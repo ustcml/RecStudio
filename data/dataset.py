@@ -1,4 +1,7 @@
-from torch.utils.data import Dataset, DataLoader, TensorDataset
+from typing import Sized, Iterator
+from torch.utils.data import Dataset
+from torch.nn.utils.rnn import pad_sequence
+from torch.utils.data import DataLoader, Sampler
 import numpy as np
 import yaml
 import re
@@ -7,6 +10,7 @@ import os
 import scipy.sparse as ssp
 import time
 import copy
+import torch
 def parser_yaml(config_path):
     loader = yaml.FullLoader
     loader.add_implicit_resolver(
@@ -59,7 +63,15 @@ class MFDataset(Dataset):
         #feat2 = self._recover_unmapped_feature(self.inter_feat)[-10:]
         #feat2 = feat2[feat2[self.fiid].isin(feat[self.fiid])].sort_values('item_id')
         print(feat2)
-        
+
+    def _filter_ratings(self):
+        if self.config['rating_threshold'] is not None:
+            if not self.config['drop_low_rating']:
+                self.inter_feat[self.frating] = (self.inter_feat[self.frating] > self.config['rating_threshold']).astype(float)
+            else:
+                self.inter_feat = self.inter_feat[self.inter_feat[self.frating] > self.config['rating_threshold']]
+                self.inter_feat[self.frating] = 1.0
+
     def _load_all_data(self, data_dir, field_sep):
         # load interaction features
         inter_feat_path = os.path.join(data_dir, self.config['inter_feat_name'])
@@ -230,13 +242,18 @@ class MFDataset(Dataset):
         if self.user_feat is not None:
             self.user_feat.set_index(self.fuid, inplace=True)
             self.user_feat = self.user_feat.reindex(np.arange(self.num_users))
-            #self.user_feat.reset_index(inplace=True)
+            self.user_feat.reset_index(inplace=True)
             self._fill_nan(self.user_feat, mapped=True)
+        else:
+            self.user_feat = pd.DataFrame({self.fuid: np.arange(self.num_users)})
+
         if self.item_feat is not None:
             self.item_feat.set_index(self.fiid, inplace=True)
             self.item_feat = self.item_feat.reindex(np.arange(self.num_items))
-            #self.item_feat.reset_index(inplace=True)
+            self.item_feat.reset_index(inplace=True)
             self._fill_nan(self.item_feat, mapped=True)
+        else:
+            self.item_feat = pd.DataFrame({self.fiid: np.arange(self.num_items)})
     
     def _post_preprocess(self):
         if self.ftime in self.inter_feat:
@@ -245,12 +262,6 @@ class MFDataset(Dataset):
                 self.inter_feat.reset_index(drop=True, inplace=True)
             else:
                 raise ValueError('The field [{self.ftime}] should be float type')
-        if self.config['rating_threshold'] is not None:
-            if not self.config['drop_low_rating']:
-                self.inter_feat[self.frating] = (self.inter_feat[self.frating] > self.config['rating_threshold']).astype(float)
-            else:
-                self.inter_feat = self.inter_feat[self.inter_feat[self.frating] > self.config['rating_threshold']]
-                self.inter_feat[self.frating] = 1
         self._prepare_user_item_feat()
 
     def _recover_unmapped_feature(self, feat):
@@ -261,6 +272,7 @@ class MFDataset(Dataset):
         return feat
 
     def _filter(self, min_user_inter, min_item_inter):
+        self._filter_ratings()
         item_list = self.inter_feat[self.fiid]
         item_idx_list, items = pd.factorize(item_list)
         user_list = self.inter_feat[self.fuid]
@@ -383,24 +395,18 @@ class MFDataset(Dataset):
     def _get_data_idx(self, splits):
         splits, _ = splits
         data_idx = [list(zip(splits[:, i-1], splits[:, i])) for i in range(1, splits.shape[1])]
-        data_idx = [np.hstack([np.arange(*e) for e in _]) for _ in data_idx]
+        data_idx = [torch.from_numpy(np.hstack([np.arange(*e) for e in _])) for _ in data_idx]
         return data_idx
     
-    def get_value(self, feat, idx):
-        data = {}
-        for field in feat:
-            data[field] = feat[field].iat[idx]
-        return data
-
     def __len__(self):
         return len(self.data_index)
 
     def __getitem__(self, index):
         idx = self.data_index[index]
-        data = self.get_value(self.inter_feat, idx)
+        data = self.inter_feat[idx]
         uid, iid = data[self.fuid], data[self.fiid]
-        data.update(self.get_value(self.user_feat, uid))
-        data.update(self.get_value(self.item_feat, iid))
+        data.update(self.user_feat[uid])
+        data.update(self.item_feat[iid])
         return data
 
     def _copy(self, idx):
@@ -408,26 +414,17 @@ class MFDataset(Dataset):
         d.data_index = idx
         return d
 
-    def _drop_feat(self, fields):
-        if fields is None or len(fields) ==0:
-            return
-        fields = set(fields)
-        for feat in self._get_feat_list():
-            feat.drop(feat.columns.intersection(fields), inplace=True, axis=1)
-        if isinstance(self, AEDataset) or isinstance(self, SeqDataset):
-            self.inter_feat.drop(self.fuid, inplace=True, axis=1)
-
-
+    
     """ split interactions in entrywise, used for mf-like model
     Args:
         ratio (np.Array): ratio of spliting dataset
         order (bool, optional): 
         split_mode: user_entry, entry, user
     """
-    def build(self, drop_fields, ratio_or_num, shuffle=True, split_mode='user_entry'):
-        return self._build(drop_fields, ratio_or_num, shuffle, split_mode, True, False)
+    def build(self, ratio_or_num, shuffle=True, split_mode='user_entry'):
+        return self._build(ratio_or_num, shuffle, split_mode, True, False)
 
-    def _build(self, drop_fields, ratio_or_num, shuffle, split_mode, drop_dup, rep):
+    def _build(self, ratio_or_num, shuffle, split_mode, drop_dup, rep):
         ## for general recommendation, only support non-repetive recommendation
         ## keep first data, sorted by time or not, split by user or not
         if not hasattr(self, 'first_item_idx'):
@@ -452,11 +449,73 @@ class MFDataset(Dataset):
             splits = self._split_by_leave_one_out(ratio_or_num, user_count, rep)
         else:
             splits = self._split_by_ratio(ratio_or_num, user_count, split_mode == 'user')
-
-        self._drop_feat(drop_fields)
-        datasets = [self._copy(_) for _ in self._get_data_idx(splits)]
-        return datasets
         
+        if isinstance(self, AEDataset) or isinstance(self, SeqDataset):
+            self.inter_feat.drop(self.fuid, inplace=True, axis=1)
+        self.dataframe2tensors()
+        datasets = [self._copy(_) for _ in self._get_data_idx(splits)]
+        
+        return datasets
+
+    def dataframe2tensors(self):
+        self.inter_feat = TensorFrame.fromPandasDF(self.inter_feat, self)
+        self.user_feat = TensorFrame.fromPandasDF(self.user_feat, self)
+        self.item_feat = TensorFrame.fromPandasDF(self.item_feat, self)
+        for i in range(len(self.network_feat)):
+            self.network_feat[i] = TensorFrame.fromPandasDF(self.network_feat[i], self)
+    
+    def loader(self, batch_size, shuffle=True, num_workers=1, drop_last=False):
+        #version = 2
+        #if version == 1:
+        #    output = DataLoader(self, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, drop_last=drop_last)
+        #    return output
+        #elif version == 2:
+        sampler = DataSampler(self, batch_size, shuffle, drop_last)
+        output = DataLoader(self, sampler=sampler, batch_size=None, shuffle=False, num_workers=num_workers)
+        return output
+    
+    def drop_feat(self, keep_fields):
+        if keep_fields is not None and len(keep_fields) > 0:
+            fields = set(keep_fields)
+            fields.add(self.frating)
+            for feat in self._get_feat_list():
+                feat.del_fields(fields)
+            if 'user_hist' in fields or 'item_hist' in fields:
+                user_array = self.inter_feat.get_col(self.fuid)[self.inter_feat_subset]
+                item_array = self.inter_feat.get_col(self.fiid)[self.inter_feat_subset]
+            if 'user_hist' in fields:
+                sorted_users, index_users = torch.sort(user_array)
+                user, count = torch.unique_consecutive(sorted_users, return_counts=True)
+                item_list = torch.split(item_array[index_users], tuple(count.numpy()))
+                tensors = [torch.tensor([], dtype=torch.int64) for _ in range(self.num_users)]
+                for u, l in zip(user, item_list):
+                    tensors[u] = l
+                tensors = pad_sequence(tensors, batch_first=True)
+                self.user_feat.add_field('user_hist', tensors)
+            if 'item_hist' in fields:
+                sorted_items, index_items = torch.sort(item_array)
+                item, count = torch.unique_consecutive(sorted_items, return_counts=True)
+                user_list = torch.split(user_array[index_items], tuple(count.numpy()))
+                tensors = [torch.tensor([], dtype=torch.int64) for _ in range(self.num_items)]
+                for i, l in zip(item, user_list):
+                    tensors[i] = l
+                tensors = pad_sequence(tensors, batch_first=True)
+                self.item_feat.add_field('item_hist', tensors)
+    
+    @property
+    def inter_feat_subset(self):
+        return self.data_index
+
+    @property
+    def item_freq(self):
+        if not hasattr(self, 'data_index'):
+            raise ValueError('please build the dataset first by call the build method')
+        if not hasattr(self, 'it_freq'):
+            l = self.inter_feat.get_col(self.fiid)[self.inter_feat_subset]
+            it, count = torch.unique(l, return_counts=True)
+            self.it_freq = torch.zeros(self.num_items, dtype=torch.int64)
+            self.it_freq[it] = count
+        return self.it_freq
 
     @property
     def num_users(self):
@@ -477,44 +536,68 @@ class MFDataset(Dataset):
             return len(self.field2tokens[field])
         
 class AEDataset(MFDataset):
-    def build(self, drop_fields, ratio_or_num, shuffle=False):
-        return self._build(drop_fields, ratio_or_num, shuffle, 'user_entry', True, False)
+    def build(self, ratio_or_num, shuffle=False):
+        return self._build(ratio_or_num, shuffle, 'user_entry', True, False)
     
-    def get_value(self, feat, idx):
-        data = {}
-        for field in feat:
-            data[field] = list(feat[field].iloc[idx].values)
-        return data
-
     def _get_data_idx(self, splits):
         splits, uids = splits
         data_idx = [list(zip(splits[:, i-1], splits[:, i])) for i in range(1, splits.shape[1])]
-        data_idx = [[(u, slice(*e)) for e, u in zip(_, uids)] for _ in data_idx]
-        data = [list(zip(data_idx[0], data_idx[i])) for i in range(len(data_idx))]
+        #data_idx = [np.array([(u, slice(*e)) for e, u in zip(_, uids)]) for _ in data_idx]
+        data_idx = [torch.tensor([[u, *e] for e, u in zip(_, uids)]) for _ in data_idx]
+        #data = [np.array(list(zip(data_idx[0], data_idx[i]))) for i in range(len(data_idx))]
+        data = [torch.cat((data_idx[0], data_idx[i]), -1) for i in range(len(data_idx))]
         return data
 
     def __getitem__(self, index):
         idx = self.data_index[index]
-        data = {self.fuid: idx[0][0]}
-        data.update(super().get_value(self.user_feat, data[self.fuid]))
-        for n, s in zip(['in_', 'out_'], idx):
-            d = self.get_value(self.inter_feat, s[-1])
-            d.update(self.get_value(self.item_feat, d[self.fiid]))
+        #data = {self.fuid: idx[0][0]}
+        data = {self.fuid: idx[:,0]}
+        data.update(self.user_feat[data[self.fuid]])
+        for i, n in enumerate(['in_', '']):
+            start = idx[:, i * 3 + 1]
+            end = idx[:, i * 3 + 2]
+            lens = end - start
+            l = torch.cat([torch.arange(s, e) for s, e in zip(start, end)])
+            d = self.inter_feat[l]
+            for k in d:
+                d[k] = pad_sequence(d[k].split(tuple(lens.numpy())), batch_first=True)
+            d.update(self.item_feat[d[self.fiid]])
+            #d = self.get_value(self.inter_feat, idx[-1])
+            #d.update(self.get_value(self.item_feat, d[self.fiid]))
             for k, v in d.items():
                 data[n+k] = v
         return data
+    
+    # def loader(self, batch_size, shuffle=True, num_workers=1, drop_last=False):
+    #     version = 2
+    #     if version == 1:
+    #         def _collate(batch):
+    #             elem = batch[0]
+    #             batch_data = {}
+    #             for key in elem:
+    #                 if elem[key].ndim > 0:
+    #                     batch_data[key] = pad_sequence([d[key] for d in batch], batch_first=True)
+    #                 else:
+    #                     batch_data[key] = torch.stack([d[key] for d in batch])
+    #             return batch_data
+    #         output = DataLoader(self, batch_size=batch_size, shuffle=shuffle, \
+    #             collate_fn=_collate, num_workers=num_workers, drop_last=drop_last)
+    #         return output
+    #     else:
+    #         sampler = DataSampler(self, batch_size, shuffle, drop_last)
+    #         output = DataLoader(self, sampler=sampler, batch_size=None, shuffle=False, num_workers=num_workers)
+    #         return output
+
+    @property
+    def inter_feat_subset(self):
+        index = torch.cat([torch.arange(s, e) for s, e in zip(self.data_index[:,-2], self.data_index[:, -1])])
+        return index
 
 class SeqDataset(MFDataset):
-    def build(self, drop_fields, ratio_or_num, rep=True, train_rep=True):
+    def build(self, ratio_or_num, rep=True, train_rep=True):
         self.test_rep = rep
         self.train_rep = train_rep if not rep else True
-        return self._build(drop_fields, ratio_or_num, False, 'user_entry', False, rep)
-
-    def get_value(self, feat, idx):
-        data = {}
-        for field in feat:
-            data[field] = list(feat[field].iloc[idx].values)
-        return data
+        return self._build(ratio_or_num, False, 'user_entry', False, rep)
 
     def _get_data_idx(self, splits):
         splits, uids = splits
@@ -523,31 +606,126 @@ class SeqDataset(MFDataset):
             if ((dix == 0) and self.train_rep) or ((dix > 0) and self.test_rep):
                 return part
             else:
-                return part[self.first_item_idx.iloc[part[:,-1]]]
+                return part[self.first_item_idx.iloc[part[:,-1]].values]
         def get_slice(sp, u):
-            data = [(u, slice(max(sp[0], i - maxlen), i), i) for i in range(sp[0], sp[-1])]
+            #data = [(u, slice(max(sp[0], i - maxlen), i), i) for i in range(sp[0], sp[-1])]
+            data = np.array([[u, max(sp[0], i - maxlen), i] for i in range(sp[0], sp[-1])], dtype=np.int64)
             sp -= sp[0]
             return np.split(data[1:], sp[1:-1]-1)
         output = [get_slice(sp, u) for sp, u in zip(splits, uids)]
-        output = list(zip(*output))
-        output = [keep_first_item(dix, np.concatenate(_)) for dix, _ in enumerate(output)]
+        output = [torch.from_numpy(np.concatenate(_)) for _ in zip(*output)]
+        output = [keep_first_item(dix, _) for dix, _ in enumerate(output)]
         return output
 
     def __getitem__(self, index):
-        uid, source, target = self.data_index[index]
-        data = {self.fuid: uid}
-        data.update(super().get_value(self.user_feat, data[self.fuid]))
-        target_data = super().get_value(self.inter_feat, target)
-        target_data.update(super().get_value(self.item_feat, target_data[self.fiid]))
-        source_data = self.get_value(self.inter_feat, source)
-        source_data.update(self.get_value(self.item_feat, source_data[self.fiid]))
-        for n, d in zip(['in_', 'out_'], [source_data, target_data]):
+        #uid, source, target = self.data_index[index]
+        idx = self.data_index[index]
+        data = {self.fuid: idx[:, 0]}
+        data.update(self.user_feat[data[self.fuid]])
+        target_data = self.inter_feat[idx[:, 2]]
+        target_data.update(self.item_feat[target_data[self.fiid]])
+        #source_data = self.get_value(self.inter_feat, idx[:, 1])
+        start = idx[:, 1]
+        end = idx[:, 2]
+        lens = end - start
+        l = torch.cat([torch.arange(s, e) for s, e in zip(start, end)])
+        source_data = self.inter_feat[l]
+        for k in source_data:
+            source_data[k] = pad_sequence(source_data[k].split(tuple(lens.numpy())), batch_first=True)
+        source_data.update(self.item_feat[source_data[self.fiid]])
+
+        for n, d in zip(['in_', ''], [source_data, target_data]):
             for k, v in d.items():
                 data[n+k] = v
         return data
+    
+    @property
+    def inter_feat_subset(self):
+        return self.data_index[:, -1]
+        
+
                
-dataset = MFDataset(r"datasets/ml-100k.yaml")
-train, val, test = dataset.build(['timestamp','rating', 'movie_title', 'class'], [0.8, 0.1, 0.1])
-print(train[np.random.randint(len(train))])
-#train, val, test = dataset.build([dataset.fuid, dataset.fiid], [0.8, 0.1, 0.1])
-#print(len(train)+len(val)+len(test))
+class TensorFrame(Dataset):
+    @classmethod
+    def fromPandasDF(cls, dataframe, dataset):
+        data = {}
+        length = len(dataframe.index)
+        for field in dataframe:
+            ftype = dataset.field2type[field]
+            value = dataframe[field]
+            if ftype == 'token_seq':
+                    seq_data = [torch.from_numpy(d[:dataset.field2maxlen[field]]) for d in value]
+                    data[field] = pad_sequence(seq_data, batch_first=True)
+            elif ftype == 'float_seq':
+                seq_data = [torch.from_numpy(d[:dataset.field2maxlen[field]]) for d in value]
+                data[field] = pad_sequence(seq_data, batch_first=True)
+            elif ftype == 'token':
+                data[field] = torch.from_numpy(dataframe[field].to_numpy(np.int64))
+            else:
+                data[field] = torch.from_numpy(dataframe[field].to_numpy(np.float))
+        return cls(data, length)
+
+    def __init__(self, data, length):
+        self.data = data
+        self.length = length
+
+    def get_col(self, field):
+        return self.data[field]
+
+    def __len__(self):
+        return self.length
+    
+    def __getitem__(self, idx):
+        ret = {}
+        for field, value in self.data.items():
+            ret[field] = value[idx]
+        return ret
+    
+    def del_fields(self, keep_fields):
+        for f in self.fields:
+            if f not in keep_fields:
+                del self.data[f]
+    
+    def loader(self, batch_size):
+        sampler = DataSampler(self, batch_size, False, False)
+        output = DataLoader(self, sampler=sampler, batch_size=None, shuffle=False)
+        return output
+
+    def add_field(self, field, value):
+        self.data[field] = value
+
+    @property
+    def fields(self):
+        return set(self.data.keys())
+
+
+class DataSampler(Sampler):
+    def __init__(self, data_source:Sized, batch_size, shuffle=True, drop_last=False, generator=None):
+        self.data_source = data_source
+        self.batch_size = batch_size
+        self.drop_last = drop_last
+        self.shuffle = shuffle
+        self.generator = generator
+    
+    def __iter__(self):
+        n = len(self.data_source)
+        if self.generator is None:
+            generator = torch.Generator()
+            generator.manual_seed(int(torch.empty((), dtype=torch.int64).random_().item()))
+        else:
+            generator = self.generator
+
+        if self.shuffle:
+            output = torch.randperm(n, generator=generator).split(self.batch_size)
+        else:
+            output = torch.arange(n).split(self.batch_size)
+        if self.drop_last:
+            yield from output[:-1]
+        else:
+            yield from output
+
+    def __len__(self):
+        if self.drop_last:
+            return len(self.data_source) // self.batch_size
+        else:
+            return (len(self.data_source) + self.batch_size - 1) // self.batch_size

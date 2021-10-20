@@ -1,0 +1,11 @@
+ann: {index: 'IVFx,Flat', parameter: ~}  ## 1 HNSWx,Flat; 2 Flat; 3 IVFx,Flat ## {nprobe: 1}  {efSearch: 1}
+learning_rate: 0.01
+weight_decay: 0.99
+learner: adam
+scheduler: exponential
+epochs: 100
+negative_count: 1
+batch_size: 1024
+num_workers: 6
+embed_dim: 32
+sampler: ~
