@@ -393,20 +393,37 @@ class MFDataset(Dataset):
                 
     
     def _get_data_idx(self, splits):
-        splits, _ = splits
+        splits, uids = splits
         data_idx = [list(zip(splits[:, i-1], splits[:, i])) for i in range(1, splits.shape[1])]
-        data_idx = [torch.from_numpy(np.hstack([np.arange(*e) for e in _])) for _ in data_idx]
-        return data_idx
+        if uids is not None:
+            d = [torch.from_numpy(np.hstack([np.arange(*e) for e in data_idx[0]]))]
+            for _ in data_idx[1:]:
+                d.append(torch.tensor([[u, *e] for u, e in zip(uids, _)]))
+            return d
+        else:
+            data_idx = [torch.from_numpy(np.hstack([np.arange(*e) for e in _])) for _ in data_idx]
+            return data_idx
     
     def __len__(self):
         return len(self.data_index)
 
     def __getitem__(self, index):
-        idx = self.data_index[index]
-        data = self.inter_feat[idx]
-        uid, iid = data[self.fuid], data[self.fiid]
-        data.update(self.user_feat[uid])
-        data.update(self.item_feat[iid])
+        if self.data_index.dim() > 1:
+            idx = self.data_index[index]
+            data = {self.fuid: idx[:,0]}
+            data.update(self.user_feat[data[self.fuid]])
+            start = idx[:, 1]
+            end = idx[:, 2]
+            lens = end - start
+            l = torch.cat([torch.arange(s, e) for s, e in zip(start, end)])
+            d = self.inter_feat.get_col(self.fiid)[l]
+            data[self.fiid] = pad_sequence(d.split(tuple(lens.numpy())), batch_first=True)
+        else:
+            idx = self.data_index[index]
+            data = self.inter_feat[idx]
+            uid, iid = data[self.fuid], data[self.fiid]
+            data.update(self.user_feat[uid])
+            data.update(self.item_feat[iid])
         return data
 
     def _copy(self, idx):
@@ -450,11 +467,14 @@ class MFDataset(Dataset):
         else:
             splits = self._split_by_ratio(ratio_or_num, user_count, split_mode == 'user')
         
-        if isinstance(self, AEDataset) or isinstance(self, SeqDataset):
-            self.inter_feat.drop(self.fuid, inplace=True, axis=1)
+        #if isinstance(self, AEDataset) or isinstance(self, SeqDataset):
+        #    self.inter_feat.drop(self.fuid, inplace=True, axis=1)
         self.dataframe2tensors()
         datasets = [self._copy(_) for _ in self._get_data_idx(splits)]
-        
+        user_hist, user_count = datasets[0].get_hist(True)
+        for d in datasets:
+            d.user_hist = user_hist
+            d.user_count = user_count
         return datasets
 
     def dataframe2tensors(self):
@@ -465,13 +485,23 @@ class MFDataset(Dataset):
             self.network_feat[i] = TensorFrame.fromPandasDF(self.network_feat[i], self)
     
     def loader(self, batch_size, shuffle=True, num_workers=1, drop_last=False):
-        #version = 2
-        #if version == 1:
-        #    output = DataLoader(self, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, drop_last=drop_last)
-        #    return output
-        #elif version == 2:
         sampler = DataSampler(self, batch_size, shuffle, drop_last)
         output = DataLoader(self, sampler=sampler, batch_size=None, shuffle=False, num_workers=num_workers)
+        return output
+
+    def eval_loader(self, batch_size, num_workers=1):
+        def collate(data):
+            if 'user_hist' not in data:
+                user_count = self.user_count[data[self.fuid]].max()
+                if isinstance(self, AEDataset):
+                    data['user_hist'] = data['in_item_id']
+                else:
+                    data['user_hist'] = self.user_hist[data[self.fuid]][:, 0:user_count]
+            return data
+        _, idx = torch.sort(self.data_index[:, 2] - self.data_index[:, 1])
+        sampler = DataSampler(self, batch_size, False, False, seq=idx)
+        output = DataLoader(self, sampler=sampler, batch_size=None, shuffle=False, \
+            num_workers=num_workers, collate_fn=collate)
         return output
     
     def drop_feat(self, keep_fields):
@@ -480,28 +510,41 @@ class MFDataset(Dataset):
             fields.add(self.frating)
             for feat in self._get_feat_list():
                 feat.del_fields(fields)
-            if 'user_hist' in fields or 'item_hist' in fields:
-                user_array = self.inter_feat.get_col(self.fuid)[self.inter_feat_subset]
-                item_array = self.inter_feat.get_col(self.fiid)[self.inter_feat_subset]
+            # if 'user_hist' in fields or 'item_hist' in fields:
+            #     user_array = self.inter_feat.get_col(self.fuid)[self.inter_feat_subset]
+            #     item_array = self.inter_feat.get_col(self.fiid)[self.inter_feat_subset]
             if 'user_hist' in fields:
-                sorted_users, index_users = torch.sort(user_array)
-                user, count = torch.unique_consecutive(sorted_users, return_counts=True)
-                item_list = torch.split(item_array[index_users], tuple(count.numpy()))
-                tensors = [torch.tensor([], dtype=torch.int64) for _ in range(self.num_users)]
-                for u, l in zip(user, item_list):
-                    tensors[u] = l
-                tensors = pad_sequence(tensors, batch_first=True)
-                self.user_feat.add_field('user_hist', tensors)
+                # sorted_users, index_users = torch.sort(user_array)
+                # user, count = torch.unique_consecutive(sorted_users, return_counts=True)
+                # item_list = torch.split(item_array[index_users], tuple(count.numpy()))
+                # tensors = [torch.tensor([], dtype=torch.int64) for _ in range(self.num_users)]
+                # for u, l in zip(user, item_list):
+                #     tensors[u] = l
+                self.user_feat.add_field('user_hist', self.user_hist)
             if 'item_hist' in fields:
-                sorted_items, index_items = torch.sort(item_array)
-                item, count = torch.unique_consecutive(sorted_items, return_counts=True)
-                user_list = torch.split(user_array[index_items], tuple(count.numpy()))
-                tensors = [torch.tensor([], dtype=torch.int64) for _ in range(self.num_items)]
-                for i, l in zip(item, user_list):
-                    tensors[i] = l
-                tensors = pad_sequence(tensors, batch_first=True)
-                self.item_feat.add_field('item_hist', tensors)
+                # sorted_items, index_items = torch.sort(item_array)
+                # item, count = torch.unique_consecutive(sorted_items, return_counts=True)
+                # user_list = torch.split(user_array[index_items], tuple(count.numpy()))
+                # tensors = [torch.tensor([], dtype=torch.int64) for _ in range(self.num_items)]
+                # for i, l in zip(item, user_list):
+                #     tensors[i] = l
+                self.item_feat.add_field('item_hist', self.get_hist(False))
     
+    def get_hist(self, isUser=True):
+        user_array = self.inter_feat.get_col(self.fuid)[self.inter_feat_subset]
+        item_array = self.inter_feat.get_col(self.fiid)[self.inter_feat_subset]
+        sorted, index = torch.sort(user_array if isUser else item_array)
+        user_item, count = torch.unique_consecutive(sorted, return_counts=True)
+        list_ = torch.split(item_array[index] if isUser else user_array[index], tuple(count.numpy()))
+        tensors = [torch.tensor([], dtype=torch.int64) for _ in range(self.num_users if isUser else self.num_items)]
+        for i, l in zip(user_item, list_):
+            tensors[i] = l
+        #tensors = np.array(tensors, dtype=object)
+        user_count = torch.tensor([len(e) for e in tensors])
+        tensors = pad_sequence(tensors, batch_first=True)
+        return tensors, user_count
+
+
     @property
     def inter_feat_subset(self):
         return self.data_index
@@ -565,7 +608,8 @@ class AEDataset(MFDataset):
             #d = self.get_value(self.inter_feat, idx[-1])
             #d.update(self.get_value(self.item_feat, d[self.fiid]))
             for k, v in d.items():
-                data[n+k] = v
+                if k != self.fuid:
+                    data[n+k] = v
         return data
     
     # def loader(self, batch_size, shuffle=True, num_workers=1, drop_last=False):
@@ -636,7 +680,8 @@ class SeqDataset(MFDataset):
 
         for n, d in zip(['in_', ''], [source_data, target_data]):
             for k, v in d.items():
-                data[n+k] = v
+                if k != self.fuid:
+                    data[n+k] = v
         return data
     
     @property
@@ -700,12 +745,13 @@ class TensorFrame(Dataset):
 
 
 class DataSampler(Sampler):
-    def __init__(self, data_source:Sized, batch_size, shuffle=True, drop_last=False, generator=None):
+    def __init__(self, data_source:Sized, batch_size, shuffle=True, drop_last=False, generator=None, seq=None):
         self.data_source = data_source
         self.batch_size = batch_size
         self.drop_last = drop_last
         self.shuffle = shuffle
         self.generator = generator
+        self.seq = seq
     
     def __iter__(self):
         n = len(self.data_source)
@@ -718,7 +764,10 @@ class DataSampler(Sampler):
         if self.shuffle:
             output = torch.randperm(n, generator=generator).split(self.batch_size)
         else:
-            output = torch.arange(n).split(self.batch_size)
+            if self.seq is not None:
+                output = self.seq.split(self.batch_size)
+            else:
+                output = torch.arange(n).split(self.batch_size)
         if self.drop_last:
             yield from output[:-1]
         else:

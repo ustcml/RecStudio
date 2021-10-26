@@ -13,4 +13,4 @@ class BPRRecommender(basemodel.UserItemIDTowerRecommender):
         return scorer.InnerProductScorer()
 
     def build_sampler(self, train_data):
-        return sampler.UniformSampler(train_data.num_items-1)
+        return sampler.UniformSampler(train_data.num_items-1, self.score_func)

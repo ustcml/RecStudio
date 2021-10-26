@@ -24,10 +24,17 @@ class SoftmaxLoss(FullScoreLoss):
             return torch.sum(torch.nan_to_num(torch.logsumexp(all_score, dim=-1, keepdim=True) - pos_score, neginf=0))
 
 class BPRLoss(PairwiseLoss):
+    def __init__(self, dns=False):
+        super().__init__()
+        self.dns = dns
     def forward(self, label, pos_score, log_pos_prob, neg_score, log_neg_prob):
-        loss = F.logsigmoid(pos_score.unsqueeze(-1) - neg_score)
-        weight = F.softmax(torch.ones_like(neg_score), -1)
-        return -torch.sum(loss * weight)
+        if not self.dns:
+            loss = F.logsigmoid(pos_score.unsqueeze(-1) - neg_score)
+            weight = F.softmax(torch.ones_like(neg_score), -1)
+            return -torch.sum(loss * weight)
+        else:
+            loss = -F.logsigmoid(pos_score - torch.max(neg_score, dim=-1))
+
 
 class SampledSoftmaxLoss(PairwiseLoss):
     def forward(self, label, pos_score, log_pos_prob, neg_score, log_neg_prob):
@@ -45,9 +52,15 @@ class WeightedBPRLoss(PairwiseLoss):
         return -torch.sum(loss * weight)
 
 class BinaryCrossEntropyLoss(PairwiseLoss):
+    def __init__(self, dns=False):
+        super().__init__()
+        self.dns = dns
     def forward(self, label, pos_score, log_pos_prob, neg_score, log_neg_prob):
-        weight = F.softmax(torch.ones_like(neg_score), -1)
-        return torch.sum(-F.logsigmoid(pos_score) + torch.sum(F.softplus(neg_score) * weight, dim=-1))
+        if not self.dns or pos_score.dim() > 1:
+            weight = F.softmax(torch.ones_like(neg_score), -1)
+            return torch.sum(-F.logsigmoid(pos_score) + torch.sum(F.softplus(neg_score) * weight, dim=-1))
+        else:
+            return torch.sum(-F.logsigmoid(pos_score) + F.softplus(torch.max(neg_score, dim=-1)))
     
 class WightedBinaryCrossEntropyLoss(PairwiseLoss):
     def forward(self, label, pos_score, log_pos_prob, neg_score, log_neg_prob):

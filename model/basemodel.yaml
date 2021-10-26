@@ -3,9 +3,13 @@ learning_rate: 0.01
 weight_decay: 0.99
 learner: adam
 scheduler: exponential
-epochs: 100
+epochs: 10
 negative_count: 1
-batch_size: 1024
+batch_size: 2048
 num_workers: 6
-embed_dim: 32
+embed_dim: 64
 sampler: ~
+gpu: ~
+eval_batch_size: 20
+eval_metrics: {'recall@10'}
+topk: 100

@@ -2,11 +2,14 @@ import torch
 
 class InnerProductScorer(torch.nn.Module):
     def forward(self, query, items):
-        if query.dim() < items.dim():
-            output = torch.bmm(items, query.unsqueeze(-1))
-            output.squeeze_(-1)
+        if query.size(0) == items.size(0):
+            if query.dim() < items.dim():
+                output = torch.bmm(items, query.unsqueeze(-1))
+                output.squeeze_(-1)
+            else:
+                output = torch.sum(query * items, dim=-1)
         else:
-            output = torch.sum(query * items, dim=-1)
+            output = torch.matmul(query, items.T)
         return output
 
 class CosineScorer(InnerProductScorer):

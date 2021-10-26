@@ -9,7 +9,7 @@ if __name__=='__main__':
     dataset = MFDataset(r"datasets/ml-100k.yaml")
     train, val, test = dataset.build([0.8, 0.1, 0.1])
     model = BPR.BPRRecommender(parser_yaml(r'model/basemodel.yaml'))
-    model.fit(train, {'user_id', 'item_id', 'rating'}, True)
+    model.fit(train, {'user_id', 'item_id', 'rating'}, val, True)
     #train.drop_feat(['user_id', 'item_id', 'age', 'gender', 'item_hist'])
     #freq = train.item_freq
     #print(freq.sum().item())
@@ -17,10 +17,10 @@ if __name__=='__main__':
     #for batch in loader:
     #    print(batch)
     # b = 0
-    # loader = val.loader(batch_size=10, shuffle=True, num_workers=1, drop_last=True)
-    # for batch in loader:
-    #    print(batch)
-    #    break
+    #loader = val.loader(batch_size=2, shuffle=True, num_workers=1, drop_last=True)
+    #for batch in loader:
+    #   print(batch)
+    #   break
     # print(b)
     #print(train[10])
     #print(train.item_freq.sum())

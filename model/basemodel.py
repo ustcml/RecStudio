@@ -1,3 +1,4 @@
+from typing import Any, Sized, Iterator, Optional
 import torch.nn.functional as F
 from utils.utils import set_color
 from torch.utils.data import DataLoader
@@ -11,40 +12,52 @@ import faiss
 from . import scorer
 from . import loss_func
 import torch
-
-class Recommender(nn.Module):
+from pytorch_lightning import Trainer, LightningModule, seed_everything
+from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
+import eval
+class Recommender(LightningModule):
 
     def __init__(self, config):
         super(Recommender, self).__init__()
+        seed_everything(42, workers=True) ## Trainer(deterministic=False) 
         self.config = config
+        self.loss_fn = self.config_loss()
+        self.trainer = Trainer(gpus=config['gpu'], 
+                                max_epochs=config['epochs'],
+                                num_sanity_val_steps=0)
+
+    def configure_callbacks(self):
+        if self.val_check:
+            early_stopping = EarlyStopping('val_loss', verbose=True)
+            ckp_callback = ModelCheckpoint(monitor='val_loss', save_top_k=1, mode='min', save_last=True,\
+                filename='{epoch:02d}-{val_loss:.2f}')
+            return [ckp_callback, early_stopping]
+        
 
     def init_model(self, train_data):
         pass
 
-    def on_fit_begin(self, train_data):
-        pass
-    
-    def on_fit_end(self, train_data):
-        pass
+    def training_step(self, batch, batch_idx):
+        y_h = self.forward(batch, isinstance(self.loss_fn, loss_func.FullScoreLoss))
+        loss = self.loss_fn(batch[self.frating], *y_h if isinstance(y_h, tuple) else y_h)
+        return loss
 
-    def on_epoch_begin(self, epoch_idx, train_data):
+    def training_epoch_end(self, outputs):
+        loss = torch.hstack([e['loss'] for e in outputs]).sum()
+        self.log('train_loss', loss, prog_bar=True)
+    
+    def validation_step(self, batch, batch_idx):
+        return self.test_step(batch, batch_idx)
+    
+    def validation_epoch_end(self, outputs):
         pass
+        #metric = torch.hstack(outputs).sum()
+        #self.log('val_loss', loss, prog_bar=True)
 
-    def on_epoch_end(self, epoch_idx, train_data):
-        pass
-    
-    def get_opt_parameter(self):
-        return self.parameters()
-    
-    def set_model_mode(self, mode):
-        if mode =='train':
-           self.train()
-        else:
-           self.eval()
-    
+        
     def config_loss(self):
         pass
-
+    
     def get_optimizer(self, params):
         if self.config['learner'].lower() == 'adam':
             optimizer = optim.Adam(params, lr=self.config['learning_rate'], weight_decay=self.config['weight_decay'])
@@ -59,31 +72,38 @@ class Recommender(nn.Module):
             #if self.weight_decay > 0:
             #    self.logger.warning('Sparse Adam cannot argument received argument [{weight_decay}]')
         else:
-            #self.logger.warning('Received unrecognized optimizer, set default Adam optimizer')
             optimizer = optim.Adam(params, lr=self.config['learning_rate'])
         return optimizer
-    
+
     def get_scheduler(self, optimizer):
         if self.config['scheduler'].lower() == 'exponential':
             scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.98)
+        elif self.config['scheduler'].lower() == 'onplateau':
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
         else:
-            scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=1)
+            scheduler = None
         return scheduler
     
-    def agg_loss(self, losses):
-        weights = None
-        if isinstance(losses, tuple):
-            if weights is not None:
-                loss = sum(l * w for l, w in zip(losses, weights))
-            else:
-                loss = sum(losses)
-            loss_tuple = np.array([_.item() for _ in losses])
+    def configure_optimizers(self):
+        params = self.parameters()
+        optimizer = self.get_optimizer(params)
+        scheduler = self.get_scheduler(optimizer)
+        if scheduler:
+            return {
+                'optimizer': optimizer,
+                'lr_scheduler': {
+                    'scheduler': scheduler,
+                    'monitor': 'val_loss',
+                    'interval': 'epoch',
+                    'frequency': 1,
+                    'strict': False
+                }
+            }
         else:
-            loss = losses
-            loss_tuple = losses.item()
-        return loss, loss_tuple
+            return optimizer
 
-    def fit(self, train_data, use_fields=None, show_progress=True):
+    def fit(self, train_data, use_fields=None, val_data=None, show_progress=True):
+        self.val_check = val_data is not None
         self.fuid, self.fiid, self.frating = train_data.fuid, train_data.fiid, train_data.frating
         if use_fields is not None:
             train_data.drop_feat(use_fields)
@@ -92,43 +112,26 @@ class Recommender(nn.Module):
         self.item_fields = train_data.item_feat.fields if use_fields is None \
             else train_data.item_feat.fields.intersection(use_fields)
         self.init_model(train_data)
-        self.set_model_mode('train')
-        self.on_fit_begin(train_data)
-        optimizer = self.get_optimizer(self.get_opt_parameter())
-        scheduler = self.get_scheduler(optimizer)
-        loader = train_data.loader(batch_size=self.config['batch_size'], \
-            num_workers=self.config['num_workers'], shuffle=True)
-        for epoch_idx in range(self.config['epochs']):
-            total_loss = None
-            self.on_epoch_begin(epoch_idx, train_data)
-            iter_data = (
-                tqdm(
-                    enumerate(loader),
-                    total=(len(train_data) + self.config['batch_size'] -1) /self.config['batch_size'],
-                    desc=set_color(f"Train {epoch_idx:>5}", 'pink'),
-                ) if show_progress else enumerate(loader))
-            for _, batch_data in iter_data:
-                y_h = self.forward(batch_data, isinstance(self.loss_fn, loss_func.FullScoreLoss))
-                losses = self.loss_fn(batch_data[self.frating], *y_h if isinstance(y_h, tuple) else y_h)
-                loss, losstuple = self.agg_loss(losses)
-                total_loss = losstuple if total_loss is None else losstuple + total_loss
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-            print(f'Iteration {epoch_idx}: loss={total_loss}')
-            scheduler.step()
-            self.on_epoch_end(epoch_idx, train_data)
-        self.on_fit_end(train_data)
+        train_loader = train_data.loader(batch_size=self.config['batch_size'], shuffle=True)
+        if val_data:
+            val_loader = val_data.eval_loader(batch_size=self.config['eval_batch_size'])
+        else:
+            val_loader = None
+        self.trainer.fit(self, train_loader, val_loader)
 
     def evaluate(self, test_data):
-        pass
+        test_loader = test_data.eval_loader(batch_size=self.config['eval_batch_size'])
+        self.user_hist = test_data.user_hist
+        self.trainer.test(self, test_loader)
+        
     
-    def predict(self, query):
-        pass
 
     
 class TowerFreeRecommender(Recommender):
     def __init__(self):
+        pass
+
+    def evaluate(self, test_data, train_data):
         pass
 
 class ItemIDTowerRecommender(Recommender):
@@ -136,8 +139,7 @@ class ItemIDTowerRecommender(Recommender):
         super(ItemIDTowerRecommender, self).__init__(config)
         self.neg_count = config['negative_count']
         self.score_func = self.config_scorer()
-        self.loss_fn = self.config_loss()
-        self.use_index = config['ann'] is not None
+        self.use_index = False #config['ann'] is not None
         self.embed_dim = self.config['embed_dim']
     
     def config_loss(self):
@@ -147,14 +149,19 @@ class ItemIDTowerRecommender(Recommender):
         return scorer.InnerProductScorer()
     
     def init_model(self, train_data): ## need to overwrite
+        self.item_encoder = self.build_item_encoder(train_data)
         if self.neg_count is not None:
             self.sampler = self.build_sampler(train_data)
-        self.item_encoder = self.build_item_encoder(train_data)
+            self.sampler.update(self.get_item_vector().detach().clone())
+        
 
-    def on_epoch_begin(self, epoch_idx, train_data):
+    def on_train_epoch_end(self, unused: Optional[Any] = None):
         if self.neg_count is not None:
-            self.sampler.update(self.get_item_vector())
+            self.sampler.update(self.get_item_vector().detach().clone())
     
+    def on_validation_epoch_start(self):
+        self.prepare_testing()
+
     def construct_query(self, batch_data): ## need to overwrite
         pass
 
@@ -186,16 +193,18 @@ class ItemIDTowerRecommender(Recommender):
     def build_sampler(self, train_data):
         if 'sampler' in self.config and self.config['sampler'] is not None:
             if self.config['sampler'].lower() == 'uniform':
-                output = sampler.UniformSampler(train_data.num_items-1)
+                output = sampler.UniformSampler(train_data.num_items-1, self.score_func)
             elif self.config['sampler'].lower() == 'popularity':
-                output = sampler.PopularSamplerModel(train_data.item_freq[1:], self.config['item_freq_process_mode'])
+                output = sampler.PopularSamplerModel(train_data.item_freq[1:], \
+                    self.score_func, self.config['item_freq_process_mode'])
             elif self.config['sampler'].lower() == 'midx_uni':
-                output = sampler.SoftmaxApprSamplerUniform(train_data.num_items-1, self.config['sampler_num_centers'])
+                output = sampler.SoftmaxApprSamplerUniform(train_data.num_items-1, \
+                    self.config['sampler_num_centers'], self.score_func)
             elif self.config['sampler'].lower() == 'midx_pop':
                 output = sampler.SoftmaxApprSamplerPop(train_data.item_freq[1:], self.config['sampler_num_centers'], \
-                    self.config['item_freq_process_mode'])
+                    self.score_func, self.config['item_freq_process_mode'])
         else:
-            output = sampler.UniformSampler(train_data.num_items-1)
+            output = sampler.UniformSampler(train_data.num_items-1, self.score_func)
         return output
     
     def get_item_vector(self):
@@ -203,7 +212,8 @@ class ItemIDTowerRecommender(Recommender):
     
     def build_ann_index(self):
         # faiss.METRIC_INNER_PRODUCT
-        item_vector = self.get_item_vector().detach()
+        #item_vector = self.get_item_vector().detach().clone()
+        item_vector = self.item_vector
         if isinstance(self.score_func, scorer.InnerProductScorer):
             metric = faiss.METRIC_INNER_PRODUCT
         elif isinstance(self.score_func, scorer.CosineScorer):
@@ -229,15 +239,47 @@ class ItemIDTowerRecommender(Recommender):
         index.add(item_vector.numpy())
         return index
 
-    def on_fit_end(self, train_data):
+    def on_fit_end(self):
+        self.prepare_testing()
+    
+    def prepare_testing(self):
+        self.item_vector = self.get_item_vector().detach().clone()
         if self.use_index:
             self.ann_index = self.build_ann_index()
+            
+
+    def test_step(self, batch, batch_idx):
+        eval_metric = self.config['eval_metrics']
+        pred_m, rank_m = eval.split_metrics(eval_metric)
+        if len(rank_m)>0:
+            query = self.construct_query(batch)
+            user_h = batch['user_hist']
+            _, topk_items = self.topk(query, self.config['topk'] + user_h.size(1))
+            # todo preprocess topk_items and user_h
+            for n, m in rank_m:
+                self.log(n, m(topk_items, user_h))
         else:
-            self.item_vector = self.get_item_vector().detach()
+            y_ = self.forward(batch, False)
+            y = batch[self.fiid]
+            for n, m in pred_m:
+                self.log(n, m(y, y_))
+        
+        #train_items = user_hist[batch[self.fuid]]
+
+    # def evaluate(self, test_data, train_data=None):
+    #     loader = test_data.loader(batch_size=self.config['eval_batch_size'], shuffle=False)
+    #     if train_data:
+    #         user_hist = train_data.get_hist(isUser=True)
+    #         user_count = np.array([len(e) for e in user_hist])
+    #     for batch in loader:
+            
     
     def topk(self, query, k):
         if self.use_index:
-            return self.ann_index.search(F.normalize(query, dim=1).numpy(), k)
+            if isinstance(self.score_func, scorer.CosineScorer):
+                return self.ann_index.search(F.normalize(query, dim=1).numpy(), k)
+            else:
+                return self.ann_index.search(query.numpy(), k)
         else:
             return torch.topk(self.score_func(query, self.item_vector), k)
 
