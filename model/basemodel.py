@@ -26,12 +26,12 @@ class Recommender(LightningModule):
                                 max_epochs=config['epochs'],
                                 num_sanity_val_steps=0)
 
-    def configure_callbacks(self):
-        if self.val_check:
-            early_stopping = EarlyStopping('val_loss', verbose=True)
-            ckp_callback = ModelCheckpoint(monitor='val_loss', save_top_k=1, mode='min', save_last=True,\
-                filename='{epoch:02d}-{val_loss:.2f}')
-            return [ckp_callback, early_stopping]
+    # def configure_callbacks(self):
+    #     if self.val_check:
+    #         early_stopping = EarlyStopping('val_loss', verbose=True)
+    #         ckp_callback = ModelCheckpoint(monitor='val_loss', save_top_k=1, mode='min', save_last=True,\
+    #             filename='{epoch:02d}-{val_loss:.2f}')
+    #         return [ckp_callback, early_stopping]
         
 
     def init_model(self, train_data):
@@ -50,7 +50,16 @@ class Recommender(LightningModule):
         return self.test_step(batch, batch_idx)
     
     def validation_epoch_end(self, outputs):
-        pass
+        rec = outputs[0]
+        for i in range(len(rec)):
+            length = 0
+            total = 0
+            for _ in outputs:
+                n, v, bs = _[i]
+                total += v * bs
+                length += bs
+            self.log(n, total/length, prog_bar=True)
+        
         #metric = torch.hstack(outputs).sum()
         #self.log('val_loss', loss, prog_bar=True)
 
@@ -251,18 +260,20 @@ class ItemIDTowerRecommender(Recommender):
     def test_step(self, batch, batch_idx):
         eval_metric = self.config['eval_metrics']
         pred_m, rank_m = eval.split_metrics(eval_metric)
+        topk = self.config['topk']
+        bs = batch[self.fiid].size(0)
         if len(rank_m)>0:
             query = self.construct_query(batch)
-            user_h = batch['user_hist']
-            _, topk_items = self.topk(query, self.config['topk'] + user_h.size(1))
-            # todo preprocess topk_items and user_h
-            for n, m in rank_m:
-                self.log(n, m(topk_items, user_h))
+            score, topk_items = self.topk(query, topk, batch['user_hist'])
+            target, _ = batch[self.fiid].sort()
+            idx_ = torch.searchsorted(target, topk_items)
+            idx_[idx_ == target.size(1)] = target.size(1) - 1
+            label = torch.gather(target, 1, idx_) == topk_items
+            return [[n, m(label, target.sum(-1)), bs]for n, m in rank_m]
         else:
             y_ = self.forward(batch, False)
             y = batch[self.fiid]
-            for n, m in pred_m:
-                self.log(n, m(y, y_))
+            return [[n, m(y, y_), bs] for n, m in pred_m]
         
         #train_items = user_hist[batch[self.fuid]]
 
@@ -274,14 +285,25 @@ class ItemIDTowerRecommender(Recommender):
     #     for batch in loader:
             
     
-    def topk(self, query, k):
+    def topk(self, query, k, user_h):
+        more = user_h.size(1) if user_h is not None else 0
         if self.use_index:
             if isinstance(self.score_func, scorer.CosineScorer):
-                return self.ann_index.search(F.normalize(query, dim=1).numpy(), k)
+                score, topk_items = self.ann_index.search(F.normalize(query, dim=1).numpy(), k + more)
             else:
-                return self.ann_index.search(query.numpy(), k)
+                score, topk_items = self.ann_index.search(query.numpy(), k + more)
         else:
-            return torch.topk(self.score_func(query, self.item_vector), k)
+            score, topk_items = torch.topk(self.score_func(query, self.item_vector), k + more)
+        if user_h is not None:
+            topk_items += 1
+            existing, _ = user_h.sort()
+            idx_ = torch.searchsorted(existing, topk_items)
+            idx_[idx_ == existing.size(1)] = existing.size(1) - 1
+            score[torch.gather(existing, 1, idx_) == topk_items] = -float('inf')
+            score1, idx = score.topk(k)
+            return score1, torch.gather(topk_items, 1, idx)
+        else:
+            return score, topk_items
 
 class ItemTowerRecommender(ItemIDTowerRecommender):   
 

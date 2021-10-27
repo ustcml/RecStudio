@@ -501,7 +501,7 @@ class MFDataset(Dataset):
         _, idx = torch.sort(self.data_index[:, 2] - self.data_index[:, 1])
         sampler = DataSampler(self, batch_size, False, False, seq=idx)
         output = DataLoader(self, sampler=sampler, batch_size=None, shuffle=False, \
-            num_workers=num_workers, collate_fn=collate)
+            num_workers=0, collate_fn=collate)
         return output
     
     def drop_feat(self, keep_fields):
