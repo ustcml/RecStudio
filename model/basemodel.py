@@ -9,12 +9,11 @@ from torch import nn, optim
 from tqdm import tqdm
 import numpy as np
 import faiss
-from . import scorer
-from . import loss_func
+from . import scorer, loss_func, init
 import torch
 from pytorch_lightning import Trainer, LightningModule, seed_everything
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
-import eval
+import eval    
 class Recommender(LightningModule):
 
     def __init__(self, config):
@@ -28,10 +27,11 @@ class Recommender(LightningModule):
 
     # def configure_callbacks(self):
     #     if self.val_check:
-    #         early_stopping = EarlyStopping('val_loss', verbose=True)
-    #         ckp_callback = ModelCheckpoint(monitor='val_loss', save_top_k=1, mode='min', save_last=True,\
+    #         early_stopping = EarlyStopping('recall@10', verbose=True)
+    #         ckp_callback = ModelCheckpoint(monitor='recall@10', save_top_k=1, mode='min', save_last=True,\
     #             filename='{epoch:02d}-{val_loss:.2f}')
     #         return [ckp_callback, early_stopping]
+    #     #return [MyProgressBar()]
         
 
     def init_model(self, train_data):
@@ -45,9 +45,26 @@ class Recommender(LightningModule):
     def training_epoch_end(self, outputs):
         loss = torch.hstack([e['loss'] for e in outputs]).sum()
         self.log('train_loss', loss, prog_bar=True)
+        print()
     
     def validation_step(self, batch, batch_idx):
-        return self.test_step(batch, batch_idx)
+        eval_metric = self.config['eval_metrics']
+        pred_m, rank_m = eval.split_metrics(eval_metric)
+        topk = self.config['topk']
+        bs = batch[self.fiid].size(0)
+        if len(rank_m)>0:
+            query = self.construct_query(batch)
+            score, topk_items = self.topk(query, topk, batch['user_hist'])
+            target, _ = batch[self.fiid].sort()
+            idx_ = torch.searchsorted(target, topk_items)
+            idx_[idx_ == target.size(1)] = target.size(1) - 1
+            label = torch.gather(target, 1, idx_) == topk_items
+            cutoff = self.config['cutoff'][0] if isinstance(self.config['cutoff'], list) else self.config['cutoff']
+            return [[f'{name}@{cutoff}', func(label, batch[self.frating], cutoff), bs] for name, func in rank_m]
+        else:
+            y_ = self.forward(batch, False)
+            y = batch[self.fiid]
+            return [[n, m(y, y_), bs] for n, m in pred_m]
     
     def validation_epoch_end(self, outputs):
         rec = outputs[0]
@@ -62,7 +79,16 @@ class Recommender(LightningModule):
         
         #metric = torch.hstack(outputs).sum()
         #self.log('val_loss', loss, prog_bar=True)
-
+    def test_epoch_end(self, outputs):
+        rec = outputs[0]
+        for i in range(len(rec)):
+            length = 0
+            total = 0
+            for _ in outputs:
+                n, v, bs = _[i]
+                total += v * bs
+                length += bs
+            self.log(n, total/length)
         
     def config_loss(self):
         pass
@@ -85,10 +111,13 @@ class Recommender(LightningModule):
         return optimizer
 
     def get_scheduler(self, optimizer):
-        if self.config['scheduler'].lower() == 'exponential':
-            scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.98)
-        elif self.config['scheduler'].lower() == 'onplateau':
-            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
+        if self.config['scheduler'] is not None:
+            if self.config['scheduler'].lower() == 'exponential':
+                scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.98)
+            elif self.config['scheduler'].lower() == 'onplateau':
+                scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
+            else:
+                scheduler = None
         else:
             scheduler = None
         return scheduler
@@ -121,6 +150,7 @@ class Recommender(LightningModule):
         self.item_fields = train_data.item_feat.fields if use_fields is None \
             else train_data.item_feat.fields.intersection(use_fields)
         self.init_model(train_data)
+        self.apply(init.xavier_normal_initialization)
         train_loader = train_data.loader(batch_size=self.config['batch_size'], shuffle=True)
         if val_data:
             val_loader = val_data.eval_loader(batch_size=self.config['eval_batch_size'])
@@ -131,7 +161,8 @@ class Recommender(LightningModule):
     def evaluate(self, test_data):
         test_loader = test_data.eval_loader(batch_size=self.config['eval_batch_size'])
         self.user_hist = test_data.user_hist
-        self.trainer.test(self, test_loader)
+        output = self.trainer.test(self, test_loader)
+        #print(output)
         
     
 
@@ -162,6 +193,7 @@ class ItemIDTowerRecommender(Recommender):
         if self.neg_count is not None:
             self.sampler = self.build_sampler(train_data)
             self.sampler.update(self.get_item_vector().detach().clone())
+        
         
 
     def on_train_epoch_end(self, unused: Optional[Any] = None):
@@ -269,7 +301,9 @@ class ItemIDTowerRecommender(Recommender):
             idx_ = torch.searchsorted(target, topk_items)
             idx_[idx_ == target.size(1)] = target.size(1) - 1
             label = torch.gather(target, 1, idx_) == topk_items
-            return [[n, m(label, target.sum(-1)), bs]for n, m in rank_m]
+            cutoffs = self.config['cutoff'] if isinstance(self.config['cutoff'], list) else [self.config['cutoff']]
+            return [[f'{name}@{cutoff}', func(label, batch[self.frating], cutoff), bs]\
+                for cutoff in cutoffs for name, func in rank_m]
         else:
             y_ = self.forward(batch, False)
             y = batch[self.fiid]

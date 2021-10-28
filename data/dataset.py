@@ -417,7 +417,9 @@ class MFDataset(Dataset):
             lens = end - start
             l = torch.cat([torch.arange(s, e) for s, e in zip(start, end)])
             d = self.inter_feat.get_col(self.fiid)[l]
+            rating = self.inter_feat.get_col(self.frating)[l]
             data[self.fiid] = pad_sequence(d.split(tuple(lens.numpy())), batch_first=True)
+            data[self.frating] = pad_sequence(rating.split(tuple(lens.numpy())), batch_first=True)
         else:
             idx = self.data_index[index]
             data = self.inter_feat[idx]

@@ -33,7 +33,7 @@ class BPRLoss(PairwiseLoss):
             weight = F.softmax(torch.ones_like(neg_score), -1)
             return -torch.sum(loss * weight)
         else:
-            loss = -F.logsigmoid(pos_score - torch.max(neg_score, dim=-1))
+            loss = -F.logsigmoid(pos_score - torch.max(neg_score, dim=-1)).sum()
 
 
 class SampledSoftmaxLoss(PairwiseLoss):

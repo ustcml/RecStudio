@@ -10,6 +10,7 @@ if __name__=='__main__':
     train, val, test = dataset.build([0.8, 0.1, 0.1])
     model = BPR.BPRRecommender(parser_yaml(r'model/basemodel.yaml'))
     model.fit(train, {'user_id', 'item_id', 'rating'}, val, True)
+    model.evaluate(test)
     #train.drop_feat(['user_id', 'item_id', 'age', 'gender', 'item_hist'])
     #freq = train.item_freq
     #print(freq.sum().item())
