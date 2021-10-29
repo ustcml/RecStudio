@@ -3,33 +3,10 @@ from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, Sampler
 import numpy as np
-import yaml
-import re
 import pandas as pd
-import os
+import os,copy, torch
 import scipy.sparse as ssp
-import time
-import copy
-import torch
-def parser_yaml(config_path):
-    loader = yaml.FullLoader
-    loader.add_implicit_resolver(
-        u'tag:yaml.org,2002:float',
-        re.compile(
-            u'''^(?:
-            [-+]?(?:[0-9][0-9_]*)\\.[0-9_]*(?:[eE][-+]?[0-9]+)?
-        |[-+]?(?:[0-9][0-9_]*)(?:[eE][-+]?[0-9]+)
-        |\\.[0-9_]+(?:[eE][-+][0-9]+)?
-        |[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\\.[0-9_]*
-        |[-+]?\\.(?:inf|Inf|INF)
-        |\\.(?:nan|NaN|NAN))$''', re.X
-        ), list(u'-+0123456789.')
-    )
-    with open(config_path, 'r', encoding='utf-8') as f:
-        ret = yaml.load(f.read(), Loader=loader)
-    return ret
-
-
+from utils.utils import parser_yaml
 class MFDataset(Dataset):
     def __init__(self, config_path):
         self.config = parser_yaml(config_path)

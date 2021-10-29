@@ -1,6 +1,6 @@
 from typing import Any, Sized, Iterator, Optional
 import torch.nn.functional as F
-from utils.utils import set_color
+from utils.utils import set_color, parser_yaml, color_dict
 from torch.utils.data import DataLoader
 from data.dataset import MFDataset
 from ann.search import Index
@@ -8,12 +8,10 @@ from ann import sampler
 from torch import nn, optim
 from tqdm import tqdm
 import numpy as np
-import faiss
+import faiss, torch, eval
 from . import scorer, loss_func, init
-import torch
-from pytorch_lightning import Trainer, LightningModule, seed_everything
-from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
-import eval    
+from pytorch_lightning import Trainer, LightningModule, seed_everything, LightningDataModule
+from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint 
 class Recommender(LightningModule):
 
     def __init__(self, config):
@@ -21,9 +19,7 @@ class Recommender(LightningModule):
         seed_everything(42, workers=True) ## Trainer(deterministic=False) 
         self.config = config
         self.loss_fn = self.config_loss()
-        self.trainer = Trainer(gpus=config['gpu'], 
-                                max_epochs=config['epochs'],
-                                num_sanity_val_steps=0)
+        self.fields = self.get_fields()
 
     # def configure_callbacks(self):
     #     if self.val_check:
@@ -32,10 +28,17 @@ class Recommender(LightningModule):
     #             filename='{epoch:02d}-{val_loss:.2f}')
     #         return [ckp_callback, early_stopping]
     #     #return [MyProgressBar()]
-        
+    def load_dataset(self, data_config_file):
+        pass
+
+    def get_fields(self):
+        return None
 
     def init_model(self, train_data):
         pass
+
+    def init_parameter(self):
+        self.apply(init.xavier_normal_initialization)
 
     def training_step(self, batch, batch_idx):
         y_h = self.forward(batch, isinstance(self.loss_fn, loss_func.FullScoreLoss))
@@ -44,41 +47,13 @@ class Recommender(LightningModule):
 
     def training_epoch_end(self, outputs):
         loss = torch.hstack([e['loss'] for e in outputs]).sum()
-        self.log('train_loss', loss, prog_bar=True)
-        print()
-    
-    def validation_step(self, batch, batch_idx):
-        eval_metric = self.config['eval_metrics']
-        pred_m, rank_m = eval.split_metrics(eval_metric)
-        topk = self.config['topk']
-        bs = batch[self.fiid].size(0)
-        if len(rank_m)>0:
-            query = self.construct_query(batch)
-            score, topk_items = self.topk(query, topk, batch['user_hist'])
-            target, _ = batch[self.fiid].sort()
-            idx_ = torch.searchsorted(target, topk_items)
-            idx_[idx_ == target.size(1)] = target.size(1) - 1
-            label = torch.gather(target, 1, idx_) == topk_items
-            cutoff = self.config['cutoff'][0] if isinstance(self.config['cutoff'], list) else self.config['cutoff']
-            return [[f'{name}@{cutoff}', func(label, batch[self.frating], cutoff), bs] for name, func in rank_m]
-        else:
-            y_ = self.forward(batch, False)
-            y = batch[self.fiid]
-            return [[n, m(y, y_), bs] for n, m in pred_m]
+        self.log('train_loss', loss)
+        print(color_dict(self.trainer.logged_metrics))
+        
     
     def validation_epoch_end(self, outputs):
-        rec = outputs[0]
-        for i in range(len(rec)):
-            length = 0
-            total = 0
-            for _ in outputs:
-                n, v, bs = _[i]
-                total += v * bs
-                length += bs
-            self.log(n, total/length, prog_bar=True)
-        
-        #metric = torch.hstack(outputs).sum()
-        #self.log('val_loss', loss, prog_bar=True)
+        self.test_epoch_end(outputs)
+           
     def test_epoch_end(self, outputs):
         rec = outputs[0]
         for i in range(len(rec)):
@@ -140,29 +115,32 @@ class Recommender(LightningModule):
         else:
             return optimizer
 
-    def fit(self, train_data, use_fields=None, val_data=None, show_progress=True):
-        self.val_check = val_data is not None
-        self.fuid, self.fiid, self.frating = train_data.fuid, train_data.fiid, train_data.frating
-        if use_fields is not None:
-            train_data.drop_feat(use_fields)
-        self.user_fields = train_data.user_feat.fields if use_fields is None \
-            else train_data.user_feat.fields.intersection(use_fields)
-        self.item_fields = train_data.item_feat.fields if use_fields is None \
-            else train_data.item_feat.fields.intersection(use_fields)
+    def fit(self, train_data, val_data=None, run_mode='detail'): #mode='tune'|'light'|'detail'
+        trainer = Trainer(gpus=self.config['gpu'], \
+                            max_epochs=self.config['epochs'], \
+                            num_sanity_val_steps=0,\
+                            progress_bar_refresh_rate=0)
+        self.frating = train_data.frating
+        if self.fields is not None:
+            assert self.frating in self.fields
+            train_data.drop_feat(self.fields)
+        self.user_fields = train_data.user_feat.fields if self.fields is None \
+            else train_data.user_feat.fields.intersection(self.fields)
+        self.item_fields = train_data.item_feat.fields if self.fields is None \
+            else train_data.item_feat.fields.intersection(self.fields)
         self.init_model(train_data)
-        self.apply(init.xavier_normal_initialization)
+        self.init_parameter()
         train_loader = train_data.loader(batch_size=self.config['batch_size'], shuffle=True)
         if val_data:
             val_loader = val_data.eval_loader(batch_size=self.config['eval_batch_size'])
         else:
             val_loader = None
-        self.trainer.fit(self, train_loader, val_loader)
+        trainer.fit(self, train_loader, val_loader)
 
     def evaluate(self, test_data):
         test_loader = test_data.eval_loader(batch_size=self.config['eval_batch_size'])
-        self.user_hist = test_data.user_hist
-        output = self.trainer.test(self, test_loader)
-        #print(output)
+        output = self.trainer.test(dataloaders=test_loader, ckpt_path='best', verbose=False)
+        print(color_dict(output[0]))
         
     
 
@@ -173,6 +151,14 @@ class TowerFreeRecommender(Recommender):
 
     def evaluate(self, test_data, train_data):
         pass
+
+    def validation_step(self, batch, batch_idx):
+        eval_metric = self.config['eval_metrics']
+        pred_m, _ = eval.split_metrics(eval_metric)
+        bs = batch[self.frating].size(0)
+        y_ = self.forward(batch, False)
+        y = batch[self.frating]
+        return [[n, m(y, y_), bs] for n, m in pred_m]
 
 class ItemIDTowerRecommender(Recommender):
     def __init__(self, config):
@@ -189,6 +175,8 @@ class ItemIDTowerRecommender(Recommender):
         return scorer.InnerProductScorer()
     
     def init_model(self, train_data): ## need to overwrite
+        self.fiid = train_data.fiid
+        assert self.fiid in self.fields
         self.item_encoder = self.build_item_encoder(train_data)
         if self.neg_count is not None:
             self.sampler = self.build_sampler(train_data)
@@ -290,34 +278,29 @@ class ItemIDTowerRecommender(Recommender):
             
 
     def test_step(self, batch, batch_idx):
-        eval_metric = self.config['eval_metrics']
-        pred_m, rank_m = eval.split_metrics(eval_metric)
-        topk = self.config['topk']
-        bs = batch[self.fiid].size(0)
-        if len(rank_m)>0:
-            query = self.construct_query(batch)
-            score, topk_items = self.topk(query, topk, batch['user_hist'])
-            target, _ = batch[self.fiid].sort()
-            idx_ = torch.searchsorted(target, topk_items)
-            idx_[idx_ == target.size(1)] = target.size(1) - 1
-            label = torch.gather(target, 1, idx_) == topk_items
-            cutoffs = self.config['cutoff'] if isinstance(self.config['cutoff'], list) else [self.config['cutoff']]
-            return [[f'{name}@{cutoff}', func(label, batch[self.frating], cutoff), bs]\
-                for cutoff in cutoffs for name, func in rank_m]
-        else:
-            y_ = self.forward(batch, False)
-            y = batch[self.fiid]
-            return [[n, m(y, y_), bs] for n, m in pred_m]
+        eval_metric = self.config['test_metrics']
+        cutoffs = self.config['cutoff'] if isinstance(self.config['cutoff'], list) else [self.config['cutoff']]
+        return self._test_step(batch, eval_metric, cutoffs)
         
-        #train_items = user_hist[batch[self.fuid]]
-
-    # def evaluate(self, test_data, train_data=None):
-    #     loader = test_data.loader(batch_size=self.config['eval_batch_size'], shuffle=False)
-    #     if train_data:
-    #         user_hist = train_data.get_hist(isUser=True)
-    #         user_count = np.array([len(e) for e in user_hist])
-    #     for batch in loader:
-            
+    def validation_step(self, batch, batch_idx):
+        eval_metric = self.config['val_metrics']
+        cutoff = self.config['cutoff'][0] if isinstance(self.config['cutoff'], list) else self.config['cutoff']
+        return self._test_step(batch, eval_metric, [cutoff])
+    
+    def _test_step(self, batch, metric, cutoffs):
+        _, rank_m = eval.split_metrics(metric)
+        topk = self.config['topk']
+        bs = batch[self.frating].size(0)
+        assert len(rank_m)>0
+        query = self.construct_query(batch)
+        score, topk_items = self.topk(query, topk, batch['user_hist'])
+        target, _ = batch[self.fiid].sort()
+        idx_ = torch.searchsorted(target, topk_items)
+        idx_[idx_ == target.size(1)] = target.size(1) - 1
+        label = torch.gather(target, 1, idx_) == topk_items
+        return [[f'{name}@{cutoff}', func(label, batch[self.frating], cutoff), bs]\
+            for cutoff in cutoffs for name, func in rank_m]
+    
     
     def topk(self, query, k, user_h):
         more = user_h.size(1) if user_h is not None else 0
@@ -364,7 +347,12 @@ class ItemTowerRecommender(ItemIDTowerRecommender):
 
 class UserItemIDTowerRecommender(ItemIDTowerRecommender):
 
+    def load_dataset(self, data_config_file):
+        dataset = MFDataset(data_config_file)
+        return dataset.build(self.config['split_ratio'], split_mode=self.config['split_mode'])
+
     def init_model(self, train_data): ## need to overwrite
+        self.fuid = train_data.fuid
         super().init_model(train_data)
         self.user_encoder = self.build_user_encoder(train_data)
 
@@ -384,6 +372,7 @@ class UserItemIDTowerRecommender(ItemIDTowerRecommender):
 class UserItemTowerRecommender(ItemTowerRecommender):
 
     def init_model(self, train_data): ## need to overwrite
+        self.fuid = train_data.fuid
         super().init_model(train_data)
         self.user_encoder = self.build_user_encoder(train_data)
 
