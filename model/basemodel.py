@@ -2,16 +2,20 @@ from typing import Any, Sized, Iterator, Optional
 import torch.nn.functional as F
 from utils.utils import set_color, parser_yaml, color_dict
 from torch.utils.data import DataLoader
-from data.dataset import MFDataset
+from data.dataset import AEDataset, MFDataset, SeqDataset
 from ann.search import Index
 from ann import sampler
 from torch import nn, optim
 from tqdm import tqdm
 import numpy as np
-import faiss, torch, eval
+import faiss, torch, eval, os, logging
 from . import scorer, loss_func, init
 from pytorch_lightning import Trainer, LightningModule, seed_everything, LightningDataModule
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint 
+from pytorch_lightning.loggers import TensorBoardLogger
+# configure logging at the root level of lightning
+print_logger = logging.getLogger("pytorch_lightning")
+print_logger.setLevel(logging.INFO)
 class Recommender(LightningModule):
 
     def __init__(self, config):
@@ -19,20 +23,32 @@ class Recommender(LightningModule):
         seed_everything(42, workers=True) ## Trainer(deterministic=False) 
         self.config = config
         self.loss_fn = self.config_loss()
-        self.fields = self.get_fields()
+        self.fields = self.config.get('use_fields')
+        self.save_hyperparameters(config)
 
-    # def configure_callbacks(self):
-    #     if self.val_check:
-    #         early_stopping = EarlyStopping('recall@10', verbose=True)
-    #         ckp_callback = ModelCheckpoint(monitor='recall@10', save_top_k=1, mode='min', save_last=True,\
-    #             filename='{epoch:02d}-{val_loss:.2f}')
-    #         return [ckp_callback, early_stopping]
-    #     #return [MyProgressBar()]
-    def load_dataset(self, data_config_file):
+    def configure_callbacks(self):
+        if self.val_check:
+            self.val_metric = next(iter(self.config['val_metrics'])) + '@' + str(self.config['cutoff'])
+            early_stopping = EarlyStopping(self.val_metric, verbose=True, patience=5, mode=self.config['early_stop_mode'])
+            ckp_callback = ModelCheckpoint(monitor=self.val_metric, save_top_k=1, mode=self.config['early_stop_mode'], save_last=True)
+            return [ckp_callback, early_stopping]
+
+    def get_dataset_class(self):
         pass
 
-    def get_fields(self):
-        return None
+    def load_dataset(self, data_config_file):
+        cls = self.get_dataset_class()
+        dataset = cls(data_config_file)
+        if cls == MFDataset:
+            parameter = {'shuffle': self.config.get('shuffle'),
+                        'split_mode': self.config.get('split_mode')}
+        elif cls == AEDataset:
+            parameter = {'shuffle': self.config.get('shuffle')}
+        elif cls == SeqDataset:
+            parameter = {'rep' : self.config.get('test_repetitive'),
+                        'train_rep': self.config.get('train_repetitive')}
+        parameter = {k: v for k, v in parameter.items() if v is not None}
+        return dataset.build(self.config['split_ratio'], **parameter)
 
     def init_model(self, train_data):
         pass
@@ -48,7 +64,14 @@ class Recommender(LightningModule):
     def training_epoch_end(self, outputs):
         loss = torch.hstack([e['loss'] for e in outputs]).sum()
         self.log('train_loss', loss)
-        print(color_dict(self.trainer.logged_metrics))
+        if self.val_check:
+            metric = self.trainer.logged_metrics[self.val_metric]
+            '''@nni.report_intermediate_result(metric)'''
+        if self.run_mode in ['light', 'tune'] or self.val_check:
+            print_logger.info(color_dict(self.trainer.logged_metrics, self.run_mode=='tune'))
+        else:
+            print_logger.info('\n'+color_dict(self.trainer.logged_metrics, self.run_mode=='tune'))
+            
         
     
     def validation_epoch_end(self, outputs):
@@ -69,20 +92,24 @@ class Recommender(LightningModule):
         pass
     
     def get_optimizer(self, params):
+        '''@nni.variable(nni.choice(0.1, 0.05, 0.01, 0.005, 0.001), name=learning_rate)'''
+        learning_rate = self.config['learning_rate']
+        '''@nni.variable(nni.choice(0.1, 0.01, 0.001, 0), name=decay)'''
+        decay = self.config['weight_decay']
         if self.config['learner'].lower() == 'adam':
-            optimizer = optim.Adam(params, lr=self.config['learning_rate'], weight_decay=self.config['weight_decay'])
+            optimizer = optim.Adam(params, lr=learning_rate, weight_decay=decay)
         elif self.config['learner'].lower() == 'sgd':
-            optimizer = optim.SGD(params, lr=self.config['learning_rate'], weight_decay=self.config['weight_decay'])
+            optimizer = optim.SGD(params, lr=learning_rate, weight_decay=decay)
         elif self.config['learner'].lower() == 'adagrad':
-            optimizer = optim.Adagrad(params, lr=self.config['learning_rate'], weight_decay=self.config['weight_decay'])
+            optimizer = optim.Adagrad(params, lr=learning_rate, weight_decay=decay)
         elif self.config['learner'].lower() == 'rmsprop':
-            optimizer = optim.RMSprop(params, lr=self.config['learning_rate'], weight_decay=self.config['weight_decay'])
+            optimizer = optim.RMSprop(params, lr=learning_rate, weight_decay=decay)
         elif self.config['learner'].lower() == 'sparse_adam':
-            optimizer = optim.SparseAdam(params, lr=self.config['learning_rate'])
+            optimizer = optim.SparseAdam(params, lr=learning_rate)
             #if self.weight_decay > 0:
             #    self.logger.warning('Sparse Adam cannot argument received argument [{weight_decay}]')
         else:
-            optimizer = optim.Adam(params, lr=self.config['learning_rate'])
+            optimizer = optim.Adam(params, lr=learning_rate)
         return optimizer
 
     def get_scheduler(self, optimizer):
@@ -101,12 +128,13 @@ class Recommender(LightningModule):
         params = self.parameters()
         optimizer = self.get_optimizer(params)
         scheduler = self.get_scheduler(optimizer)
+        m = self.val_metric if self.val_check else 'train_loss'
         if scheduler:
             return {
                 'optimizer': optimizer,
                 'lr_scheduler': {
                     'scheduler': scheduler,
-                    'monitor': 'val_loss',
+                    'monitor': m,
                     'interval': 'epoch',
                     'frequency': 1,
                     'strict': False
@@ -116,10 +144,20 @@ class Recommender(LightningModule):
             return optimizer
 
     def fit(self, train_data, val_data=None, run_mode='detail'): #mode='tune'|'light'|'detail'
-        trainer = Trainer(gpus=self.config['gpu'], \
-                            max_epochs=self.config['epochs'], \
-                            num_sanity_val_steps=0,\
-                            progress_bar_refresh_rate=0)
+        self.run_mode = run_mode
+        self.val_check = val_data is not None and self.config['val_metrics'] is not None
+        if run_mode == 'tune' and "NNI_OUTPUT_DIR" in os.environ: 
+            save_dir = os.environ["NNI_OUTPUT_DIR"] #for parameter tunning
+        else:
+            save_dir = os.getcwd()
+        print_logger.info('save_dir:' + save_dir)
+        refresh_rate = 0 if run_mode in ['light', 'tune'] else 1
+        logger = TensorBoardLogger(save_dir=save_dir, name="tensorboard")
+        trainer = Trainer(gpus=self.config['gpu'], 
+                            max_epochs=self.config['epochs'], 
+                            num_sanity_val_steps=0,
+                            progress_bar_refresh_rate=refresh_rate,
+                            logger=logger)
         self.frating = train_data.frating
         if self.fields is not None:
             assert self.frating in self.fields
@@ -139,8 +177,10 @@ class Recommender(LightningModule):
 
     def evaluate(self, test_data):
         test_loader = test_data.eval_loader(batch_size=self.config['eval_batch_size'])
-        output = self.trainer.test(dataloaders=test_loader, ckpt_path='best', verbose=False)
-        print(color_dict(output[0]))
+        output = self.trainer.test(dataloaders=test_loader, ckpt_path='best', verbose=False)[0]
+        metric = output[self.val_metric]
+        '''@nni.report_final_result(metric)'''
+        print_logger.info(color_dict(output, self.run_mode=='tune'))
         
     
 
@@ -166,7 +206,9 @@ class ItemIDTowerRecommender(Recommender):
         self.neg_count = config['negative_count']
         self.score_func = self.config_scorer()
         self.use_index = False #config['ann'] is not None
-        self.embed_dim = self.config['embed_dim']
+        '''@nni.variable(nni.choice(16, 32, 64), name=embed_dim)'''
+        embed_dim = self.config['embed_dim']
+        self.embed_dim = embed_dim
     
     def config_loss(self):
         return loss_func.BPRLoss()
@@ -347,9 +389,8 @@ class ItemTowerRecommender(ItemIDTowerRecommender):
 
 class UserItemIDTowerRecommender(ItemIDTowerRecommender):
 
-    def load_dataset(self, data_config_file):
-        dataset = MFDataset(data_config_file)
-        return dataset.build(self.config['split_ratio'], split_mode=self.config['split_mode'])
+    def get_dataset_class(self):
+        return MFDataset
 
     def init_model(self, train_data): ## need to overwrite
         self.fuid = train_data.fuid
@@ -370,6 +411,9 @@ class UserItemIDTowerRecommender(ItemIDTowerRecommender):
            
 
 class UserItemTowerRecommender(ItemTowerRecommender):
+
+    def get_dataset_class(self):
+        return MFDataset
 
     def init_model(self, train_data): ## need to overwrite
         self.fuid = train_data.fuid

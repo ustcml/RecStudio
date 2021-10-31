@@ -1,10 +1,7 @@
 from model import basemodel, loss_func, scorer
 from ann import sampler
 import torch
-class BPRRecommender(basemodel.UserItemIDTowerRecommender):
-
-    def get_fields(self):
-        return {'user_id', 'item_id', 'rating'}
+class BPR(basemodel.UserItemIDTowerRecommender):
 
     def build_user_encoder(self, train_data):
         return torch.nn.Embedding(train_data.num_users, self.embed_dim)
