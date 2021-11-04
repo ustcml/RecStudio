@@ -1,0 +1,2 @@
+shuffle: True
+eval_batch_size: 20

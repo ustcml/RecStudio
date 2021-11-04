@@ -1,0 +1,16 @@
+experimentName: bpr-ml100k
+useAnnotation: false
+searchSpace: 
+  embed_dim: {_type: choice, _value: [16, 32, 64]}
+  weight_decay: {_type: choice, _value: [0.1, 0.01, 0.001, 0]}
+  learning_rate: {_type: choice, _value: [0.1, 0.05, 0.01, 0.005, 0.001]}
+trialCommand: python run.py --mode=tune --model=BPR --dataset=ml-100k --data_dir=./datasets
+trialGpuNumber: 0
+trialConcurrency: 1
+experimentWorkingDirectory: ./nni-experiments
+tuner:
+  name: TPE
+  classArgs:
+    optimize_mode: maximize
+trainingService:
+  platform: local

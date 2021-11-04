@@ -1,0 +1,1 @@
+nnictl create --config config.yaml -p 8088

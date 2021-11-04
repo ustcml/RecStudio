@@ -1,0 +1,3 @@
+use_fields: ['user_id', 'item_id', 'rating']
+embed_dim: 64
+negative_count: 1
