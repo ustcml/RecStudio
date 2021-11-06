@@ -378,8 +378,15 @@ class MFDataset(Dataset):
                 d.append(torch.tensor([[u, *e] for u, e in zip(uids, _)]))
             return d
         else:
-            data_idx = [torch.from_numpy(np.hstack([np.arange(*e) for e in _])) for _ in data_idx]
-            return data_idx
+            d = [torch.from_numpy(np.hstack([np.arange(*e) for e in data_idx[0]]))]
+            for _ in data_idx[1:]:
+                start, end = _[0]
+                data = self.inter_feat.get_col(self.fuid)[start:end]
+                uids, counts = data.unique_consecutive(return_counts=True)
+                cumsum = torch.hstack([torch.tensor([0]), counts.cumsum(-1)]) + start
+                d.append(torch.tensor([[u, st, en] for u, st, en in zip(uids, cumsum[:-1], cumsum[1:])]))
+            #data_idx = [torch.from_numpy(np.hstack([np.arange(*e) for e in _])) for _ in data_idx]
+            return d
     
     def __len__(self):
         return len(self.data_index)
@@ -445,6 +452,12 @@ class MFDataset(Dataset):
             splits = self._split_by_leave_one_out(ratio_or_num, user_count, rep)
         else:
             splits = self._split_by_ratio(ratio_or_num, user_count, split_mode == 'user')
+        
+        if split_mode == 'entry':
+            splits_ = splits[0][0]
+            for start, end in zip(splits_[:-1], splits_[1:]):
+                self.inter_feat[start:end] = self.inter_feat[start:end].sort_values(by=self.fuid)
+
         
         #if isinstance(self, AEDataset) or isinstance(self, SeqDataset):
         #    self.inter_feat.drop(self.fuid, inplace=True, axis=1)
@@ -686,7 +699,7 @@ class TensorFrame(Dataset):
             elif ftype == 'token':
                 data[field] = torch.from_numpy(dataframe[field].to_numpy(np.int64))
             else:
-                data[field] = torch.from_numpy(dataframe[field].to_numpy(np.float))
+                data[field] = torch.from_numpy(dataframe[field].to_numpy(np.float32))
         return cls(data, length)
 
     def __init__(self, data, length):
@@ -717,6 +730,12 @@ class TensorFrame(Dataset):
 
     def add_field(self, field, value):
         self.data[field] = value
+
+    def reindex(self, idx):
+        output = copy.deepcopy(self)
+        for f in output.fields:
+            output.data[f] = output.data[f][idx]
+        return output
 
     @property
     def fields(self):

@@ -25,6 +25,7 @@ def xavier_normal_initialization(module):
     """
     if isinstance(module, nn.Embedding):
         xavier_normal_(module.weight.data)
+        constant_(module.weight.data[module.padding_idx], 0.)
     elif isinstance(module, nn.Linear):
         xavier_normal_(module.weight.data)
         if module.bias is not None:

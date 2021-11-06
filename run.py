@@ -2,7 +2,7 @@ import os, nni, argparse
 from torchrec.utils.utils import get_model, print_logger, color_dict_normal, parser_yaml
 if __name__=='__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', '-m', type=str, default='BPR', help='model name')
+    parser.add_argument('--model', '-m', type=str, default='WRMF', help='model name')
     parser.add_argument('--data_dir', type=str, default='datasets', help='directory of datasets')
     parser.add_argument('--dataset', '-d', type=str, default='ml-100k', help='dataset name')
     parser.add_argument('--mode', choices=['tune', 'light', 'detail'], default='light', help='flag indiates model tuning')

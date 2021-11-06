@@ -2,6 +2,7 @@ from typing import Any, Optional
 import torch.nn.functional as F
 from torchrec.utils.utils import set_color, parser_yaml, color_dict, print_logger
 from torchrec.data.dataset import AEDataset, MFDataset, SeqDataset
+from torchrec.data.advance_dataset import ALSDataset
 from torchrec.ann import sampler
 from torch import optim
 import numpy as np
@@ -51,7 +52,7 @@ class Recommender(LightningModule):
     def load_dataset(self, data_config_file):
         cls = self.get_dataset_class()
         dataset = cls(data_config_file)
-        if cls == MFDataset:
+        if cls in (MFDataset, ALSDataset):
             parameter = {'shuffle': self.config.get('shuffle'),
                         'split_mode': self.config.get('split_mode')}
         elif cls == AEDataset:
@@ -74,6 +75,8 @@ class Recommender(LightningModule):
         return loss
 
     def training_epoch_end(self, outputs):
+        if isinstance(self.trainer.train_dataloader.dataset.datasets, ALSDataset):
+            self.trainer.train_dataloader.dataset.datasets.switch_mode((self.current_epoch + 1) % 2)
         loss = torch.hstack([e['loss'] for e in outputs]).sum()
         self.log('train_loss', loss)
         if self.val_check and self.run_mode == 'tune':
@@ -200,6 +203,10 @@ class Recommender(LightningModule):
         if verbose:
             print_logger.info(color_dict(output, self.run_mode=='tune'))
         return output
+    
+    def prepare_testing(self):
+        if isinstance(self.trainer.train_dataloader.dataset.datasets, ALSDataset):
+            self.trainer.train_dataloader.dataset.datasets.switch_mode(0)
         
     
 
@@ -279,7 +286,7 @@ class ItemIDTowerRecommender(Recommender):
             return data 
 
     def build_item_encoder(self, train_data):
-        return torch.nn.Embedding(train_data.num_items, self.embed_dim)
+        return torch.nn.Embedding(train_data.num_items, self.embed_dim, padding_idx=0)
     
     def build_sampler(self, train_data):
         if 'sampler' in self.config and self.config['sampler'] is not None:
@@ -334,6 +341,7 @@ class ItemIDTowerRecommender(Recommender):
         self.prepare_testing()
     
     def prepare_testing(self):
+        super().prepare_testing()
         self.item_vector = self.get_item_vector().detach().clone()
         if self.use_index:
             self.ann_index = self.build_ann_index()
