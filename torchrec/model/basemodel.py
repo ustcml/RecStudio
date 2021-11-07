@@ -190,7 +190,9 @@ class Recommender(LightningModule):
                             max_epochs=self.config['epochs'], 
                             num_sanity_val_steps=0,
                             progress_bar_refresh_rate=refresh_rate,
-                            logger=logger, log_every_n_steps=len(train_loader))
+                            logger=logger, 
+                            log_every_n_steps=len(train_loader),
+                            reload_dataloaders_every_epoch = isinstance(train_data, ALSDataset))
         trainer.fit(self, train_loader, val_loader)
 
     def evaluate(self, test_data, verbose=True):

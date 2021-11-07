@@ -1,5 +1,5 @@
 from torch.utils.data import DataLoader
-from torchrec.data.dataset import MFDataset, SeqDataset, DataSampler
+from torchrec.data.dataset import MFDataset, SeqDataset, SortedDataSampler
 import torch
 class ALSDataset(MFDataset):
     def build(self, ratio_or_num, shuffle=True, split_mode='user_entry'):
@@ -31,8 +31,7 @@ class ALSDataset(MFDataset):
         return datasets
     
     def loader(self, batch_size, shuffle=True, num_workers=1, drop_last=False):
-        _, idx = torch.sort(self.data_index[:, 2] - self.data_index[:, 1])
-        sampler = DataSampler(self, batch_size, shuffle, drop_last, seq=idx)
+        sampler = SortedDataSampler(self, batch_size, drop_last)
         output = DataLoader(self, sampler=sampler, batch_size=None, shuffle=False, num_workers=num_workers)
         return output
     
@@ -51,6 +50,32 @@ class ALSDataset(MFDataset):
             name = self.fuid
             self.fuid = self.fiid
             self.fiid = name
+    
+    def save(self, file_name=None):
+        import scipy.sparse as ssp
+        import scipy.io as sio
+        import os
+        users, items, ratings = [], [], []
+        for data in self.loader(batch_size=100, shuffle=True):
+            uid, iid, rating = data[self.fuid], data[self.fiid], data[self.frating]
+            for u, ids, rs in zip(uid, iid, rating):
+                for id, r in zip(ids, rs):
+                    if u>0 and id>0:
+                        if self.mode == 0:
+                            users.append(u)
+                            items.append(id)
+                        else:
+                            users.append(id)
+                            items.append(u)
+                        ratings.append(r)
+        users = (torch.stack(users) - 1).numpy()
+        items = (torch.stack(items) - 1).numpy()
+        ratings = torch.stack(ratings).numpy()
+        shape = [self.num_users-1, self.num_items-1]
+        shape = shape if self.mode == 0 else shape.reverse()
+        mat = ssp.csc_matrix((ratings, (users, items)), shape)
+        #sio.savemat(os.path.join('datasets', file_name+'.mat'), {file_name:mat}, format='4')
+        return mat
 
 
 class SessionDataset(SeqDataset):

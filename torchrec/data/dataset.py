@@ -480,6 +480,10 @@ class MFDataset(Dataset):
         sampler = DataSampler(self, batch_size, shuffle, drop_last)
         output = DataLoader(self, sampler=sampler, batch_size=None, shuffle=False, num_workers=num_workers)
         return output
+    
+    @property
+    def sample_length(self):
+        return self.data_index[:, 2] - self.data_index[:, 1]
 
     def eval_loader(self, batch_size, num_workers=1):
         def collate(data):
@@ -490,8 +494,7 @@ class MFDataset(Dataset):
                 else:
                     data['user_hist'] = self.user_hist[data[self.fuid]][:, 0:user_count]
             return data
-        _, idx = torch.sort(self.data_index[:, 2] - self.data_index[:, 1])
-        sampler = DataSampler(self, batch_size, False, False, seq=idx)
+        sampler = SortedDataSampler(self, batch_size)
         output = DataLoader(self, sampler=sampler, batch_size=None, shuffle=False, \
             num_workers=num_workers, collate_fn=collate)
         return output
@@ -776,3 +779,25 @@ class DataSampler(Sampler):
             return len(self.data_source) // self.batch_size
         else:
             return (len(self.data_source) + self.batch_size - 1) // self.batch_size
+
+
+class SortedDataSampler(Sampler):
+    def __init__(self, data_source:Sized, batch_size, drop_last=False):
+        self.data_source = data_source
+        self.batch_size = batch_size
+        self.drop_last = drop_last
+    
+    def __iter__(self):
+        idx = torch.sort(self.data_source.sample_length).indices
+        output = idx.split(self.batch_size)
+        if self.drop_last:
+            yield from output[:-1]
+        else:
+            yield from output
+
+    def __len__(self):
+        if self.drop_last:
+            return len(self.data_source) // self.batch_size
+        else:
+            return (len(self.data_source) + self.batch_size - 1) // self.batch_size
+

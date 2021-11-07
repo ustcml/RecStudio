@@ -26,7 +26,7 @@ class WRMF(UserItemIDTowerRecommender):
         self.item_encoder.weight.requires_grad=False
     
     def config_loss(self):
-        return None
+        return loss_func.SquareLoss()
     
     def config_scorer(self):
         return scorer.InnerProductScorer()
@@ -39,11 +39,22 @@ class WRMF(UserItemIDTowerRecommender):
             r = torch.bmm(item_embed.transpose(1, 2), batch[self.frating].unsqueeze(-1)).squeeze(-1) # BxD
             output = torch.linalg.solve(QuQ, r * (self.config['alpha'] + 1))
             self.user_encoder.weight[batch[self.fuid]] = output # B x D
+            user_embed = self.user_encoder(self.get_user_feat(batch)) # BxD
+            pred = self.score_func(user_embed, item_embed) # BxD   BxNxD -> BxN
+            # with open(f'datasets/{self.current_epoch}.txt', 'a') as writer:
+            #     for row, (u, ids, rs) in enumerate(zip(batch[self.fuid], batch[self.fiid], batch[self.frating])):
+            #         writer.writelines(f'{u}\t{id}\t{r}\t{pred[row, col]}\n' for col, (id, r) in enumerate(zip(ids, rs)) if id > 0)
         else:
             user_embed = self.user_encoder(self.get_user_feat(batch))
             PiP = torch.bmm(user_embed.transpose(1, 2), user_embed) * self.config['alpha'] + self.PtP + eye
-            r = torch.bmm(user_embed.transpose(1, 2), batch[self.frating].float().unsqueeze(-1)).squeeze(-1)
+            r = torch.bmm(user_embed.transpose(1, 2), batch[self.frating].unsqueeze(-1)).squeeze(-1)
             output = torch.linalg.solve(PiP, r * (self.config['alpha'] + 1))
             self.item_encoder.weight[batch[self.fiid]] = output
+            item_embed = self.item_encoder(self.get_item_feat(batch)) 
+            pred = self.score_func(item_embed, user_embed) # BxD BxNxD  -> BxN
+            # with open(f'datasets/{self.current_epoch}.txt', 'a') as writer:
+            #     for row, (ids, id, rs) in enumerate(zip(batch[self.fuid], batch[self.fiid], batch[self.frating])):
+            #         writer.writelines(f'{u}\t{id}\t{r}\t{pred[row, col]}\n' for col, (u, r) in enumerate(zip(ids, rs)) if u > 0)
+        loss = self.loss_fn(batch[self.frating], pred)
         
-        return {'loss':torch.tensor(0.0)}
+        return {'loss':loss}
