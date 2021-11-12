@@ -464,9 +464,16 @@ class MFDataset(Dataset):
         self.dataframe2tensors()
         datasets = [self._copy(_) for _ in self._get_data_idx(splits)]
         user_hist, user_count = datasets[0].get_hist(True)
-        for d in datasets:
+        for d in datasets[:2]:
             d.user_hist = user_hist
             d.user_count = user_count
+        if len(datasets) > 2:
+            assert len(datasets) == 3 
+            uh, uc = datasets[1].get_hist(True)
+            uh = torch.cat((user_hist, uh), dim=-1).sort(dim=-1, descending=True).values
+            uc = uc + user_count
+            datasets[-1].user_hist = uh
+            datasets[-1].user_count = uc
         return datasets
 
     def dataframe2tensors(self):
@@ -483,7 +490,10 @@ class MFDataset(Dataset):
     
     @property
     def sample_length(self):
-        return self.data_index[:, 2] - self.data_index[:, 1]
+        if self.data_index.dim() > 1:
+            return self.data_index[:, 2] - self.data_index[:, 1]
+        else:
+            raise ValueError('can not compute sample length for this dataset')
 
     def eval_loader(self, batch_size, num_workers=1):
         def collate(data):
@@ -542,7 +552,10 @@ class MFDataset(Dataset):
 
     @property
     def inter_feat_subset(self):
-        return self.data_index
+        if self.data_index.dim() > 1:
+            return torch.cat([torch.arange(s, e) for s, e in zip(self.data_index[:,1], self.data_index[:, 2])])
+        else:
+            return self.data_index
 
     @property
     def item_freq(self):
@@ -769,7 +782,7 @@ class DataSampler(Sampler):
                 output = self.seq.split(self.batch_size)
             else:
                 output = torch.arange(n).split(self.batch_size)
-        if self.drop_last:
+        if self.drop_last and (n % self.batch_size != 0):
             yield from output[:-1]
         else:
             yield from output

@@ -42,7 +42,7 @@ class Recommender(LightningModule):
     def configure_callbacks(self):
         if self.val_check:
             self.val_metric = next(iter(self.config['val_metrics'])) + '@' + str(self.config['cutoff'])
-            early_stopping = EarlyStopping(self.val_metric, verbose=True, patience=5, mode=self.config['early_stop_mode'])
+            early_stopping = EarlyStopping(self.val_metric, verbose=True, patience=10, mode=self.config['early_stop_mode'])
             ckp_callback = ModelCheckpoint(monitor=self.val_metric, save_top_k=1, mode=self.config['early_stop_mode'], save_last=True)
             return [ckp_callback, early_stopping]
 
@@ -259,8 +259,6 @@ class ItemIDTowerRecommender(Recommender):
         if self.neg_count is not None:
             self.sampler.update(self.get_item_vector().detach().clone())
     
-    def on_validation_epoch_start(self):
-        self.prepare_testing()
 
     def construct_query(self, batch_data): ## need to overwrite
         pass
@@ -339,7 +337,10 @@ class ItemIDTowerRecommender(Recommender):
         index.add(item_vector.numpy())
         return index
 
-    def on_fit_end(self):
+    def on_validation_start(self) -> None:
+        self.prepare_testing()
+
+    def on_test_start(self) -> None:
         self.prepare_testing()
     
     def prepare_testing(self):

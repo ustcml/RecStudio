@@ -33,28 +33,33 @@ class WRMF(UserItemIDTowerRecommender):
     
     def training_step(self, batch, batch_idx):
         eye = self.config['lambda'] * torch.eye(self.embed_dim)
+        ratings = (batch[self.frating]>0).float()
         if batch[self.fuid].dim() == 1: ## user model, updating user embedding
             item_embed = self.item_encoder(self.get_item_feat(batch)) # B x N x D
-            QuQ = torch.bmm(item_embed.transpose(1, 2), item_embed) * self.config['alpha'] + self.QtQ + eye # BxDxD
-            r = torch.bmm(item_embed.transpose(1, 2), batch[self.frating].unsqueeze(-1)).squeeze(-1) # BxD
+            QuQ = torch.bmm(item_embed.transpose(1, 2), item_embed) * self.config['alpha'] + (self.QtQ + eye) # BxDxD
+            r = torch.bmm(item_embed.transpose(1, 2), ratings.unsqueeze(-1)).squeeze(-1) # BxD
             output = torch.linalg.solve(QuQ, r * (self.config['alpha'] + 1))
             self.user_encoder.weight[batch[self.fuid]] = output # B x D
             user_embed = self.user_encoder(self.get_user_feat(batch)) # BxD
             pred = self.score_func(user_embed, item_embed) # BxD   BxNxD -> BxN
+            reg1 = torch.multiply(user_embed @ self.QtQ,  user_embed).sum(-1)
             # with open(f'datasets/{self.current_epoch}.txt', 'a') as writer:
             #     for row, (u, ids, rs) in enumerate(zip(batch[self.fuid], batch[self.fiid], batch[self.frating])):
             #         writer.writelines(f'{u}\t{id}\t{r}\t{pred[row, col]}\n' for col, (id, r) in enumerate(zip(ids, rs)) if id > 0)
         else:
             user_embed = self.user_encoder(self.get_user_feat(batch))
-            PiP = torch.bmm(user_embed.transpose(1, 2), user_embed) * self.config['alpha'] + self.PtP + eye
-            r = torch.bmm(user_embed.transpose(1, 2), batch[self.frating].unsqueeze(-1)).squeeze(-1)
+            PiP = torch.bmm(user_embed.transpose(1, 2), user_embed) * self.config['alpha'] + (self.PtP + eye)
+            r = torch.bmm(user_embed.transpose(1, 2), ratings.unsqueeze(-1)).squeeze(-1)
             output = torch.linalg.solve(PiP, r * (self.config['alpha'] + 1))
             self.item_encoder.weight[batch[self.fiid]] = output
             item_embed = self.item_encoder(self.get_item_feat(batch)) 
             pred = self.score_func(item_embed, user_embed) # BxD BxNxD  -> BxN
+            reg1 = torch.multiply(item_embed @ self.PtP, item_embed).sum(-1)
             # with open(f'datasets/{self.current_epoch}.txt', 'a') as writer:
             #     for row, (ids, id, rs) in enumerate(zip(batch[self.fuid], batch[self.fiid], batch[self.frating])):
             #         writer.writelines(f'{u}\t{id}\t{r}\t{pred[row, col]}\n' for col, (u, r) in enumerate(zip(ids, rs)) if u > 0)
-        loss = self.loss_fn(batch[self.frating], pred)
+        loss = self.loss_fn(ratings, pred) * (self.config['alpha'] + 1)
+        loss -= (pred**2).sum(-1)
+        loss += reg1
         
         return {'loss':loss}

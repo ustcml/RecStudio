@@ -4,7 +4,7 @@ import torch
 class BPR(basemodel.UserItemIDTowerRecommender):
 
     def build_user_encoder(self, train_data):
-        return torch.nn.Embedding(train_data.num_users, self.embed_dim)
+        return torch.nn.Embedding(train_data.num_users, self.embed_dim, padding_idx=0)
     
     def config_loss(self):
         return loss_func.BPRLoss()
