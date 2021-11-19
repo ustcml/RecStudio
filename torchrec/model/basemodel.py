@@ -41,7 +41,10 @@ class Recommender(LightningModule):
 
     def configure_callbacks(self):
         if self.val_check:
-            self.val_metric = next(iter(self.config['val_metrics'])) + '@' + str(self.config['cutoff'])
+            eval_metric = self.config['val_metrics']
+            self.val_metric = next(iter(eval_metric)) if isinstance(eval_metric, list)  else eval_metric
+            if len(eval.get_rank_metrics(self.val_metric)) > 0:
+                self.val_metric += '@' + str(self.config['cutoff'])
             early_stopping = EarlyStopping(self.val_metric, verbose=True, patience=10, mode=self.config['early_stop_mode'])
             ckp_callback = ModelCheckpoint(monitor=self.val_metric, save_top_k=1, mode=self.config['early_stop_mode'], save_last=True)
             return [ckp_callback, early_stopping]
@@ -55,6 +58,8 @@ class Recommender(LightningModule):
         if cls in (MFDataset, ALSDataset):
             parameter = {'shuffle': self.config.get('shuffle'),
                         'split_mode': self.config.get('split_mode')}
+            if isinstance(self, TowerFreeRecommender):
+                parameter['fmeval'] = True
         elif cls == AEDataset:
             parameter = {'shuffle': self.config.get('shuffle')}
         elif cls == SeqDataset:
@@ -69,16 +74,10 @@ class Recommender(LightningModule):
     def init_parameter(self):
         self.apply(init.xavier_normal_initialization)
 
-    def training_step(self, batch, batch_idx):
-        y_h = self.forward(batch, isinstance(self.loss_fn, loss_func.FullScoreLoss))
-        loss = self.loss_fn(batch[self.frating], *y_h if isinstance(y_h, tuple) else y_h)
-        return loss
 
     def training_epoch_end(self, outputs):
-        if isinstance(self.trainer.train_dataloader.dataset.datasets, ALSDataset):
-            self.trainer.train_dataloader.dataset.datasets.switch_mode((self.current_epoch + 1) % 2)
         loss = torch.hstack([e['loss'] for e in outputs]).sum()
-        self.log('train_loss', loss)
+        self.log('train_loss', loss, on_step=False, on_epoch=True)
         if self.val_check and self.run_mode == 'tune':
             metric = self.trainer.logged_metrics[self.val_metric]
             nni.report_intermediate_result(metric)
@@ -87,21 +86,6 @@ class Recommender(LightningModule):
         else:
             print_logger.info('\n'+color_dict(self.trainer.logged_metrics, self.run_mode=='tune'))
             
-        
-    
-    def validation_epoch_end(self, outputs):
-        self.test_epoch_end(outputs)
-           
-    def test_epoch_end(self, outputs):
-        rec = outputs[0]
-        for i in range(len(rec)):
-            length = 0
-            total = 0
-            for _ in outputs:
-                n, v, bs = _[i]
-                total += v * bs
-                length += bs
-            self.log(n, total/length)
         
     def config_loss(self):
         pass
@@ -175,11 +159,12 @@ class Recommender(LightningModule):
         self.user_fields = train_data.user_feat.fields if self.fields is None \
             else train_data.user_feat.fields.intersection(self.fields)
         self.item_fields = train_data.item_feat.fields if self.fields is None \
-            else train_data.item_feat.fields.intersection(self.fields)
+            else train_data.item_feat.fields.intersection(self.fields)        
+        iscombine = self.set_train_loaders(train_data)
         self.init_model(train_data)
         self.init_parameter()
-        train_loader = train_data.loader(batch_size=self.config['batch_size'], \
-            shuffle=True, num_workers=self.config['num_workers'])
+        train_loader = train_data.train_loader(batch_size=self.config['batch_size'], \
+            shuffle=True, num_workers=self.config['num_workers'], load_combine=iscombine)
         if val_data:
             val_loader = val_data.eval_loader(batch_size=self.config['eval_batch_size'],\
                 num_workers=self.config['num_workers'])
@@ -190,9 +175,7 @@ class Recommender(LightningModule):
                             max_epochs=self.config['epochs'], 
                             num_sanity_val_steps=0,
                             progress_bar_refresh_rate=refresh_rate,
-                            logger=logger, 
-                            log_every_n_steps=len(train_loader),
-                            reload_dataloaders_every_epoch = isinstance(train_data, ALSDataset))
+                            logger=logger)
         trainer.fit(self, train_loader, val_loader)
 
     def evaluate(self, test_data, verbose=True):
@@ -205,25 +188,48 @@ class Recommender(LightningModule):
         if verbose:
             print_logger.info(color_dict(output, self.run_mode=='tune'))
         return output
-    
-    def prepare_testing(self):
-        if isinstance(self.trainer.train_dataloader.dataset.datasets, ALSDataset):
-            self.trainer.train_dataloader.dataset.datasets.switch_mode(0)
         
-    
-
+    def set_train_loaders(self, train_data):
+        train_data.loaders = [train_data.loader]
+        train_data.nepoch = None
+        return False
     
 class TowerFreeRecommender(Recommender):
-    def __init__(self):
-        pass
+
+    def get_dataset_class(self):
+        return MFDataset
+
+    def __init__(self, config):
+        super().__init__(config)
+
+    def training_step(self, batch, batch_idx):
+        y_h = self.forward(batch)
+        loss = self.loss_fn(y_h, (batch[self.frating]>3).float())
+        return loss
 
     def validation_step(self, batch, batch_idx):
-        eval_metric = self.config['eval_metrics']
-        pred_m, _ = eval.split_metrics(eval_metric)
-        bs = batch[self.frating].size(0)
-        y_ = self.forward(batch, False)
-        y = batch[self.frating]
-        return [[n, m(y, y_), bs] for n, m in pred_m]
+        return self._test_step(batch)
+    
+    def test_step(self, batch, batch_idx):
+        return self._test_step(batch)
+    
+    def _test_step(self, batch):
+        y_ = self.forward(batch)
+        y = (batch[self.frating]>3).float()
+        return y_, y
+    
+    def validation_epoch_end(self, outputs):
+        self._test_epoch_end(outputs, self.config['val_metrics'])
+           
+    def test_epoch_end(self, outputs):
+        self._test_epoch_end(outputs, self.config['test_metrics'])
+
+    def _test_epoch_end(self, outputs, eval_metric):
+        eval_metric = eval.get_pred_metrics(eval_metric)
+        pred, target = [torch.cat(e) for e in zip(*outputs)]
+        result = {n: f(pred, target.int()) for n, f in eval_metric}
+        self.log_dict(result, on_step=False, on_epoch=True)
+
 
 class ItemIDTowerRecommender(Recommender):
     def __init__(self, config):
@@ -253,7 +259,10 @@ class ItemIDTowerRecommender(Recommender):
             self.sampler = self.build_sampler(train_data)
             self.sampler.update(self.get_item_vector().detach().clone())
         
-        
+    def training_step(self, batch, batch_idx):
+        y_h = self.forward(batch, isinstance(self.loss_fn, loss_func.FullScoreLoss))
+        loss = self.loss_fn(batch[self.frating], *y_h if isinstance(y_h, tuple) else y_h)
+        return loss    
 
     def on_train_epoch_end(self, unused: Optional[Any] = None):
         if self.neg_count is not None:
@@ -344,11 +353,28 @@ class ItemIDTowerRecommender(Recommender):
         self.prepare_testing()
     
     def prepare_testing(self):
-        super().prepare_testing()
         self.item_vector = self.get_item_vector().detach().clone()
         if self.use_index:
             self.ann_index = self.build_ann_index()
             
+    def validation_epoch_end(self, outputs):
+        self.test_epoch_end(outputs)
+           
+    def test_epoch_end(self, outputs):
+        rec = outputs[0]
+        for i in range(len(rec)):
+            length = 0
+            total = 0
+            for _ in outputs:
+                n, v, bs = _[i]
+                total += v * bs
+                length += bs
+            self.log(n, total/length, on_step=False, on_epoch=True)
+
+    def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: Optional[int] = None) -> Any:
+        query = self.construct_query(batch)
+        score, topk_items = self.topk(query, self.config['topk'], batch['user_hist'])
+        return topk_items
 
     def test_step(self, batch, batch_idx):
         eval_metric = self.config['test_metrics']
@@ -361,17 +387,22 @@ class ItemIDTowerRecommender(Recommender):
         return self._test_step(batch, eval_metric, [cutoff])
     
     def _test_step(self, batch, metric, cutoffs):
-        _, rank_m = eval.split_metrics(metric)
+        rank_m = eval.get_rank_metrics(metric)
         topk = self.config['topk']
         bs = batch[self.frating].size(0)
         assert len(rank_m)>0
         query = self.construct_query(batch)
         score, topk_items = self.topk(query, topk, batch['user_hist'])
-        target, _ = batch[self.fiid].sort()
-        idx_ = torch.searchsorted(target, topk_items)
-        idx_[idx_ == target.size(1)] = target.size(1) - 1
-        label = torch.gather(target, 1, idx_) == topk_items
-        return [[f'{name}@{cutoff}', func(label, batch[self.frating], cutoff), bs]\
+        if batch[self.fiid].dim() > 1:
+            target, _ = batch[self.fiid].sort()
+            idx_ = torch.searchsorted(target, topk_items)
+            idx_[idx_ == target.size(1)] = target.size(1) - 1
+            label = torch.gather(target, 1, idx_) == topk_items
+            pos_rating = batch[self.frating]
+        else:
+            label = batch[self.fiid].view(-1, 1) == topk_items
+            pos_rating = batch[self.frating].view(-1, 1)
+        return [[f'{name}@{cutoff}', func(label, pos_rating, cutoff), bs]\
             for cutoff in cutoffs for name, func in rank_m]
     
     

@@ -1,55 +1,39 @@
+import copy
 from torch.utils.data import DataLoader
 from torchrec.data.dataset import MFDataset, SeqDataset, SortedDataSampler
 import torch
 class ALSDataset(MFDataset):
     def build(self, ratio_or_num, shuffle=True, split_mode='user_entry'):
         datasets = self._build(ratio_or_num, shuffle, split_mode, True, False)
-        datasets[0].inter_feat_by_user = self.inter_feat
-        item_ids = self.inter_feat.get_col(self.fiid)
-        data_index = datasets[0].data_index
-        indicator = torch.zeros_like(item_ids, dtype=torch.bool).scatter(0, data_index, True)
-        sort_idx = (item_ids * 2 + ~indicator).sort().indices
-        datasets[0].inter_feat_by_item = self.inter_feat.reindex(sort_idx)
-        item_uniq, count_toal = torch.unique_consecutive(item_ids[sort_idx], return_counts=True)
-        count_train = [_.sum() for _ in torch.split(indicator[sort_idx], tuple(count_toal))]
-        cumsum = torch.hstack([torch.tensor([0]), count_toal.cumsum(-1)])
-        datasets[0].data_index_item = torch.tensor([[i, st, st+c] for i, st, c in zip(item_uniq, cumsum[:-1], count_train)])
-        # data_index = datasets[0].data_index
-        # item_ids = self.inter_feat.get_col(self.fiid)[data_index]
-        # sort_item, sort_idx = item_ids.sort()
-        # datasets[0].inter_feat_by_item = self.inter_feat.reindex(data_index, sort_idx)
-        # item_uniq, count = torch.unique_consecutive(sort_item, return_counts=True)
-        # cumsum = torch.hstack([torch.tensor([0]), count.cumsum(-1)])
-        # datasets[0].data_index_item = torch.tensor([[i, st, en] for i, st, en in zip(item_uniq, cumsum[:-1], cumsum[1:])])
-
+        data_index = datasets[0].inter_feat_subset
         user_ids = self.inter_feat.get_col(self.fuid)[data_index]
         user_uniq, count_train = torch.unique_consecutive(user_ids, return_counts=True)
         cumsum = torch.hstack([torch.tensor([0]), count_train.cumsum(-1)])
-        datasets[0].data_index_user = torch.tensor([[u, data_index[st], data_index[en-1]+1] for u, st, en in zip(user_uniq, cumsum[:-1], cumsum[1:])])
-        datasets[0].data_index = datasets[0].data_index_user
-        datasets[0].mode = 0
+        datasets[0].data_index = torch.tensor([[u, data_index[st], data_index[en-1]+1] for u, st, en in zip(user_uniq, cumsum[:-1], cumsum[1:])])
         return datasets
+    
+    def transpose(self):
+        output = copy.copy(self)
+        item_ids = self.inter_feat.get_col(self.fiid)
+        data_index = self.inter_feat_subset
+        indicator = torch.zeros_like(item_ids, dtype=torch.bool).scatter(0, data_index, True)
+        sort_idx = (item_ids * 2 + ~indicator).sort().indices
+        output.inter_feat = self.inter_feat.reindex(sort_idx)
+        item_uniq, count_toal = torch.unique_consecutive(item_ids[sort_idx], return_counts=True)
+        count_train = [_.sum() for _ in torch.split(indicator[sort_idx], tuple(count_toal))]
+        cumsum = torch.hstack([torch.tensor([0]), count_toal.cumsum(-1)])
+        output.data_index = torch.tensor([[i, st, st+c] for i, st, c in zip(item_uniq, cumsum[:-1], count_train)])
+        output.fuid = self.fiid
+        output.fiid = self.fuid
+        output.user_feat = self.item_feat
+        output.item_feat = self.user_feat
+        return output
     
     def loader(self, batch_size, shuffle=True, num_workers=1, drop_last=False):
         sampler = SortedDataSampler(self, batch_size, drop_last)
         output = DataLoader(self, sampler=sampler, batch_size=None, shuffle=False, num_workers=num_workers)
         return output
     
-    def switch_mode(self, mode):
-        if self.mode != mode:
-            if mode == 0:
-                self.data_index = self.data_index_user
-                self.inter_feat = self.inter_feat_by_user
-            elif mode == 1:
-                self.data_index = self.data_index_item
-                self.inter_feat = self.inter_feat_by_item
-            self.mode = mode
-            feat = self.user_feat
-            self.user_feat  = self.item_feat
-            self.item_feat = feat
-            name = self.fuid
-            self.fuid = self.fiid
-            self.fiid = name
     
     def save(self, file_name=None):
         import scipy.sparse as ssp
@@ -61,7 +45,7 @@ class ALSDataset(MFDataset):
             for u, ids, rs in zip(uid, iid, rating):
                 for id, r in zip(ids, rs):
                     if u>0 and id>0:
-                        if self.mode == 0:
+                        if 'user' in self.fuid:
                             users.append(u)
                             items.append(id)
                         else:
@@ -72,10 +56,11 @@ class ALSDataset(MFDataset):
         items = (torch.stack(items) - 1).numpy()
         ratings = torch.stack(ratings).numpy()
         shape = [self.num_users-1, self.num_items-1]
-        shape = shape if self.mode == 0 else shape.reverse()
+        shape = shape if 'user' in self.fuid else shape.reverse()
         mat = ssp.csc_matrix((ratings, (users, items)), shape)
         #sio.savemat(os.path.join('datasets', file_name+'.mat'), {file_name:mat}, format='4')
         return mat
+
 
 
 class SessionDataset(SeqDataset):

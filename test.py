@@ -8,20 +8,16 @@ from torch.utils.data import DataLoader
 from torch.nn.utils.rnn import pad_sequence
 from torchrec.model.mf.bpr import BPR
 
-
 if __name__=='__main__':
-    dataset = ALSDataset(r"datasets/ml-100k/ml-100k.yaml")
-    train, val, test = dataset.build([0.8, 0.1, 0.1], shuffle=True, split_mode='user_entry')#, split_mode='entry')
-    train.switch_mode(0)
-    a = train.save()
-    print(a.shape)
-    train.switch_mode(1)
-    b = train.save()
-    print(b.shape)
-    print((a - b).sum())
-    train.switch_mode(0)
-    c = train.save()
-    print((c - b).sum())
+    dataset = MFDataset(r"datasets/ml-100k/ml-100k.yaml")
+    train, val, test = dataset.build([0.8, 0.1, 0.1], split_mode='entry')
+    train.loaders = [train.loader, train.user_feat.loader]
+    train.nepoch = [2,1]
+    loader = train.train_loader(2)
+    for i in range(4):
+        for batch in loader:
+            print(batch)
+            break
     # data = next(iter(train.loader(batch_size=len(train), shuffle=False)))
     # uid, iid, rating = data[train.fuid], data[train.fiid], data[train.frating]
     # val = []

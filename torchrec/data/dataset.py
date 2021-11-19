@@ -372,21 +372,24 @@ class MFDataset(Dataset):
     def _get_data_idx(self, splits):
         splits, uids = splits
         data_idx = [list(zip(splits[:, i-1], splits[:, i])) for i in range(1, splits.shape[1])]
-        if uids is not None:
-            d = [torch.from_numpy(np.hstack([np.arange(*e) for e in data_idx[0]]))]
-            for _ in data_idx[1:]:
-                d.append(torch.tensor([[u, *e] for u, e in zip(uids, _)]))
-            return d
+        if not getattr(self, 'fmeval', False):
+            if uids is not None:
+                d = [torch.from_numpy(np.hstack([np.arange(*e) for e in data_idx[0]]))]
+                for _ in data_idx[1:]:
+                    d.append(torch.tensor([[u, *e] for u, e in zip(uids, _)]))
+                return d
+            else:
+                d = [torch.from_numpy(np.hstack([np.arange(*e) for e in data_idx[0]]))]
+                for _ in data_idx[1:]:
+                    start, end = _[0]
+                    data = self.inter_feat.get_col(self.fuid)[start:end]
+                    uids, counts = data.unique_consecutive(return_counts=True)
+                    cumsum = torch.hstack([torch.tensor([0]), counts.cumsum(-1)]) + start
+                    d.append(torch.tensor([[u, st, en] for u, st, en in zip(uids, cumsum[:-1], cumsum[1:])]))
+                #data_idx = [torch.from_numpy(np.hstack([np.arange(*e) for e in _])) for _ in data_idx]
+                return d
         else:
-            d = [torch.from_numpy(np.hstack([np.arange(*e) for e in data_idx[0]]))]
-            for _ in data_idx[1:]:
-                start, end = _[0]
-                data = self.inter_feat.get_col(self.fuid)[start:end]
-                uids, counts = data.unique_consecutive(return_counts=True)
-                cumsum = torch.hstack([torch.tensor([0]), counts.cumsum(-1)]) + start
-                d.append(torch.tensor([[u, st, en] for u, st, en in zip(uids, cumsum[:-1], cumsum[1:])]))
-            #data_idx = [torch.from_numpy(np.hstack([np.arange(*e) for e in _])) for _ in data_idx]
-            return d
+            return [torch.from_numpy(np.hstack([np.arange(*e) for e in _])) for _ in data_idx]
     
     def __len__(self):
         return len(self.data_index)
@@ -410,6 +413,11 @@ class MFDataset(Dataset):
             uid, iid = data[self.fuid], data[self.fiid]
             data.update(self.user_feat[uid])
             data.update(self.item_feat[iid])
+        
+        if getattr(self, 'eval_mode', False) and 'user_hist' not in data:
+            user_count = self.user_count[data[self.fuid]].max()
+            data['user_hist'] = self.user_hist[data[self.fuid]][:, 0:user_count]
+
         return data
 
     def _copy(self, idx):
@@ -424,7 +432,8 @@ class MFDataset(Dataset):
         order (bool, optional): 
         split_mode: user_entry, entry, user
     """
-    def build(self, ratio_or_num, shuffle=True, split_mode='user_entry'):
+    def build(self, ratio_or_num, shuffle=True, split_mode='user_entry', fmeval=False):
+        self.fmeval = fmeval
         return self._build(ratio_or_num, shuffle, split_mode, True, False)
 
     def _build(self, ratio_or_num, shuffle, split_mode, drop_dup, rep):
@@ -480,9 +489,20 @@ class MFDataset(Dataset):
         self.inter_feat = TensorFrame.fromPandasDF(self.inter_feat, self)
         self.user_feat = TensorFrame.fromPandasDF(self.user_feat, self)
         self.item_feat = TensorFrame.fromPandasDF(self.item_feat, self)
-        for i in range(len(self.network_feat)):
-            self.network_feat[i] = TensorFrame.fromPandasDF(self.network_feat[i], self)
+        if hasattr(self, 'network_feat'):
+            for i in range(len(self.network_feat)):
+                self.network_feat[i] = TensorFrame.fromPandasDF(self.network_feat[i], self)
     
+    def train_loader(self, batch_size, shuffle=True, num_workers=1, drop_last=False, load_combine=False):
+        if not hasattr(self, 'loaders'):
+            return self.loader(batch_size, shuffle, num_workers, drop_last)
+        else:
+            loaders = [l(batch_size, shuffle, num_workers, drop_last) for l in self.loaders]
+            if load_combine:
+                return loaders
+            else:
+                return ChainedDataLoader(loaders, getattr(self, 'nepoch', None))
+
     def loader(self, batch_size, shuffle=True, num_workers=1, drop_last=False):
         sampler = DataSampler(self, batch_size, shuffle, drop_last)
         output = DataLoader(self, sampler=sampler, batch_size=None, shuffle=False, num_workers=num_workers)
@@ -496,18 +516,13 @@ class MFDataset(Dataset):
             raise ValueError('can not compute sample length for this dataset')
 
     def eval_loader(self, batch_size, num_workers=1):
-        def collate(data):
-            if 'user_hist' not in data:
-                user_count = self.user_count[data[self.fuid]].max()
-                if isinstance(self, AEDataset):
-                    data['user_hist'] = data['in_item_id']
-                else:
-                    data['user_hist'] = self.user_hist[data[self.fuid]][:, 0:user_count]
-            return data
-        sampler = SortedDataSampler(self, batch_size)
-        output = DataLoader(self, sampler=sampler, batch_size=None, shuffle=False, \
-            num_workers=num_workers, collate_fn=collate)
-        return output
+        if not getattr(self, 'fmeval', False):
+            self.eval_mode = True
+            sampler = SortedDataSampler(self, batch_size)
+            output = DataLoader(self, sampler=sampler, batch_size=None, shuffle=False, num_workers=num_workers)
+            return output
+        else:
+            return self.loader(batch_size, shuffle=False, num_workers=num_workers)
     
     def drop_feat(self, keep_fields):
         if keep_fields is not None and len(keep_fields) > 0:
@@ -515,24 +530,9 @@ class MFDataset(Dataset):
             fields.add(self.frating)
             for feat in self._get_feat_list():
                 feat.del_fields(fields)
-            # if 'user_hist' in fields or 'item_hist' in fields:
-            #     user_array = self.inter_feat.get_col(self.fuid)[self.inter_feat_subset]
-            #     item_array = self.inter_feat.get_col(self.fiid)[self.inter_feat_subset]
             if 'user_hist' in fields:
-                # sorted_users, index_users = torch.sort(user_array)
-                # user, count = torch.unique_consecutive(sorted_users, return_counts=True)
-                # item_list = torch.split(item_array[index_users], tuple(count.numpy()))
-                # tensors = [torch.tensor([], dtype=torch.int64) for _ in range(self.num_users)]
-                # for u, l in zip(user, item_list):
-                #     tensors[u] = l
                 self.user_feat.add_field('user_hist', self.user_hist)
             if 'item_hist' in fields:
-                # sorted_items, index_items = torch.sort(item_array)
-                # item, count = torch.unique_consecutive(sorted_items, return_counts=True)
-                # user_list = torch.split(user_array[index_items], tuple(count.numpy()))
-                # tensors = [torch.tensor([], dtype=torch.int64) for _ in range(self.num_items)]
-                # for i, l in zip(item, user_list):
-                #     tensors[i] = l
                 self.item_feat.add_field('item_hist', self.get_hist(False))
     
     def get_hist(self, isUser=True):
@@ -561,12 +561,11 @@ class MFDataset(Dataset):
     def item_freq(self):
         if not hasattr(self, 'data_index'):
             raise ValueError('please build the dataset first by call the build method')
-        if not hasattr(self, 'it_freq'):
-            l = self.inter_feat.get_col(self.fiid)[self.inter_feat_subset]
-            it, count = torch.unique(l, return_counts=True)
-            self.it_freq = torch.zeros(self.num_items, dtype=torch.int64)
-            self.it_freq[it] = count
-        return self.it_freq
+        l = self.inter_feat.get_col(self.fiid)[self.inter_feat_subset]
+        it, count = torch.unique(l, return_counts=True)
+        it_freq = torch.zeros(self.num_items, dtype=torch.int64)
+        it_freq[it] = count
+        return it_freq
 
     @property
     def num_users(self):
@@ -618,27 +617,11 @@ class AEDataset(MFDataset):
             for k, v in d.items():
                 if k != self.fuid:
                     data[n+k] = v
+        
+        if getattr(self, 'eval_mode', False) and 'user_hist' not in data:
+            data['user_hist'] = data['in_item_id']
+        
         return data
-    
-    # def loader(self, batch_size, shuffle=True, num_workers=1, drop_last=False):
-    #     version = 2
-    #     if version == 1:
-    #         def _collate(batch):
-    #             elem = batch[0]
-    #             batch_data = {}
-    #             for key in elem:
-    #                 if elem[key].ndim > 0:
-    #                     batch_data[key] = pad_sequence([d[key] for d in batch], batch_first=True)
-    #                 else:
-    #                     batch_data[key] = torch.stack([d[key] for d in batch])
-    #             return batch_data
-    #         output = DataLoader(self, batch_size=batch_size, shuffle=shuffle, \
-    #             collate_fn=_collate, num_workers=num_workers, drop_last=drop_last)
-    #         return output
-    #     else:
-    #         sampler = DataSampler(self, batch_size, shuffle, drop_last)
-    #         output = DataLoader(self, sampler=sampler, batch_size=None, shuffle=False, num_workers=num_workers)
-    #         return output
 
     @property
     def inter_feat_subset(self):
@@ -680,6 +663,7 @@ class SeqDataset(MFDataset):
         start = idx[:, 1]
         end = idx[:, 2]
         lens = end - start
+        data['seqlen'] = lens
         l = torch.cat([torch.arange(s, e) for s, e in zip(start, end)])
         source_data = self.inter_feat[l]
         for k in source_data:
@@ -690,6 +674,11 @@ class SeqDataset(MFDataset):
             for k, v in d.items():
                 if k != self.fuid:
                     data[n+k] = v
+        
+        if getattr(self, 'eval_mode', False) and 'user_hist' not in data:
+            user_count = self.user_count[data[self.fuid]].max()
+            data['user_hist'] = self.user_hist[data[self.fuid]][:, 0:user_count]
+
         return data
     
     @property
@@ -739,9 +728,9 @@ class TensorFrame(Dataset):
             if f not in keep_fields:
                 del self.data[f]
     
-    def loader(self, batch_size):
-        sampler = DataSampler(self, batch_size, False, False)
-        output = DataLoader(self, sampler=sampler, batch_size=None, shuffle=False)
+    def loader(self, batch_size, shuffle=False, num_workers=1, drop_last=False):
+        sampler = DataSampler(self, batch_size, shuffle, drop_last)
+        output = DataLoader(self, sampler=sampler, batch_size=None, shuffle=False, num_workers=num_workers)
         return output
 
     def add_field(self, field, value):
@@ -788,7 +777,7 @@ class DataSampler(Sampler):
             yield from output
 
     def __len__(self):
-        if self.drop_last:
+        if self.drop_last and (len(self.data_source) % self.batch_size != 0):
             return len(self.data_source) // self.batch_size
         else:
             return (len(self.data_source) + self.batch_size - 1) // self.batch_size
@@ -803,14 +792,26 @@ class SortedDataSampler(Sampler):
     def __iter__(self):
         idx = torch.sort(self.data_source.sample_length).indices
         output = idx.split(self.batch_size)
-        if self.drop_last:
+        if self.drop_last and (len(self.data_source) % self.batch_size != 0):
             yield from output[:-1]
         else:
             yield from output
 
     def __len__(self):
-        if self.drop_last:
+        if self.drop_last and (len(self.data_source) % self.batch_size != 0):
             return len(self.data_source) // self.batch_size
         else:
             return (len(self.data_source) + self.batch_size - 1) // self.batch_size
+    
+
+class ChainedDataLoader:
+    def __init__(self, loaders, nepoch=None) -> None:
+        self.loaders = loaders
+        self.epoch = -1
+        nepoch = np.ones(len(loaders)) if nepoch is None else np.array(nepoch)
+        self.iter_idx = np.concatenate([np.repeat(i, c) for i, c in enumerate(nepoch)])
+    
+    def __iter__(self):
+        self.epoch += 1
+        return iter(self.loaders[self.iter_idx[self.epoch % len(self.iter_idx)]])
 

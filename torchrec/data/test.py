@@ -12,16 +12,12 @@ from torchrec.model.mf.bpr import BPR
 if __name__=='__main__':
     dataset = ALSDataset(r"datasets/ml-100k/ml-100k.yaml")
     train, val, test = dataset.build([0.8, 0.1, 0.1], shuffle=True, split_mode='user_entry')#, split_mode='entry')
-    train.switch_mode(0)
+    train_t = train.transpose()
     a = train.save()
+    b = train_t.save()
     print(a.shape)
-    train.switch_mode(1)
-    b = train.save()
     print(b.shape)
     print((a - b).sum())
-    train.switch_mode(0)
-    c = train.save()
-    print((c - b).sum())
     # data = next(iter(train.loader(batch_size=len(train), shuffle=False)))
     # uid, iid, rating = data[train.fuid], data[train.fiid], data[train.frating]
     # val = []

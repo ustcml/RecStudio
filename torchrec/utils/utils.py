@@ -73,7 +73,7 @@ def get_model(model_name):
     Returns:
         Recommender: model class
     """
-    model_submodule = ['ae', 'mf', 'seq']
+    model_submodule = ['ae', 'mf', 'seq', 'fm']
 
     model_file_name = model_name.lower()
     model_module = None
@@ -92,5 +92,6 @@ def get_model(model_name):
     conf.update(parser_yaml(fname))
     for name in ['all', model_file_name]:
         fname = os.path.join(dir, 'config', name+'.yaml')
-        conf.update(parser_yaml(fname))
+        if os.path.isfile(fname):
+            conf.update(parser_yaml(fname))
     return model_class, conf

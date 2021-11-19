@@ -5,7 +5,7 @@ learner: adam
 scheduler: ~
 epochs: 100
 batch_size: 2048
-num_workers: 6
+num_workers: 0 # please do not use this parameter, slowing down the training process
 gpu: ~
 
 # used for training tower-based model

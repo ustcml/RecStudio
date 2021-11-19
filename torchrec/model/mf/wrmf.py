@@ -9,6 +9,11 @@ class WRMF(UserItemIDTowerRecommender):
     def __init__(self, config):
         super().__init__(config)
         self.automatic_optimization = False
+    
+    def set_train_loaders(self, train_data):
+        train_data.loaders = [train_data.loader, train_data.transpose().loader]
+        train_data.nepoch = None
+        return False ## use combine loader or concate loaders
 
     def get_dataset_class(self):
         return ALSDataset
@@ -32,7 +37,7 @@ class WRMF(UserItemIDTowerRecommender):
         return scorer.InnerProductScorer()
     
     def training_step(self, batch, batch_idx):
-        eye = self.config['lambda'] * torch.eye(self.embed_dim)
+        eye = self.config['lambda'] * torch.eye(self.embed_dim, device=self.device)
         ratings = (batch[self.frating]>0).float()
         if batch[self.fuid].dim() == 1: ## user model, updating user embedding
             item_embed = self.item_encoder(self.get_item_feat(batch)) # B x N x D
@@ -43,9 +48,6 @@ class WRMF(UserItemIDTowerRecommender):
             user_embed = self.user_encoder(self.get_user_feat(batch)) # BxD
             pred = self.score_func(user_embed, item_embed) # BxD   BxNxD -> BxN
             reg1 = torch.multiply(user_embed @ self.QtQ,  user_embed).sum(-1)
-            # with open(f'datasets/{self.current_epoch}.txt', 'a') as writer:
-            #     for row, (u, ids, rs) in enumerate(zip(batch[self.fuid], batch[self.fiid], batch[self.frating])):
-            #         writer.writelines(f'{u}\t{id}\t{r}\t{pred[row, col]}\n' for col, (id, r) in enumerate(zip(ids, rs)) if id > 0)
         else:
             user_embed = self.user_encoder(self.get_user_feat(batch))
             PiP = torch.bmm(user_embed.transpose(1, 2), user_embed) * self.config['alpha'] + (self.PtP + eye)
@@ -55,9 +57,6 @@ class WRMF(UserItemIDTowerRecommender):
             item_embed = self.item_encoder(self.get_item_feat(batch)) 
             pred = self.score_func(item_embed, user_embed) # BxD BxNxD  -> BxN
             reg1 = torch.multiply(item_embed @ self.PtP, item_embed).sum(-1)
-            # with open(f'datasets/{self.current_epoch}.txt', 'a') as writer:
-            #     for row, (ids, id, rs) in enumerate(zip(batch[self.fuid], batch[self.fiid], batch[self.frating])):
-            #         writer.writelines(f'{u}\t{id}\t{r}\t{pred[row, col]}\n' for col, (u, r) in enumerate(zip(ids, rs)) if u > 0)
         loss = self.loss_fn(ratings, pred) * (self.config['alpha'] + 1)
         loss -= (pred**2).sum(-1)
         loss += reg1

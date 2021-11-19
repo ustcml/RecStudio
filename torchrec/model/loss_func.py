@@ -67,7 +67,17 @@ class WightedBinaryCrossEntropyLoss(PairwiseLoss):
         weight = F.softmax(neg_score - log_neg_prob, -1)
         return torch.sum(-F.logsigmoid(pos_score) + torch.sum(F.softplus(neg_score) * weight, dim=-1))
 
-class WARPLoss(PairwiseLoss):
-    def forward(self, label, pos_score, log_pos_prob, neg_score, neg_prob):
-        raise NotImplementedError(f'{type(self).__name__} still not implemented')
+class HingeLoss(PairwiseLoss):
+    def __init__(self, margin=2, num_items=None):
+        super().__init__()
+        self.margin = margin
+        self.n_items = num_items
 
+    def forward(self, label, pos_score, log_pos_prob, neg_score, neg_prob):
+        loss = torch.max(torch.max(neg_score, dim=-1) - pos_score + self.margin, 0).sum()
+        if self.n_items is not None:
+            impostors = neg_score - pos_score.view(-1, 1) + self.margin > 0
+            rank = torch.mean(impostors, -1) * self.n_items
+            return loss * torch.log(rank + 1)
+        else:
+            return loss
