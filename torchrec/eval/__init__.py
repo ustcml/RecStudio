@@ -34,12 +34,10 @@ def ndcg(pred, target, k):
 
 def mrr(pred, target, k):
     row, col = torch.nonzero(pred[:, :k], as_tuple=True)
-    row_uniq, inverse = torch.unique_consecutive(row, return_inverse=True)
-    perm = torch.arange(inverse.size(0)).type_as(inverse)
-    inverse, perm = inverse.flip([0]), perm.flip([0])
-    idx = inverse.new_empty(row_uniq.size(0)).scatter_(0, inverse, perm)
-    first = row_uniq.new_zeros(pred.size(0)).scatter_(0, row_uniq, col[idx])
-    output = 1.0 / (first + 1.0)
+    row_uniq, counts = torch.unique_consecutive(row, return_counts=True)
+    idx = torch.cat([counts.new_zeros(1), counts.cumsum(dim=-1)[:-1]])
+    first = col.new_zeros(pred.size(0)).scatter_(0, row_uniq, col[idx]+1)
+    output = 1.0 / first
     output[first==0] = 0
     return output.mean()
 
