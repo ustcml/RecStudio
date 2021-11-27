@@ -27,7 +27,7 @@ if __name__=='__main__':
     if not os.path.isfile(dataset_filename):
         raise ValueError('Please provide dataset description in a yaml file')
     datasets = model.load_dataset(dataset_filename)
-    model.fit(*datasets[:2], args.mode)
+    model.fit(*datasets[:2], run_mode=args.mode)
     model.evaluate(datasets[-1])
     
 

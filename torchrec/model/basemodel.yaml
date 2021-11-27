@@ -15,7 +15,7 @@ negative_count: 1
 embed_dim: 64
 
 # used for evaluating tower-based model
-eval_batch_size: 20
+eval_batch_size: 128
 split_ratio: [0.8,0.1,0.1]
 test_metrics: [recall, precision, map, ndcg, mrr, hit]
 val_metrics: [recall, ndcg]

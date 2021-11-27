@@ -6,14 +6,14 @@ from torchrec.data.advance_dataset import ALSDataset
 from torchrec.ann import sampler
 from torch import optim
 import numpy as np
-import faiss, torch, os, nni
+import faiss, torch, os, nni, abc
 import torchrec.eval as eval
 from . import scorer, loss_func, init
 from pytorch_lightning import Trainer, LightningModule, seed_everything, LightningDataModule
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint 
 from pytorch_lightning.loggers import TensorBoardLogger
 # configure logging at the root level of lightning
-class Recommender(LightningModule):
+class Recommender(LightningModule, abc.ABC):
 
     def __init__(self, config):
         super(Recommender, self).__init__()
@@ -48,7 +48,8 @@ class Recommender(LightningModule):
             early_stopping = EarlyStopping(self.val_metric, verbose=True, patience=10, mode=self.config['early_stop_mode'])
             ckp_callback = ModelCheckpoint(monitor=self.val_metric, save_top_k=1, mode=self.config['early_stop_mode'], save_last=True)
             return [ckp_callback, early_stopping]
-
+    
+    @abc.abstractmethod
     def get_dataset_class(self):
         pass
 
@@ -68,16 +69,25 @@ class Recommender(LightningModule):
         parameter = {k: v for k, v in parameter.items() if v is not None}
         return dataset.build(self.config['split_ratio'], **parameter)
 
+    @abc.abstractmethod
     def init_model(self, train_data):
-        pass
+        self.frating = train_data.frating
+        if self.fields is not None:
+            assert self.frating in self.fields
+            train_data.drop_feat(self.fields)
+        else:
+            self.fields = set(f for f in train_data.field2type if 'time' not in f)
+            
+        self.user_fields = train_data.user_feat.fields.intersection(self.fields)
+        self.item_fields = train_data.item_feat.fields.intersection(self.fields)        
 
     def init_parameter(self):
         self.apply(init.xavier_normal_initialization)
 
 
     def training_epoch_end(self, outputs):
-        loss = torch.hstack([e['loss'] for e in outputs]).sum()
-        self.log('train_loss', loss, on_step=False, on_epoch=True)
+        loss_metric = {'train_'+ k: torch.hstack([e[k] for e in outputs]).sum() for k in outputs[0]}
+        self.log_dict(loss_metric, on_step=False, on_epoch=True)
         if self.val_check and self.run_mode == 'tune':
             metric = self.trainer.logged_metrics[self.val_metric]
             nni.report_intermediate_result(metric)
@@ -86,7 +96,7 @@ class Recommender(LightningModule):
         else:
             print_logger.info('\n'+color_dict(self.trainer.logged_metrics, self.run_mode=='tune'))
             
-        
+    @abc.abstractmethod  
     def config_loss(self):
         pass
     
@@ -152,14 +162,6 @@ class Recommender(LightningModule):
         print_logger.info('save_dir:' + save_dir)
         refresh_rate = 0 if run_mode in ['light', 'tune'] else 1
         logger = TensorBoardLogger(save_dir=save_dir, name="tensorboard")
-        self.frating = train_data.frating
-        if self.fields is not None:
-            assert self.frating in self.fields
-            train_data.drop_feat(self.fields)
-        self.user_fields = train_data.user_feat.fields if self.fields is None \
-            else train_data.user_feat.fields.intersection(self.fields)
-        self.item_fields = train_data.item_feat.fields if self.fields is None \
-            else train_data.item_feat.fields.intersection(self.fields)        
         iscombine = self.set_train_loaders(train_data)
         self.init_model(train_data)
         self.init_parameter()
@@ -231,51 +233,53 @@ class TowerFreeRecommender(Recommender):
         self.log_dict(result, on_step=False, on_epoch=True)
 
 
-class ItemIDTowerRecommender(Recommender):
+class ItemTowerRecommender(Recommender):
     def __init__(self, config):
-        super(ItemIDTowerRecommender, self).__init__(config)
+        super(ItemTowerRecommender, self).__init__(config)
         self.neg_count = config['negative_count']
         self.score_func = self.config_scorer()
         self.use_index = False #config['ann'] is not None
+
     @staticmethod
     def add_model_specific_args(parent_parser):
-        parent_parser = super(ItemIDTowerRecommender, ItemIDTowerRecommender).add_model_specific_args(parent_parser)
-        parser = parent_parser.add_argument_group("ItemIDTowerRecommender")
+        parent_parser = super(ItemTowerRecommender, ItemTowerRecommender).add_model_specific_args(parent_parser)
+        parser = parent_parser.add_argument_group("ItemTowerRecommender")
         parser.add_argument('--sampler', type=str, default='uniform', help='sampler for some loss function')
         parser.add_argument('--negative_count', type=int, default=1, help='negative count for samplers')
         return parent_parser
     
-    def config_loss(self):
-        return loss_func.BPRLoss()
-    
+    @abc.abstractmethod
     def config_scorer(self):
-        return scorer.InnerProductScorer()
+        pass
     
+    @abc.abstractmethod
     def init_model(self, train_data): ## need to overwrite
+        super().init_model(train_data)
         self.fiid = train_data.fiid
         assert self.fiid in self.fields
         self.item_encoder = self.build_item_encoder(train_data)
+        if len(self.item_fields) > 1:
+            self.item_feat = train_data.item_feat
         if self.neg_count is not None:
             self.sampler = self.build_sampler(train_data)
-            self.sampler.update(self.get_item_vector().detach().clone())
         
     def training_step(self, batch, batch_idx):
         y_h = self.forward(batch, isinstance(self.loss_fn, loss_func.FullScoreLoss))
         loss = self.loss_fn(batch[self.frating], *y_h if isinstance(y_h, tuple) else y_h)
         return loss    
 
-    def on_train_epoch_end(self, unused: Optional[Any] = None):
-        if self.neg_count is not None:
+    def on_train_epoch_start(self):
+        if self.neg_count is not None and isinstance(self.sampler, torch.nn.Module):
             self.sampler.update(self.get_item_vector().detach().clone())
-    
-
+        
+    @abc.abstractmethod
     def construct_query(self, batch_data): ## need to overwrite
         pass
 
     def forward(self, batch_data, full_score):
-        pos_items = self.item_encoder(self.get_item_feat(batch_data))
+        pos_items = self.get_item_feat(batch_data)
         query = self.construct_query(batch_data)
-        pos_score = self.score_func(query, pos_items)
+        pos_score = self.score_func(query, self.item_encoder(pos_items))
         if batch_data[self.fiid].dim() > 1:
             pos_score[batch_data[self.fiid] == 0] = -float('inf')
         if self.neg_count is not None:
@@ -290,9 +294,15 @@ class ItemIDTowerRecommender(Recommender):
     
     def get_item_feat(self, data):
         if isinstance(data, dict): ## batch_data
-            return data[self.fiid]
+            if len(self.item_fields) == 1:
+                return data[self.fiid]
+            else:
+                return dict((field, value) for field, value in data.items() if field in self.item_fields)
         else: ## neg_item_idx
-            return data 
+            if len(self.item_fields) == 1:
+                return data
+            else:
+                return self.item_feat[data]
 
     def build_item_encoder(self, train_data):
         return torch.nn.Embedding(train_data.num_items, self.embed_dim, padding_idx=0)
@@ -315,7 +325,12 @@ class ItemIDTowerRecommender(Recommender):
         return output
     
     def get_item_vector(self):
-        return self.item_encoder.weight[1:]
+        if len(self.item_fields) == 1:
+            return self.item_encoder.weight[1:]
+        else:
+            output = [self.item_encoder(batch) for batch in self.item_feat.loader(batch_size=1024)]
+            output = torch.cat(output, dim=0)
+            return output[1:]
     
     def build_ann_index(self):
         # faiss.METRIC_INNER_PRODUCT
@@ -426,35 +441,12 @@ class ItemIDTowerRecommender(Recommender):
         else:
             return score, topk_items
 
-class ItemTowerRecommender(ItemIDTowerRecommender):   
-
-    def construct_query(self, batch_data): ## need to overwrite
-        pass
-
-    def get_item_feat(self, data):
-        if isinstance(data, dict): ## batch_data
-            return dict((field, value) for field, value in data.items() if field in self.item_fields)
-        else:    ## neg_item_idx
-            return self.item_feat[data]
-
-    def build_item_encoder(self, train_data): ## need to overwrite
-        pass
-
-    def init_model(self, train_data): ## need to overwrite
-        super().init_model(train_data)
-        self.item_feat = train_data.item_feat
-    
-    def get_item_vector(self):
-        output = [self.item_encoder(batch) for batch in self.item_feat.loader(batch_size=1024)]
-        output = torch.cat(output, dim=0)
-        return output[1:]
-
-class UserItemIDTowerRecommender(ItemIDTowerRecommender):
+class TwoTowerRecommender(ItemTowerRecommender):
 
     @staticmethod
     def add_model_specific_args(parent_parser):
-        parent_parser = super(UserItemIDTowerRecommender, UserItemIDTowerRecommender).add_model_specific_args(parent_parser)
-        parser = parent_parser.add_argument_group("UserItemIDTowerRecommender")
+        parent_parser = super(TwoTowerRecommender, TwoTowerRecommender).add_model_specific_args(parent_parser)
+        parser = parent_parser.add_argument_group("TwoTowerRecommender")
         parser.add_argument('--split_mode', type=str, default='user_entry', help='data split mode')
         return parent_parser
 
@@ -466,6 +458,7 @@ class UserItemIDTowerRecommender(ItemIDTowerRecommender):
         super().init_model(train_data)
         self.user_encoder = self.build_user_encoder(train_data)
 
+    @abc.abstractmethod
     def build_user_encoder(self, train_data): # need to overwrite
         pass
     
@@ -478,40 +471,3 @@ class UserItemIDTowerRecommender(ItemIDTowerRecommender):
     def construct_query(self, batch_data):
         return self.user_encoder(self.get_user_feat(batch_data))
            
-
-class UserItemTowerRecommender(ItemTowerRecommender):
-
-    @staticmethod
-    def add_model_specific_args(parent_parser):
-        parent_parser = super().add_model_specific_args(parent_parser)
-        parser = parent_parser.add_argument_group("UserItemTowerRecommender")
-        parser.add_argument('--split_mode', type=str, default='user_entry', help='data split mode')
-        return parent_parser
-
-    def get_dataset_class(self):
-        return MFDataset
-
-    def init_model(self, train_data): ## need to overwrite
-        self.fuid = train_data.fuid
-        super().init_model(train_data)
-        self.user_encoder = self.build_user_encoder(train_data)
-
-    def build_user_encoder(self, train_data): #need to overwrite
-        pass
-    
-    def build_item_encoder(self, train_data): #need to overwrite
-        pass
-
-    def get_user_feat(self, batch_data):
-        if len(self.user_fields) == 1:
-            return batch_data[self.fuid]
-        else:
-            return dict((field, value) for field, value in batch_data.items() if field in self.user_fields)
-
-
-    def construct_query(self, batch_data):
-        return self.user_encoder(self.get_user_feat(batch_data))
-
-        
-
-    

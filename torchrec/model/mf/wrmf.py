@@ -1,10 +1,10 @@
 from numpy.core.fromnumeric import std
-from torchrec.model.basemodel import UserItemIDTowerRecommender
+from torchrec.model.basemodel import TwoTowerRecommender
 from torchrec.model import loss_func, scorer
 from torchrec.data.advance_dataset import ALSDataset
 from torch.nn.init import normal_, constant_
 import torch
-class WRMF(UserItemIDTowerRecommender):
+class WRMF(TwoTowerRecommender):
 
     def __init__(self, config):
         super().__init__(config)
@@ -31,7 +31,7 @@ class WRMF(UserItemIDTowerRecommender):
         self.item_encoder.weight.requires_grad=False
     
     def config_loss(self):
-        return loss_func.SquareLoss()
+        return None
     
     def config_scorer(self):
         return scorer.InnerProductScorer()
@@ -57,7 +57,7 @@ class WRMF(UserItemIDTowerRecommender):
             item_embed = self.item_encoder(self.get_item_feat(batch)) 
             pred = self.score_func(item_embed, user_embed) # BxD BxNxD  -> BxN
             reg1 = torch.multiply(item_embed @ self.PtP, item_embed).sum(-1)
-        loss = self.loss_fn(ratings, pred) * (self.config['alpha'] + 1)
+        loss = torch.sum((ratings - pred) **2, dim=-1) * (self.config['alpha'] + 1)
         loss -= (pred**2).sum(-1)
         loss += reg1
         

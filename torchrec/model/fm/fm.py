@@ -4,6 +4,7 @@ from torchrec.model.fm import layers
 class FM(basemodel.TowerFreeRecommender):
     
     def init_model(self, train_data):
+        super().init_model(train_data)
         self.embeddings = torch.nn.ModuleDict()
         for f, t in train_data.field2type.items():
             if f != self.frating and 'time' not in f:

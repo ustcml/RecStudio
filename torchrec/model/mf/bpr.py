@@ -1,7 +1,7 @@
 from torchrec.model import basemodel, loss_func, scorer
 from torchrec.ann import sampler
 import torch
-class BPR(basemodel.UserItemIDTowerRecommender):
+class BPR(basemodel.TwoTowerRecommender):
 
     def build_user_encoder(self, train_data):
         return torch.nn.Embedding(train_data.num_users, self.embed_dim, padding_idx=0)
