@@ -16,7 +16,7 @@ class CosineScorer(InnerProductScorer):
     def forward(self, query, items):
         output = super().forward(query, items)
         output /= torch.norm(items, dim=-1)
-        output /= torch.norm(query, dim=-1, keepdim=query.dim()!=items.dim())
+        output /= torch.norm(query, dim=-1, keepdim=(query.dim()!=items.dim() or query.size(0)!=items.size(0)))
         return output
 
 
@@ -24,7 +24,7 @@ class EuclideanScorer(InnerProductScorer):
     def forward(self, query, items):
         output = -2 * super().forward(query, items)
         output += torch.sum(torch.square(items), dim=-1)
-        output += torch.sum(torch.square(query), dim=-1, keepdim=query.dim()!=items.dim())
+        output += torch.sum(torch.square(query), dim=-1, keepdim=(query.dim()!=items.dim() or query.size(0)!=items.size(0)))
         return -output
         
 

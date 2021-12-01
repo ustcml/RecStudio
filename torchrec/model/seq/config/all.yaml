@@ -1,3 +1,5 @@
 test_repetitive: True # user # entry
 train_repetitive: True
 eval_batch_size: 128
+
+use_fields: ['user_id', 'item_id', 'rating']
