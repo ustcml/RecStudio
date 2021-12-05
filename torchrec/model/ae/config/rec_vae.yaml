@@ -1,0 +1,22 @@
+shuffle: True
+eval_batch_size: 200
+use_fields: ['user_id', 'item_id', 'rating']
+hidden_dim: 200
+latent_dim: 64
+negative_count: ~
+dropout: 0.5
+gamma: 0.00005
+alternating: True
+enc_epoch: 3
+dec_epoch: 1
+
+
+# for training all models
+learning_rate: 0.01
+weight_decay: 0.0001
+learner: adam
+scheduler: ~
+epochs: 200
+batch_size: 2048
+gpu: 1
+
