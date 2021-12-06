@@ -7,7 +7,7 @@ negative_count: ~
 dropout: 0.5
 gamma: 0.00005
 alternating: True
-enc_epoch: 3
+enc_epoch: 3 # These two parameters are set for alternatively training
 dec_epoch: 1
 
 

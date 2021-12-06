@@ -1,4 +1,3 @@
-from torch.nn.modules.loss import KLDivLoss
 from torchrec.model import basemodel, loss_func, scorer
 from torchrec.ann import sampler
 import torch
@@ -73,8 +72,6 @@ class Multi_VAE(basemodel.ItemTowerRecommender):
     def config_scorer(self):
         return scorer.InnerProductScorer()
 
-
-
     def construct_query(self, batch_data):
         assert len(self.user_fields) == 1
         # batch_data : B * D
@@ -134,7 +131,3 @@ class Multi_VAE(basemodel.ItemTowerRecommender):
             return eps.mul(std).add_(mu)
         else:
             return mu
-
-
-    
-

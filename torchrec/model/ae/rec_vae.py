@@ -1,4 +1,3 @@
-from torch.nn.modules.loss import KLDivLoss
 from torchrec.model import basemodel, loss_func, scorer
 from torchrec.ann import sampler
 import torch
@@ -104,6 +103,8 @@ class Rec_VAE(basemodel.ItemTowerRecommender):
         if self.alternating:
             self.enc_n_epoch = config['enc_epoch']
             self.dec_n_epoch = config['dec_epoch']
+            n_epochs = [config['enc_epoch'], config['dec_epoch'] ]
+            self.iter_idx = np.concatenate([np.repeat(i, c) for i, c in enumerate(n_epochs)])
 
     def get_dataset_class(self):
         return dataset.AEDataset
@@ -151,7 +152,8 @@ class Rec_VAE(basemodel.ItemTowerRecommender):
         else:
             return mu
     
-    def training_step(self, batch, batch_idx):
+    def training_step(self, batch, batch_idx, optimizer_idx):
+        # optimizer_idx is required for multi optimizers
         loss = super().training_step(batch, batch_idx)
         return loss + self.kld_loss
 
@@ -164,10 +166,20 @@ class Rec_VAE(basemodel.ItemTowerRecommender):
             if self.current_epoch % (self.enc_n_epoch + self.dec_n_epoch) == (self.enc_n_epoch - 1):
                 self.update_prior()
 
-    # Source code update the encoder and decoder alternately, control the two different optimizers    
-    # def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_idx, optimizer_closure, on_tpu, using_native_amp, using_lbfgs):
-    #     # return super().optimizer_step(epoch, batch_idx, optimizer, optimizer_idx=optimizer_idx, optimizer_closure=optimizer_closure, on_tpu=on_tpu, using_native_amp=using_native_amp, using_lbfgs=using_lbfgs)
-    #     raise NotImplementedError
-    
-    # def configure_optimizers(self):
-    #     return 
+    # Source code update the encoder and decoder alternately, control the two different optimizers
+    def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_idx, optimizer_closure, on_tpu, using_native_amp, using_lbfgs):
+        if self.alternating:
+            if optimizer_idx == self.iter_idx[epoch % (self.enc_n_epoch + self.dec_n_epoch)]:
+                optimizer.step(closure=optimizer_closure)
+            else:
+                optimizer_closure()
+        else:
+            if optimizer_idx in [0,1]:
+                optimizer.step(closure=optimizer_closure)
+            
+    def configure_optimizers(self):
+        opt_enc = self.get_optimizer(self.encoder.parameters())
+        # Q: module CompositePrior seems to have no update of parameters
+        opt_dec = self.get_optimizer(self.item_encoder.parameters())
+        return [opt_enc, opt_dec]
+        
