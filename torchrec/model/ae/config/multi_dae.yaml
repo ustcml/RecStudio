@@ -1,0 +1,19 @@
+shuffle: True
+eval_batch_size: 200
+activate_function: ReLU
+use_fields: ['user_id', 'item_id', 'rating']
+# embed_dim: 64
+encoder_dims: [200,64]
+decoder_dims: [64,200]
+# [100,32,100] or [100,64,32,64,100]
+negative_count: ~
+dropout: 0.5
+
+# for training all models
+learning_rate: 0.01
+weight_decay: 0.0001
+learner: adam
+scheduler: ~
+epochs: 200
+batch_size: 2048
+gpu: 1
