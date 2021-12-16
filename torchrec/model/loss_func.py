@@ -35,7 +35,7 @@ class BPRLoss(PairwiseLoss):
         self.dns = dns
     def forward(self, label, pos_score, log_pos_prob, neg_score, log_neg_prob):
         if not self.dns:
-            loss = F.logsigmoid(pos_score.unsqueeze(-1) - neg_score)
+            loss = F.logsigmoid(pos_score.view(*pos_score.shape, 1) - neg_score)
             weight = F.softmax(torch.ones_like(neg_score), -1)
             return -torch.mean((loss * weight).sum(-1))
         else:
@@ -56,7 +56,7 @@ class SampledSoftmaxLoss(PairwiseLoss):
 
 class WeightedBPRLoss(PairwiseLoss):
     def forward(self, label, pos_score, log_pos_prob, neg_score, log_neg_prob):
-        loss = F.logsigmoid(pos_score.unsqueeze(-1) - neg_score)
+        loss = F.logsigmoid(pos_score.view(*pos_score.shape, 1) - neg_score)
         weight = F.softmax(neg_score - log_neg_prob, -1)
         return -torch.mean((loss * weight).sum(-1))
 

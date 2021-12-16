@@ -14,14 +14,14 @@ def precision(pred, target, k):
 def map(pred, target, k):
     count = (target > 0).sum(-1)
     pred = pred[:, :k]
-    output = pred.cumsum(dim=-1).float() / torch.arange(1, k+1, device=pred.device)
+    output = pred.cumsum(dim=-1).float() / torch.arange(1, k+1).type_as(pred)
     output = (output * pred).sum(dim=-1) / torch.minimum(count, k*torch.ones_like(count))
     #torch.minimum(count, pred.sum(dim=-1).float())
     return output.mean()
 
 def _dcg(pred, k):
     k = min(k, pred.size(1))
-    denom = torch.log2(torch.arange(k, device=pred.device) + 2.0).view(1,-1)
+    denom = torch.log2(torch.arange(k).type_as(pred) + 2.0).view(1,-1)
     return (pred[:, :k] / denom).sum(dim=-1)
 
 def ndcg(pred, target, k):

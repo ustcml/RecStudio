@@ -43,8 +43,9 @@ class Recommender(LightningModule, abc.ABC):
         if self.val_check:
             eval_metric = self.config['val_metrics']
             self.val_metric = next(iter(eval_metric)) if isinstance(eval_metric, list)  else eval_metric
+            cutoffs = self.config['cutoff'] if isinstance(self.config['cutoff'], list) else [self.config['cutoff']]
             if len(eval.get_rank_metrics(self.val_metric)) > 0:
-                self.val_metric += '@' + str(self.config['cutoff'])
+                self.val_metric += '@' + str(cutoffs[0])
             early_stopping = EarlyStopping(self.val_metric, verbose=True, patience=10, mode=self.config['early_stop_mode'])
             ckp_callback = ModelCheckpoint(monitor=self.val_metric, save_top_k=1, mode=self.config['early_stop_mode'], save_last=True)
             return [ckp_callback, early_stopping]
@@ -86,7 +87,7 @@ class Recommender(LightningModule, abc.ABC):
 
 
     def training_epoch_end(self, outputs):
-        loss_metric = {'train_'+ k: torch.hstack([e[k] for e in outputs]).sum() for k in outputs[0]}
+        loss_metric = {'train_'+ k: torch.hstack([e[k] for e in outputs]).mean() for k in outputs[0]}
         self.log_dict(loss_metric, on_step=False, on_epoch=True)
         if self.val_check and self.run_mode == 'tune':
             metric = self.trainer.logged_metrics[self.val_metric]
@@ -95,6 +96,30 @@ class Recommender(LightningModule, abc.ABC):
             print_logger.info(color_dict(self.trainer.logged_metrics, self.run_mode=='tune'))
         else:
             print_logger.info('\n'+color_dict(self.trainer.logged_metrics, self.run_mode=='tune'))
+    
+    def validation_epoch_end(self, outputs):
+        val_metric = self.config['val_metrics'] if isinstance(self.config['val_metrics'], list) else [self.config['val_metrics']]
+        cutoffs = self.config['cutoff'] if isinstance(self.config['cutoff'], list) else [self.config['cutoff']]
+        val_metric = [f'{m}@{cutoff}' for cutoff in cutoffs[:1] for m in val_metric]
+        out = self._test_epoch_end(outputs)
+        out = dict(zip(val_metric, out))
+        self.log_dict(out, on_step=False, on_epoch=True)
+
+    def test_epoch_end(self, outputs):
+        test_metric = self.config['test_metrics'] if isinstance(self.config['test_metrics'], list) else [self.config['test_metrics']]
+        cutoffs = self.config['cutoff'] if isinstance(self.config['cutoff'], list) else [self.config['cutoff']]
+        test_metric = [f'{m}@{cutoff}' for cutoff in cutoffs for m in test_metric]
+        out = self._test_epoch_end(outputs)
+        out = dict(zip(test_metric, out))
+        self.log_dict(out, on_step=False, on_epoch=True)
+
+    def _test_epoch_end(self, outputs):
+        metric, bs = zip(*outputs)
+        metric = torch.tensor(metric)
+        bs = torch.tensor(bs)
+        out = (metric * bs.view(-1, 1)).sum(0) / bs.sum()
+        return out
+        
             
     @abc.abstractmethod  
     def config_loss(self):
@@ -177,7 +202,8 @@ class Recommender(LightningModule, abc.ABC):
                             max_epochs=self.config['epochs'], 
                             num_sanity_val_steps=0,
                             progress_bar_refresh_rate=refresh_rate,
-                            logger=logger)
+                            logger=logger,
+                            accelerator="dp")
         trainer.fit(self, train_loader, val_loader)
 
     def evaluate(self, test_data, verbose=True):
@@ -238,7 +264,11 @@ class ItemTowerRecommender(Recommender):
         super(ItemTowerRecommender, self).__init__(config)
         self.neg_count = config['negative_count']
         self.score_func = self.config_scorer()
-        self.use_index = False #config['ann'] is not None
+        self.use_index = config['ann'] is not None and \
+            (not config['item_bias'] or \
+                (isinstance(self.score_func, scorer.InnerProductScorer) or \
+                 isinstance(self.score_func, scorer.EuclideanScorer))
+            )
 
     @staticmethod
     def add_model_specific_args(parent_parser):
@@ -283,7 +313,11 @@ class ItemTowerRecommender(Recommender):
         if batch_data[self.fiid].dim() > 1:
             pos_score[batch_data[self.fiid] == 0] = -float('inf')
         if self.neg_count is not None:
-            pos_prob, neg_item_idx, neg_prob = self.sampler(query, self.neg_count, pos_items)
+            if isinstance(self.sampler, ItemTowerRecommender):
+                sample_query = self.sampler.construct_query(batch_data)
+            else:
+                sample_query = query
+            pos_prob, neg_item_idx, neg_prob = self.sampler(sample_query, self.neg_count, pos_items)
             neg_items = self.item_encoder(self.get_item_feat(neg_item_idx))
             neg_score = self.score_func(query, neg_items)
             return pos_score, pos_prob, neg_score, neg_prob
@@ -305,7 +339,7 @@ class ItemTowerRecommender(Recommender):
                 return self.item_feat[data]
 
     def build_item_encoder(self, train_data):
-        return torch.nn.Embedding(train_data.num_items, self.embed_dim, padding_idx=0)
+        return Embedding(train_data.num_items, self.embed_dim, padding_idx=0, bias=self.config['item_bias'])
     
     def build_sampler(self, train_data):
         if 'sampler' in self.config and self.config['sampler'] is not None:
@@ -368,23 +402,11 @@ class ItemTowerRecommender(Recommender):
         self.prepare_testing()
     
     def prepare_testing(self):
-        self.item_vector = self.get_item_vector().detach().clone()
+        self.register_buffer('item_vector', self.get_item_vector().detach().clone())
+        #self.item_vector = self.get_item_vector().detach().clone()
         if self.use_index:
             self.ann_index = self.build_ann_index()
             
-    def validation_epoch_end(self, outputs):
-        self.test_epoch_end(outputs)
-           
-    def test_epoch_end(self, outputs):
-        rec = outputs[0]
-        for i in range(len(rec)):
-            length = 0
-            total = 0
-            for _ in outputs:
-                n, v, bs = _[i]
-                total += v * bs
-                length += bs
-            self.log(n, total/length, on_step=False, on_epoch=True)
 
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: Optional[int] = None) -> Any:
         query = self.construct_query(batch)
@@ -417,8 +439,7 @@ class ItemTowerRecommender(Recommender):
         else:
             label = batch[self.fiid].view(-1, 1) == topk_items
             pos_rating = batch[self.frating].view(-1, 1)
-        return [[f'{name}@{cutoff}', func(label, pos_rating, cutoff), bs]\
-            for cutoff in cutoffs for name, func in rank_m]
+        return [func(label, pos_rating, cutoff) for cutoff in cutoffs for name, func in rank_m], bs
     
     
     def topk(self, query, k, user_h):
@@ -469,5 +490,22 @@ class TwoTowerRecommender(ItemTowerRecommender):
             return dict((field, value) for field, value in batch_data.items() if field in self.user_fields)
 
     def construct_query(self, batch_data):
-        return self.user_encoder(self.get_user_feat(batch_data))
+        output = self.user_encoder(self.get_user_feat(batch_data))
+        if self.config['item_bias']:
+            if isinstance(self.score_func, scorer.InnerProductScorer):
+                concate_term = torch.ones(*output.shape[:-1], 1).type_as(output)
+            elif isinstance(self.score_func, scorer.EuclideanScorer):
+                concate_term = torch.zeros(*output.shape[:-1], 1).type_as(output)
+            else:
+                raise ValueError(f"bias does not support for the score function: {type(self.score_func).__name__}")
+            output = torch.cat([output, concate_term], dim=-1)
+        return output
+
+
+class Embedding(torch.nn.Embedding):
+    def __init__(self, num_embeddings: int, embedding_dim: int, padding_idx: Optional[int] = None, bias: bool = False, *args, **kwargs):
+        if bias:
+            super().__init__(num_embeddings, embedding_dim + 1, padding_idx, *args, **kwargs)
+        else:
+            super().__init__(num_embeddings, embedding_dim, padding_idx, *args, **kwargs)
            
