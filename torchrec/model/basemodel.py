@@ -1,7 +1,7 @@
 from typing import Any, Optional
 import torch.nn.functional as F
 from torchrec.utils.utils import set_color, parser_yaml, color_dict, print_logger
-from torchrec.data.dataset import AEDataset, MFDataset, SeqDataset
+from torchrec.data.dataset import AEDataset, KnowledgeBasedDataset, MFDataset, SeqDataset
 from torchrec.data.advance_dataset import ALSDataset
 from torchrec.ann import sampler
 from torch import optim
@@ -57,7 +57,7 @@ class Recommender(LightningModule, abc.ABC):
     def load_dataset(self, data_config_file):
         cls = self.get_dataset_class()
         dataset = cls(data_config_file)
-        if cls in (MFDataset, ALSDataset):
+        if cls in (MFDataset, ALSDataset, KnowledgeBasedDataset):
             parameter = {'shuffle': self.config.get('shuffle'),
                         'split_mode': self.config.get('split_mode')}
             if isinstance(self, TowerFreeRecommender):
