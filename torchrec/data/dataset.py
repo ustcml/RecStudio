@@ -685,6 +685,62 @@ class SeqDataset(MFDataset):
     def inter_feat_subset(self):
         return self.data_index[:, -1]
         
+class KnowledgeBasedDataset(MFDataset):
+    def __init__(self, config_path):
+        super().__init__(config_path)
+        self.kg_state = 0
+        self.kg_index = None
+        assert self.config['network_feat_name'] != None
+        for i, name in enumerate(self.config['network_feat_name']):
+            if len(name) == 2:
+                self.kg_index = i
+                break
+        assert self.kg_index != None
+        self.fhid = self.config['network_feat_field'][self.kg_index][0][0].split(':')[0]
+        self.ftid = self.config['network_feat_field'][self.kg_index][0][1].split(':')[0]
+        self.frid = self.config['network_feat_field'][self.kg_index][0][2].split(':')[0]
+        
+
+    def __getitem__(self, index):
+        if self.kg_state == 0:
+            return super().__getitem__(index)
+        data = self.network_feat[self.kg_index][index]
+        return data
+
+    def __len__(self):
+        if self.kg_state == 0:
+            return super().__len__()
+        else:
+            return self.network_feat[self.kg_index].__len__()
+
+    def train_loader(self, batch_size, shuffle=True, num_workers=1, drop_last=False, load_combine=False):
+        if not hasattr(self, 'loaders'):
+            kgDataset = copy.copy(self)
+            kgDataset.kg_state = 1
+            recDataloader = self.loader(batch_size, shuffle, num_workers, drop_last)
+            kgDataloader = kgDataset.loader(batch_size, True, num_workers, drop_last)
+            return KnowledgeBasedLoader(recDataloader, kgDataloader)
+        else:
+            # TODO 可以RS数据、KG数据交替，但是不能RS数据（KG数据）与RSKG数据交替。
+            loaders = [l(batch_size, shuffle, num_workers, drop_last) for l in self.loaders]
+            if load_combine:
+                return loaders
+            else:
+                return ChainedDataLoader(loaders, getattr(self, 'nepoch', None))
+
+    def loader(self, batch_size, shuffle=True, num_workers=1, drop_last=False):
+        if self.kg_state == 1 and shuffle == False:
+            shuffle = True
+        return super().loader(batch_size, shuffle=shuffle, num_workers=num_workers, drop_last=drop_last)
+    
+    @property
+    def num_entities(self):
+        return self.num_values(self.fhid)
+
+    @property
+    def num_relations(self):
+        return self.num_values(self.frid)
+
 
                
 class TensorFrame(Dataset):
@@ -815,3 +871,36 @@ class ChainedDataLoader:
         self.epoch += 1
         return iter(self.loaders[self.iter_idx[self.epoch % len(self.iter_idx)]])
 
+
+class KnowledgeBasedLoader:
+    def __init__(self, recDataloader, kgDataloader):
+        self.state = 0
+        self.recDataloader = recDataloader
+        self.kgDataloader = kgDataloader
+        # self.recIterator = iter(self.recDataloader)
+        # self.kgIterator = iter(self.kgDataloader)
+
+    def __iter__(self):
+        if self.state == 0:
+            self.kgIterator = iter(self.kgDataloader)
+            self.recIterator = iter(self.recDataloader)
+        elif self.state == 1:
+            self.recIterator = iter(self.recDataloader)
+        elif self.state == 2:
+            self.kgIterator = iter(self.kgDataloader)
+        return self
+    
+    def __next__(self):
+        batch_data = {}
+        if self.state == 0:
+            batch_data.update(next(self.recIterator))
+            try:
+                batch_data.update(next(self.kgIterator))
+            except StopIteration:
+                self.kgIterator = iter(self.kgDataloader)
+                batch_data.update(next(self.kgIterator))
+        elif self.state == 1:
+            batch_data.update(next(self.recIterator))
+        elif self.state == 2:
+            batch_data.update(next(self.kgIterator))
+        return batch_data
