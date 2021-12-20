@@ -3,3 +3,4 @@ use_fields: ['user_id', 'item_id', 'rating']
 alpha: 1
 lambda: 0.5
 batch_size: 100
+gpu: ~

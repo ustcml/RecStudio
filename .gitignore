@@ -137,3 +137,5 @@ dmypy.json
 cython_debug/
 
 tensorboard/
+.vscode/
+nni-experiments/

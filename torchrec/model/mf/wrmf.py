@@ -19,7 +19,7 @@ class WRMF(TwoTowerRecommender):
         return ALSDataset
     
     def build_user_encoder(self, train_data):
-        return torch.nn.Embedding(train_data.num_users, self.embed_dim, padding_idx=0)
+        return torch.nn.Embedding(train_data.num_users, self.item_encoder.embedding_dim, padding_idx=0)
     
     def on_train_epoch_start(self) -> None:
         self.PtP = self.user_encoder.weight.T @ self.user_encoder.weight
@@ -29,6 +29,7 @@ class WRMF(TwoTowerRecommender):
         super().init_parameter()
         self.user_encoder.weight.requires_grad=False
         self.item_encoder.weight.requires_grad=False
+        self.register_buffer('eye', self.config['lambda'] * torch.eye(self.item_encoder.embedding_dim))
     
     def config_loss(self):
         return None
@@ -36,21 +37,25 @@ class WRMF(TwoTowerRecommender):
     def config_scorer(self):
         return scorer.InnerProductScorer()
     
+    def construct_query(self, batch_data):
+        return self.user_encoder(self.get_user_feat(batch_data))
+    
     def training_step(self, batch, batch_idx):
-        eye = self.config['lambda'] * torch.eye(self.embed_dim, device=self.device)
         ratings = (batch[self.frating]>0).float()
         if batch[self.fuid].dim() == 1: ## user model, updating user embedding
             item_embed = self.item_encoder(self.get_item_feat(batch)) # B x N x D
-            QuQ = torch.bmm(item_embed.transpose(1, 2), item_embed) * self.config['alpha'] + (self.QtQ + eye) # BxDxD
+            QuQ = torch.bmm(item_embed.transpose(1, 2), item_embed) * self.config['alpha'] + (self.QtQ + self.eye) # BxDxD
             r = torch.bmm(item_embed.transpose(1, 2), ratings.unsqueeze(-1)).squeeze(-1) # BxD
             output = torch.linalg.solve(QuQ, r * (self.config['alpha'] + 1))
+            if self.config['item_bias']:
+                output[:, -1] = 1.0
             self.user_encoder.weight[batch[self.fuid]] = output # B x D
             user_embed = self.user_encoder(self.get_user_feat(batch)) # BxD
             pred = self.score_func(user_embed, item_embed) # BxD   BxNxD -> BxN
             reg1 = torch.multiply(user_embed @ self.QtQ,  user_embed).sum(-1)
         else:
             user_embed = self.user_encoder(self.get_user_feat(batch))
-            PiP = torch.bmm(user_embed.transpose(1, 2), user_embed) * self.config['alpha'] + (self.PtP + eye)
+            PiP = torch.bmm(user_embed.transpose(1, 2), user_embed) * self.config['alpha'] + (self.PtP + self.eye)
             r = torch.bmm(user_embed.transpose(1, 2), ratings.unsqueeze(-1)).squeeze(-1)
             output = torch.linalg.solve(PiP, r * (self.config['alpha'] + 1))
             self.item_encoder.weight[batch[self.fiid]] = output
