@@ -721,7 +721,8 @@ class KnowledgeBasedDataset(MFDataset):
             kgDataloader = kgDataset.loader(batch_size, True, num_workers, drop_last)
             return KnowledgeBasedLoader(recDataloader, kgDataloader)
         else:
-            # TODO 可以RS数据、KG数据交替，但是不能RS数据（KG数据）与RSKG数据交替。
+            # it support rec data and kg data alternate training
+            # TODO add (rec and kg) dataloder to alternate training if necessary
             loaders = [l(batch_size, shuffle, num_workers, drop_last) for l in self.loaders]
             if load_combine:
                 return loaders
