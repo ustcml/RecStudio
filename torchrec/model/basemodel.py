@@ -206,7 +206,7 @@ class TowerFreeRecommender(Recommender):
 
     def training_step(self, batch, batch_idx):
         y_h = self.forward(batch)
-        loss = self.loss_fn((batch[self.frating]>3).float(), *y_h)
+        loss = self.loss_fn(y_h, (batch[self.frating]>3).float())
         return loss
 
     def validation_step(self, batch, batch_idx):
