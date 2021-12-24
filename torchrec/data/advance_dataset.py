@@ -29,12 +29,6 @@ class ALSDataset(MFDataset):
         output.item_feat = self.user_feat
         return output
     
-    def loader(self, batch_size, shuffle=True, num_workers=1, drop_last=False):
-        sampler = SortedDataSampler(self, batch_size, drop_last)
-        output = DataLoader(self, sampler=sampler, batch_size=None, shuffle=False, num_workers=num_workers)
-        return output
-    
-    
     def save(self, file_name=None):
         import scipy.sparse as ssp
         import scipy.io as sio

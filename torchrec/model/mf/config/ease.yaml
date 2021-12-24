@@ -1,0 +1,3 @@
+lambda: 250
+epochs: 1
+gpu: ~

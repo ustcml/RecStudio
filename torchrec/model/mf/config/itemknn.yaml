@@ -1,0 +1,4 @@
+knn: 100
+epochs: 1
+gpu: ~
+similarity: cosine #| jaccard
