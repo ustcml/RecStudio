@@ -1,0 +1,8 @@
+embed_dim: 64
+use_inner_product: False
+negative_count: 1
+kge_interval: 3
+weight_decay: 0.000001
+dropout: 0.0
+L: 2
+H: 1

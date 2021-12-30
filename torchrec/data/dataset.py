@@ -735,6 +735,10 @@ class KnowledgeBasedDataset(MFDataset):
         return super().loader(batch_size, shuffle=shuffle, num_workers=num_workers, drop_last=drop_last)
     
     @property
+    def kg_feat(self):
+        return self.network_feat[self.kg_index]
+
+    @property
     def num_entities(self):
         return self.num_values(self.fhid)
 
