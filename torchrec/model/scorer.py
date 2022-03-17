@@ -44,3 +44,15 @@ class MLPScorer(InnerProductScorer):
             items = items.expand(query.size(0), -1, -1)
             input = torch.cat((query, items), dim=-1)
         return self.trans(input).squeeze(-1)
+
+class NormScorer(InnerProductScorer):
+    def __init__(self, p=2):
+        super().__init__()
+        self.p = p
+
+    def forward(self, query, items):
+        # ([batch_size, dim], [batch_size, neg, dim]) or ([num_users, dim], [num_items, dim])
+        if query.dim() < items.dim() or query.size(0) != items.size(0):
+            query.unsqueeze_(1)
+        output = torch.norm(query - items, p=self.p, dim=-1)
+        return -output

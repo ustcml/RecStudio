@@ -690,7 +690,7 @@ class SeqDataset(MFDataset):
 class KnowledgeBasedDataset(MFDataset):
     def __init__(self, config_path):
         super().__init__(config_path)
-        self.kg_state = 0
+        self.kg_state = False
         self.kg_index = None
         assert self.config['network_feat_name'] != None
         for i, name in enumerate(self.config['network_feat_name']):
@@ -701,10 +701,11 @@ class KnowledgeBasedDataset(MFDataset):
         self.fhid = self.config['network_feat_field'][self.kg_index][0][0].split(':')[0]
         self.ftid = self.config['network_feat_field'][self.kg_index][0][1].split(':')[0]
         self.frid = self.config['network_feat_field'][self.kg_index][0][2].split(':')[0]
+        self.add_inter_relation()
         
 
     def __getitem__(self, index):
-        if self.kg_state == 0:
+        if self.kg_state == False:
             return super().__getitem__(index)
         data = self.network_feat[self.kg_index][index]
         return data
@@ -717,15 +718,11 @@ class KnowledgeBasedDataset(MFDataset):
 
     def train_loader(self, batch_size, shuffle=True, num_workers=1, drop_last=False, load_combine=False):
         if not hasattr(self, 'loaders'):
-            kgDataset = copy.copy(self)
-            kgDataset.kg_state = 1
-            recDataloader = self.loader(batch_size, shuffle, num_workers, drop_last)
-            kgDataloader = kgDataset.loader(batch_size, True, num_workers, drop_last)
-            return KnowledgeBasedLoader(recDataloader, kgDataloader)
+            return self.recAndKgLoader(batch_size, shuffle, num_workers, drop_last)
         else:
             # it support rec data and kg data alternate training
             # TODO add (rec and kg) dataloder to alternate training if necessary
-            loaders = [l(batch_size, shuffle, num_workers, drop_last) for l in self.loaders]
+            loaders = [l(batch_size, shuffle, num_workers, drop_last) if callable(l) else l for l in self.loaders]
             if load_combine:
                 return loaders
             else:
@@ -736,6 +733,62 @@ class KnowledgeBasedDataset(MFDataset):
             shuffle = True
         return super().loader(batch_size, shuffle=shuffle, num_workers=num_workers, drop_last=drop_last)
     
+    def recAndKgLoader(self, batch_size, shuffle=True, num_workers=1, drop_last=False):
+        kgDataset = copy.copy(self)
+        kgDataset.kg_state = 1
+        recDataloader = self.loader(batch_size, shuffle, num_workers, drop_last)
+        kgDataloader = kgDataset.loader(batch_size, True, num_workers, drop_last)
+        return KnowledgeBasedLoader(recDataloader, kgDataloader)
+
+    def add_inter_relation(self):
+       self.field2tokens[self.frid] = np.append(self.field2tokens[self.frid], '[inter-relation]')
+       self.field2token2idx[self.frid]['[inter-relation]'] = len(self.field2tokens[self.frid]) - 1
+
+    def get_ckg_graph(self, form='coo', use_relation=True, bidirectional=False):
+        num_nodes = self.num_users + self.num_entities
+        users = self.inter_feat.get_col(self.fuid)[self.inter_feat_subset]
+        items = self.inter_feat.get_col(self.fiid)[self.inter_feat_subset] + self.num_users
+        heads = self.kg_feat.get_col(self.fhid) + self.num_users
+        tails = self.kg_feat.get_col(self.ftid) + self.num_users
+        relations = self.kg_feat.get_col(self.frid)
+        if bidirectional == True: 
+            _heads = torch.cat([heads, tails])
+            _tails = torch.cat([tails, heads])
+            heads = _heads 
+            tails = _tails
+        
+
+        rows = torch.cat([users, items, heads])
+        cols = torch.cat([items, users, tails])
+        if(use_relation == False):
+            vals = torch.zeros_like(rows)
+        else:
+            inter_relation_id = self.field2token2idx[self.frid]['[inter-relation]']
+            vals = torch.full_like(rows, inter_relation_id)
+            vals[2 * len(users) : ] = relations
+
+        if form in ['coo', 'csr']:
+            rows = rows.numpy()
+            cols = cols.numpy()
+            vals = vals.numpy()
+            if form == 'coo':
+                from scipy.sparse import coo_matrix
+                return coo_matrix((vals, (rows, cols)), (num_nodes, num_nodes))
+            elif form == 'csr':
+                from scipy.sparse import csr_matrix
+                return csr_matrix((vals, (rows, cols)), (num_nodes, num_nodes))
+        elif form == 'dgl':
+            import dgl
+            graph = dgl.graph((rows, cols))
+            graph.edata[self.frid] = vals
+            return graph
+        elif form == 'pyg':
+            from torch_geometric.data import Data
+            edge_attr = vals if use_relation else None
+            graph = Data(edge_index=torch.stack(rows, cols), edge_attr=edge_attr)
+        else:
+            raise ValueError(f'ckg graph doesn\'t "[{form}]" form')
+
     @property
     def kg_feat(self):
         return self.network_feat[self.kg_index]

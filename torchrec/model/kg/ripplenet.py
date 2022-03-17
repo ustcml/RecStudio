@@ -1,7 +1,3 @@
-from os import replace
-import os
-from re import I
-from torchrec.model.kg.layers import MLPModule
 from torchrec.model import basemodel, loss_func, scorer
 from torchrec.data import dataset
 from torchrec.ann import sampler 
@@ -31,7 +27,9 @@ class RippleNet(basemodel.ItemTowerRecommender):
         self.frid = train_data.frid
         self.rel_emb = nn.Embedding(train_data.num_relations, self.embed_dim * self.embed_dim, padding_idx=0)
         # get ripple_set_h, ripple_set_t and ripple_set_r
-        self.user_history_dict = self._construct_user_hist(train_data.inter_feat)
+        # remember to get the sub inter_feat that only includes train data
+        # maybe need to provide sub inter_feat directly in order to prevent users from using inter_feat incorrectly.  
+        self.user_history_dict = self._construct_user_hist(train_data.inter_feat[train_data.inter_feat_subset]) 
         self.kg = self._construct_kg(train_data.kg_feat)
         self.ripple_set_h = torch.zeros(self.n_hop, train_data.num_users, self.n_memory, dtype=torch.long)
         self.ripple_set_t = torch.zeros(self.n_hop, train_data.num_users, self.n_memory, dtype=torch.long)
@@ -55,10 +53,9 @@ class RippleNet(basemodel.ItemTowerRecommender):
 
     def _construct_user_hist(self, inter_feat):
         user_history_dict = collections.defaultdict(list)
-        for i in range(len(inter_feat)):
-            row = inter_feat[i]
-            user = row[self.fuid].item()
-            item = row[self.fiid].item()
+        for i in range(len(inter_feat[self.fuid])):
+            user = inter_feat[self.fuid][i].item()
+            item = inter_feat[self.fiid][i].item()
             user_history_dict[user].append(item)
         return user_history_dict
 
@@ -68,7 +65,7 @@ class RippleNet(basemodel.ItemTowerRecommender):
             kg_feat(TensorFrame): Knowledge graph feature.
         Returns:
             kg(defaultidict): The key is head_id, and the value is a list. 
-            The list contains all triplets whose head is head_id.
+            The list contains all triplets whose heads are head_id.
         """
         # head -> [(tail, relation), (tail, relation), ..., (tail, relation)]
         kg = collections.defaultdict(list)
@@ -107,7 +104,6 @@ class RippleNet(basemodel.ItemTowerRecommender):
                         memories_t.append(tail_and_relation[0])
                 
                 # if the current ripple set of the given user is empty, we simply copy the ripple set of the last hop here
-                # TODO this won't happen for h = 0, because only the items that appear in the KG have been selected
                 if len(memories_h) == 0:
                     # ripple_set[user].append(ripple_set[user][-1])
                     self.ripple_set_h[h][user] = self.ripple_set_h[h - 1][user]
@@ -132,7 +128,7 @@ class RippleNet(basemodel.ItemTowerRecommender):
     def _key_addressing(self):
         o_list = []
         for hop in range(self.n_hop):
-            # [batch_size, n_memories, dim, 1]
+            # [batch_size, n_memories, dim, 1] || [batch_size, 1, n_memories, dim, 1]
             h = self.h_emb_list[hop].unsqueeze(-1)
             if self.training:
                 # [batch_size, n_memories, dim, dim]
@@ -151,7 +147,7 @@ class RippleNet(basemodel.ItemTowerRecommender):
             # [batch_size, n_memories, 1] 
             probs_expanded = probs_normalized.unsqueeze(-1)
             # [batch_size, n_memories, dim] -> [batch_size, dim]
-            o = torch.sum(self.h_emb_list[hop] * probs_expanded, dim=-2)
+            o = torch.sum(self.t_emb_list[hop] * probs_expanded, dim=-2)
             
             self.item_embeddings = self.update_item_embedding(self.item_embeddings, o)
             o_list.append(o)
@@ -187,7 +183,7 @@ class RippleNet(basemodel.ItemTowerRecommender):
                 self.memories_r.append(self.ripple_set_r[i][users].unsqueeze(-2))
                 self.memories_t.append(self.ripple_set_t[i][users].unsqueeze(-2))  
             #[num_items, dim]
-            self.item_embeddings = self.item_encoder.weight[ : self.num_items]
+            self.item_embeddings = self.item_encoder.weight[1 : self.num_items]
         else:
             for i in range(self.n_hop):
                 # [batch_size, n_memories]
@@ -269,14 +265,7 @@ class RippleNet(basemodel.ItemTowerRecommender):
             t = self.kge_t_emb_list[hop]
             # [batch_size, n_memories]
             hRt = torch.sigmoid(torch.sum(Rh * t, dim=-1))
-            kge_loss += torch.sum(hRt)
+            kge_loss += torch.mean(hRt)
         kge_loss = -self.kge_weight * kge_loss
         
         return loss + kge_loss 
-
-
-
-# TODO positive embeddings are not in self.h_emb_list
-# TODO Embloss. l2loss in paper code is different from weight_decay.
-# TODO this won't happen for h = 0, because only the items that appear in the KG have been selected
-# TODO item_update_mode 

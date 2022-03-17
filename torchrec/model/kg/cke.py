@@ -13,14 +13,6 @@ class CKE_item_encoder(torch.nn.Module):
     def forward(self, batch_data):
         return self.rec_item_emb(batch_data) + self.ent_emb(batch_data)
 
-class L2normScorer(torch.nn.Module):
-    def forward(self, query, items):
-        # [batch_size, dim], [batch_size, neg, dim] or [num_users, dim], [num_items, dim]
-        if query.dim() < items.dim() or query.size(0) != items.size(0):
-            query.unsqueeze_(1)
-        output = torch.norm(query - items, dim=-1)
-        return -output
-
 class CKE(basemodel.TwoTowerRecommender):
     def init_model(self, train_data):
         self.ent_emb = torch.nn.Embedding(train_data.num_entities, self.embed_dim, padding_idx=0)
@@ -36,7 +28,7 @@ class CKE(basemodel.TwoTowerRecommender):
         # kg sampler, loss and score 
         self.kg_sampler = sampler.UniformSampler(train_data.num_entities - 1)
         self.kg_loss_fn = loss_func.BPRLoss()
-        self.kg_score = L2normScorer()
+        self.kg_score = scorer.NormScorer(2)
 
     def get_dataset_class(self):
         return dataset.KnowledgeBasedDataset

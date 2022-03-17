@@ -4,14 +4,6 @@ from torchrec.data import dataset
 from torchrec.ann import sampler 
 import torch
 
-class L2normScorer(torch.nn.Module):
-    def forward(self, query, items):
-        # [batch_size, dim], [batch_size, neg, dim] or [num_users, dim], [num_items, dim]
-        if query.dim() < items.dim() or query.size(0) != items.size(0):
-            query.unsqueeze_(1)
-        output = torch.norm(query - items, dim=-1)
-        return -output
-
 class CFKG(basemodel.TwoTowerRecommender):
     def init_model(self, train_data):
         super().init_model(train_data)
@@ -33,7 +25,7 @@ class CFKG(basemodel.TwoTowerRecommender):
         return False
 
     def config_scorer(self):
-        return L2normScorer()
+        return scorer.NormScorer(p=2)
 
     def config_loss(self):
         return loss_func.HingeLoss(self.config['margin'])

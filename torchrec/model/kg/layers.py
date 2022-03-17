@@ -14,15 +14,7 @@ class MLPModule(nn.Module):
     
     def add_modules(self, *args):
         for block in args:
-            self.model._modules[str(len(self.model._modules))] = block
+            self.model.add_module(str(len(self.model._modules)), block)
 
     def forward(self, input):
         return self.model(input)
-
-# layers = [32, 16, 16]
-# mlp = MLPModule(layers)
-# mlp.add_modules(nn.ReLU(), nn.Sigmoid())
-# a = torch.rand(5, 2, 32)
-# print(mlp._modules)
-# print(mlp(a))
-
