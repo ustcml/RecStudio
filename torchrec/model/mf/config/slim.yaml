@@ -1,0 +1,6 @@
+knn: 100
+epochs: 1
+gpu: ~
+alpha: 1
+l1_ratio: 0.1
+positive_only: True

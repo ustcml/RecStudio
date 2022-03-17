@@ -1,3 +1,4 @@
+from torchrec.data.advance_dataset import ALSDataset
 from torchrec.data.dataset import AEDataset
 from torchrec.model import basemodel, loss_func, scorer
 import torch.nn.functional as F
@@ -20,7 +21,7 @@ class IRGAN(basemodel.Recommender):
         self.D.sampler = self.G
     
     def get_dataset_class(self):
-        return AEDataset
+        return ALSDataset
     
     def config_loss(self):
         pass

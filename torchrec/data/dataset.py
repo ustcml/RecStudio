@@ -291,12 +291,11 @@ class MFDataset(Dataset):
         #    self.item_feat.reset_index(drop=True, inplace=True)
  
     def get_graph(self, idx, value_field=None):
+        from scipy.sparse import csc_matrix
         if idx == 0:
-            if not hasattr(self, 'first_item_idx'):
-                self.first_item_idx = ~self.inter_feat.duplicated(subset=[self.fuid, self.fiid], keep='first')
             source_field = self.fuid
             target_field = self.fiid
-            feat = self.inter_feat[self.first_item_idx]
+            feat = self.inter_feat[self.inter_feat_subset]
         else:
             if self.network_feat is not None:
                 if idx - 1 < len(self.network_feat):
@@ -316,7 +315,7 @@ class MFDataset(Dataset):
                 raise ValueError(f'valued_field [{value_field}] does not exist')
         else:
             vals = np.ones(len(rows))
-        return rows, (cols, vals), (self.num_values(source_field), self.num_values(target_field))
+        return csc_matrix((vals, (rows, cols)), (self.num_values(source_field), self.num_values(target_field)))
 
     def _split_by_ratio(self, ratio, data_count, user_mode):
         m = len(data_count)
@@ -497,14 +496,17 @@ class MFDataset(Dataset):
         if not hasattr(self, 'loaders'):
             return self.loader(batch_size, shuffle, num_workers, drop_last)
         else:
-            loaders = [l(batch_size, shuffle, num_workers, drop_last) for l in self.loaders]
+            loaders = [l(batch_size, shuffle, num_workers, drop_last) if callable(l) else l for l in self.loaders]
             if load_combine:
                 return loaders
             else:
                 return ChainedDataLoader(loaders, getattr(self, 'nepoch', None))
 
     def loader(self, batch_size, shuffle=True, num_workers=1, drop_last=False):
-        sampler = DataSampler(self, batch_size, shuffle, drop_last)
+        if self.data_index.dim() > 1: # has sample_length
+            sampler = SortedDataSampler(self, batch_size, shuffle, drop_last)
+        else:
+            sampler = DataSampler(self, batch_size, shuffle, drop_last)
         output = DataLoader(self, sampler=sampler, batch_size=None, shuffle=False, num_workers=num_workers)
         return output
     
@@ -809,13 +811,12 @@ class TensorFrame(Dataset):
 
 
 class DataSampler(Sampler):
-    def __init__(self, data_source:Sized, batch_size, shuffle=True, drop_last=False, generator=None, seq=None):
+    def __init__(self, data_source:Sized, batch_size, shuffle=True, drop_last=False, generator=None):
         self.data_source = data_source
         self.batch_size = batch_size
         self.drop_last = drop_last
         self.shuffle = shuffle
         self.generator = generator
-        self.seq = seq
     
     def __iter__(self):
         n = len(self.data_source)
@@ -828,38 +829,43 @@ class DataSampler(Sampler):
         if self.shuffle:
             output = torch.randperm(n, generator=generator).split(self.batch_size)
         else:
-            if self.seq is not None:
-                output = self.seq.split(self.batch_size)
-            else:
-                output = torch.arange(n).split(self.batch_size)
-        if self.drop_last and (n % self.batch_size != 0):
+            output = torch.arange(n).split(self.batch_size)
+        if self.drop_last and len(output[-1]) < self.batch_size:
             yield from output[:-1]
         else:
             yield from output
 
     def __len__(self):
-        if self.drop_last and (len(self.data_source) % self.batch_size != 0):
+        if self.drop_last:
             return len(self.data_source) // self.batch_size
         else:
             return (len(self.data_source) + self.batch_size - 1) // self.batch_size
 
 
 class SortedDataSampler(Sampler):
-    def __init__(self, data_source:Sized, batch_size, drop_last=False):
+    def __init__(self, data_source:Sized, batch_size, shuffle=False, drop_last=False, generator=None):
         self.data_source = data_source
         self.batch_size = batch_size
         self.drop_last = drop_last
+        self.shuffle = shuffle
+        self.generator = generator
     
     def __iter__(self):
-        idx = torch.sort(self.data_source.sample_length).indices
-        output = idx.split(self.batch_size)
-        if self.drop_last and (len(self.data_source) % self.batch_size != 0):
+        n = len(self.data_source)
+        if self.shuffle:
+            output = torch.randperm(n) // (self.batch_size * 10)
+            output = self.data_source.sample_length + output * (self.data_source.sample_length.max() + 1)
+        else:
+            output = self.data_source.sample_length
+        output = torch.sort(output).indices
+        output = output.split(self.batch_size)
+        if self.drop_last and len(output[-1]) < self.batch_size:
             yield from output[:-1]
         else:
             yield from output
 
     def __len__(self):
-        if self.drop_last and (len(self.data_source) % self.batch_size != 0):
+        if self.drop_last:
             return len(self.data_source) // self.batch_size
         else:
             return (len(self.data_source) + self.batch_size - 1) // self.batch_size

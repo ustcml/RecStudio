@@ -9,9 +9,13 @@ import numpy as np
 import faiss, torch, os, nni, abc
 import torchrec.eval as eval
 from . import scorer, loss_func, init
-from pytorch_lightning import Trainer, LightningModule, seed_everything, LightningDataModule
+from pytorch_lightning import Trainer, LightningModule, seed_everything
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint 
 from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.loops import Loop, EvaluationLoop
+from pytorch_lightning.trainer.connectors.logger_connector.result import ResultCollection
+from pytorch_lightning.utilities.model_helpers import is_overridden
+from collections import OrderedDict
 # configure logging at the root level of lightning
 class Recommender(LightningModule, abc.ABC):
 
@@ -204,7 +208,11 @@ class Recommender(LightningModule, abc.ABC):
                             progress_bar_refresh_rate=refresh_rate,
                             logger=logger,
                             accelerator="dp")
+        self.config_fitloop(trainer)
         trainer.fit(self, train_loader, val_loader)
+
+    def config_fitloop(self, trainer):
+        pass
 
     def evaluate(self, test_data, verbose=True):
         test_loader = test_data.eval_loader(batch_size=self.config['eval_batch_size'], \
@@ -508,4 +516,96 @@ class Embedding(torch.nn.Embedding):
             super().__init__(num_embeddings, embedding_dim + 1, padding_idx, *args, **kwargs)
         else:
             super().__init__(num_embeddings, embedding_dim, padding_idx, *args, **kwargs)
-           
+
+
+class AllHistTrainLoop(Loop):
+    
+    def __init__(self, max_epochs: Optional[int] = None) -> None:
+        super().__init__()
+        self.max_epochs = max_epochs
+        self._results = ResultCollection(training=True)
+        self.current_epoch = 0
+        self.epoch_loop = TrainEpochLoop()
+    
+    @property
+    def global_step(self) -> int:
+        return self.epoch_loop.global_step
+
+    @global_step.setter
+    def global_step(self, value: int) -> None:
+        self.epoch_loop.global_step = value
+    
+    @property
+    def max_steps(self) -> int:
+        return self.epoch_loop.max_steps
+
+    @max_steps.setter
+    def max_steps(self, value: int) -> None:
+        self.epoch_loop.max_steps = value
+
+    @property
+    def done(self) -> bool:
+        stop_epochs = self.max_epochs is not None and self.current_epoch >= self.max_epochs
+        return self.trainer.should_stop or stop_epochs
+
+    def advance(self, *args, **kwargs) -> None:
+        self.current_epoch += 1
+        train_dataloader = self.trainer.accelerator.process_dataloader(self.trainer.train_dataloader)
+        train_dataloader = self.trainer.data_connector.get_profiled_train_dataloader(train_dataloader)
+        with self.trainer.profiler.profile("run_training_epoch"):
+            epoch_output = self.epoch_loop.run(train_dataloader)
+            if epoch_output is None:
+                return
+        self.global_step -= 1
+        self.trainer.logger_connector.update_train_epoch_metrics()
+        self.global_step += 1
+    
+    def reset(self) -> None:
+        pass
+
+class TrainEpochLoop(Loop):
+    def __init__(self) -> None:
+        super().__init__()
+        self.is_last_batch = False
+        self.val_loop = EvaluationLoop()
+        self.global_step = 0
+        self.max_steps = None
+
+    @property
+    def done(self) -> bool:
+        return self.is_last_batch
+
+    def advance(self, train_dataloader, **kwargs) -> None:
+        _, (data, self.is_last_batch) = next(train_dataloader)
+        with self.trainer.profiler.profile("training_step"):
+            self._epoch_output = self.trainer.accelerator.training_step(OrderedDict([("batch", data), ("batch_idx", 0)]))
+            self.trainer.accelerator.post_training_step()
+        
+
+    def on_run_end(self) -> Any:
+        model = self.trainer.lightning_module
+        processed_epoch_output = [{'loss':self._epoch_output}]
+        if is_overridden("training_epoch_end", model):
+            model.training_epoch_end(processed_epoch_output)
+        
+        hook_name = "on_train_epoch_end"
+        with self.trainer.profiler.profile(hook_name):
+            # first call trainer hook
+            if hasattr(self.trainer, hook_name):
+                trainer_hook = getattr(self.trainer, hook_name)
+                trainer_hook(processed_epoch_output)
+        
+
+        
+    def on_advance_end(self) -> None:
+        if self.trainer.enable_validation:
+            self.trainer.validating = True
+            self.val_loop.reload_evaluation_dataloaders()
+            with torch.no_grad():
+                self.val_loop.run()
+            self.trainer.training = True
+        self.global_step = self.trainer.accelerator.update_global_step(
+                1, self.trainer.global_step)
+
+    def reset(self) -> None:
+        self.is_last_batch = False
