@@ -30,7 +30,7 @@ class RippleNet(basemodel.ItemTowerRecommender):
         # remember to get the sub inter_feat that only includes train data
         # maybe need to provide sub inter_feat directly in order to prevent users from using inter_feat incorrectly.  
         self.user_history_dict = self._construct_user_hist(train_data.inter_feat[train_data.inter_feat_subset]) 
-        self.kg = self._construct_kg(train_data.kg_feat)
+        self.kg = self._construct_kg(train_data.network_feat[1])
         self.ripple_set_h = torch.zeros(self.n_hop, train_data.num_users, self.n_memory, dtype=torch.long)
         self.ripple_set_t = torch.zeros(self.n_hop, train_data.num_users, self.n_memory, dtype=torch.long)
         self.ripple_set_r = torch.zeros(self.n_hop, train_data.num_users, self.n_memory, dtype=torch.long)

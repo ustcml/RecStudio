@@ -66,9 +66,7 @@ class KTUP(basemodel.TwoTowerRecommender):
         return dataset.KnowledgeBasedDataset
 
     def set_train_loaders(self, train_data):
-        kg_train_data = copy.copy(train_data)
-        kg_train_data.kg_state = True
-        train_data.loaders = [train_data.loader, kg_train_data.loader]
+        train_data.loaders = [train_data.loader, train_data.network_feat[1].loader]
         train_data.nepoch = [self.train_rec_step, self.train_kg_step]
         return False
 

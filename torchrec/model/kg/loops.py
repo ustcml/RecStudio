@@ -11,15 +11,13 @@ class KGFitLoop(FitLoop):
         super().__init__(min_epochs, max_epochs)
         self.epoch_loop = KGTrainEpochLoop()
 
-    def get_train_dataloader(self, state):
-        # state = 1, rec data; state = 2, kg data
-        self.trainer.train_dataloader.loaders.state = state
+    def get_train_dataloader(self):
         train_dataloader = self.trainer.accelerator.process_dataloader(self.trainer.train_dataloader)
         train_dataloader = self.trainer.data_connector.get_profiled_train_dataloader(train_dataloader)        
         return train_dataloader
 
-    def run_one_epoch(self, dataloader_state, val_flag):
-        train_dataloader = self.get_train_dataloader(dataloader_state)
+    def run_one_epoch(self, val_flag):
+        train_dataloader = self.get_train_dataloader()
         self.epoch_loop.val_flag = val_flag
         self.trainer.logger_connector._logged_metrics = {'epoch' : self.current_epoch}
         epoch_output = self.epoch_loop.run(train_dataloader)
@@ -52,7 +50,7 @@ class MKRFitLoop(KGFitLoop):
         with self.trainer.profiler.profile("run_training_epoch"):
             if (self.current_epoch + 1) % self.kge_interval == 0:
                 # run train Rec epoch
-                self.run_one_epoch(1, val_flag=False)
+                self.run_one_epoch(False)
                 print_logger.info(
                     set_color(
                         'Rec epoch finished. It is followed by a kg epoch and validation will be done in the kg epoch.', 
@@ -60,10 +58,10 @@ class MKRFitLoop(KGFitLoop):
                     )
                 )
                 # run train Kg epoch
-                self.run_one_epoch(2, val_flag=True)
+                self.run_one_epoch(True)
             else: 
                 # run train Rec epoch
-                self.run_one_epoch(1, val_flag=True)
+                self.run_one_epoch(True)
    
 class MKRTrainEpochLoop(TrainingEpochLoop):
     
@@ -86,6 +84,6 @@ class KGATFitLoop(KGFitLoop):
         """Runs one whole epoch."""
         with self.trainer.profiler.profile("run_training_epoch"):
             # run train Rec epoch
-            self.run_one_epoch(1, False)
+            self.run_one_epoch(False)
             # run train Kg epoch
-            self.run_one_epoch(2, True)
+            self.run_one_epoch(True)

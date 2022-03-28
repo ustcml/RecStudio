@@ -690,73 +690,31 @@ class SeqDataset(MFDataset):
 class KnowledgeBasedDataset(MFDataset):
     def __init__(self, config_path):
         super().__init__(config_path)
-        self.kg_state = False
-        self.kg_index = None
         assert self.config['network_feat_name'] != None
-        for i, name in enumerate(self.config['network_feat_name']):
-            if len(name) == 2:
-                self.kg_index = i
-                break
-        assert self.kg_index != None
-        self.fhid = self.config['network_feat_field'][self.kg_index][0][0].split(':')[0]
-        self.ftid = self.config['network_feat_field'][self.kg_index][0][1].split(':')[0]
-        self.frid = self.config['network_feat_field'][self.kg_index][0][2].split(':')[0]
-        self.add_inter_relation()
-        
 
-    def __getitem__(self, index):
-        if self.kg_state == False:
-            return super().__getitem__(index)
-        data = self.network_feat[self.kg_index][index]
-        return data
-
-    def __len__(self):
-        if self.kg_state == 0:
-            return super().__len__()
-        else:
-            return self.network_feat[self.kg_index].__len__()
-
-    def train_loader(self, batch_size, shuffle=True, num_workers=1, drop_last=False, load_combine=False):
-        if not hasattr(self, 'loaders'):
-            return self.recAndKgLoader(batch_size, shuffle, num_workers, drop_last)
-        else:
-            # it support rec data and kg data alternate training
-            # TODO add (rec and kg) dataloder to alternate training if necessary
-            loaders = [l(batch_size, shuffle, num_workers, drop_last) if callable(l) else l for l in self.loaders]
-            if load_combine:
-                return loaders
-            else:
-                return ChainedDataLoader(loaders, getattr(self, 'nepoch', None))
-
-    def loader(self, batch_size, shuffle=True, num_workers=1, drop_last=False):
-        if self.kg_state == 1 and shuffle == False:
-            shuffle = True
-        return super().loader(batch_size, shuffle=shuffle, num_workers=num_workers, drop_last=drop_last)
+    def _init_common_field(self):
+        super()._init_common_field()
+        self.fhid = self.config['network_feat_field'][self.config['network_feat_index']['kg']][0][0].split(':')[0]
+        self.ftid = self.config['network_feat_field'][self.config['network_feat_index']['kg']][0][1].split(':')[0]
+        self.frid = self.config['network_feat_field'][self.config['network_feat_index']['kg']][0][2].split(':')[0]
     
     def recAndKgLoader(self, batch_size, shuffle=True, num_workers=1, drop_last=False):
-        kgDataset = copy.copy(self)
-        kgDataset.kg_state = 1
         recDataloader = self.loader(batch_size, shuffle, num_workers, drop_last)
-        kgDataloader = kgDataset.loader(batch_size, True, num_workers, drop_last)
+        kgDataloader = self.network_feat[self.config['network_feat_index']['kg']].loader(batch_size, True, num_workers, drop_last)
         return KnowledgeBasedLoader(recDataloader, kgDataloader)
-
+    
     def add_inter_relation(self):
        self.field2tokens[self.frid] = np.append(self.field2tokens[self.frid], '[inter-relation]')
        self.field2token2idx[self.frid]['[inter-relation]'] = len(self.field2tokens[self.frid]) - 1
 
-    def get_ckg_graph(self, form='coo', use_relation=True, bidirectional=False):
+    def get_ckg_graph(self, form='coo', use_relation=True):
+        self.add_inter_relation()
         num_nodes = self.num_users + self.num_entities
         users = self.inter_feat.get_col(self.fuid)[self.inter_feat_subset]
         items = self.inter_feat.get_col(self.fiid)[self.inter_feat_subset] + self.num_users
-        heads = self.kg_feat.get_col(self.fhid) + self.num_users
-        tails = self.kg_feat.get_col(self.ftid) + self.num_users
-        relations = self.kg_feat.get_col(self.frid)
-        if bidirectional == True: 
-            _heads = torch.cat([heads, tails])
-            _tails = torch.cat([tails, heads])
-            heads = _heads 
-            tails = _tails
-        
+        heads = self.network_feat[self.config['network_feat_index']['kg']].get_col(self.fhid) + self.num_users
+        tails = self.network_feat[self.config['network_feat_index']['kg']].get_col(self.ftid) + self.num_users
+        relations = self.network_feat[self.config['network_feat_index']['kg']].get_col(self.frid)
 
         rows = torch.cat([users, items, heads])
         cols = torch.cat([items, users, tails])
@@ -787,11 +745,7 @@ class KnowledgeBasedDataset(MFDataset):
             edge_attr = vals if use_relation else None
             graph = Data(edge_index=torch.stack(rows, cols), edge_attr=edge_attr)
         else:
-            raise ValueError(f'ckg graph doesn\'t "[{form}]" form')
-
-    @property
-    def kg_feat(self):
-        return self.network_feat[self.kg_index]
+            raise ValueError(f'ckg graph doesn\'t support "[{form}]" form')
 
     @property
     def num_entities(self):
@@ -802,7 +756,6 @@ class KnowledgeBasedDataset(MFDataset):
         return self.num_values(self.frid)
 
 
-               
 class TensorFrame(Dataset):
     @classmethod
     def fromPandasDF(cls, dataframe, dataset):
@@ -938,33 +891,20 @@ class ChainedDataLoader:
 
 class KnowledgeBasedLoader:
     def __init__(self, recDataloader, kgDataloader):
-        self.state = 0
         self.recDataloader = recDataloader
         self.kgDataloader = kgDataloader
-        # self.recIterator = iter(self.recDataloader)
-        # self.kgIterator = iter(self.kgDataloader)
 
     def __iter__(self):
-        if self.state == 0:
-            self.kgIterator = iter(self.kgDataloader)
-            self.recIterator = iter(self.recDataloader)
-        elif self.state == 1:
-            self.recIterator = iter(self.recDataloader)
-        elif self.state == 2:
-            self.kgIterator = iter(self.kgDataloader)
+        self.kgIterator = iter(self.kgDataloader)
+        self.recIterator = iter(self.recDataloader)
         return self
     
     def __next__(self):
         batch_data = {}
-        if self.state == 0:
-            batch_data.update(next(self.recIterator))
-            try:
-                batch_data.update(next(self.kgIterator))
-            except StopIteration:
-                self.kgIterator = iter(self.kgDataloader)
-                batch_data.update(next(self.kgIterator))
-        elif self.state == 1:
-            batch_data.update(next(self.recIterator))
-        elif self.state == 2:
+        batch_data.update(next(self.recIterator))
+        try:
+            batch_data.update(next(self.kgIterator))
+        except StopIteration:
+            self.kgIterator = iter(self.kgDataloader)
             batch_data.update(next(self.kgIterator))
         return batch_data

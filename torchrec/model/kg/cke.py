@@ -34,6 +34,8 @@ class CKE(basemodel.TwoTowerRecommender):
         return dataset.KnowledgeBasedDataset
 
     def set_train_loaders(self, train_data):
+        train_data.loaders = [train_data.recAndKgLoader]
+        train_data.nepoch = None
         return False
 
     def config_scorer(self):

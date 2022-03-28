@@ -103,6 +103,7 @@ class KGAT(basemodel.TwoTowerRecommender):
         return dataset.KnowledgeBasedDataset
 
     def set_train_loaders(self, train_data):
+        train_data.loaders = [train_data.loader, train_data.network_feat[1].loader]
         return False
 
     def config_fitloop(self, trainer):

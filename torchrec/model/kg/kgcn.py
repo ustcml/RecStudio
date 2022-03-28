@@ -98,7 +98,7 @@ class KGCN(basemodel.TwoTowerRecommender):
         self.frid = train_data.frid
         self.num_entities = train_data.num_entities
         self.num_items = train_data.num_items
-        self.kg = self._construct_kg(train_data.kg_feat)
+        self.kg = self._construct_kg(train_data.network_feat[1])
         self.adj_entity, self.adj_relation = self._construct_adj()
         self.ent_emb = basemodel.Embedding(train_data.num_entities, self.embed_dim, padding_idx=0)
         self.rel_emb = nn.Embedding(train_data.num_relations, self.embed_dim, padding_idx=0)     
