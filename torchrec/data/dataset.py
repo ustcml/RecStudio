@@ -792,7 +792,7 @@ class SortedDataSampler(Sampler):
     def __iter__(self):
         n = len(self.data_source)
         if self.shuffle:
-            output = torch.randperm(n) // (self.batch_size * 10)
+            output = torch.div(torch.randperm(n), (self.batch_size * 10), rounding_mode='floor')
             output = self.data_source.sample_length + output * (self.data_source.sample_length.max() + 1)
         else:
             output = self.data_source.sample_length
