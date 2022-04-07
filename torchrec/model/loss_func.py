@@ -97,3 +97,7 @@ class HingeLoss(PairwiseLoss):
             return torch.mean(loss * torch.log(rank + 1))
         else:
             return torch.mean(loss)
+
+class InfoNCELoss(SampledSoftmaxLoss):
+    def forward(self, label, pos_score, log_pos_prob, neg_score, log_neg_prob):
+        return super().forward(label, pos_score, log_pos_prob, neg_score, log_neg_prob)

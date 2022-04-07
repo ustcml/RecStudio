@@ -1,7 +1,7 @@
 from typing import Any, Optional
 import torch.nn.functional as F
 from torchrec.utils.utils import set_color, parser_yaml, color_dict, print_logger
-from torchrec.data.dataset import AEDataset, MFDataset, SeqDataset
+from torchrec.data.dataset import AEDataset, MFDataset, SeqDataset, FullSeqDataset
 from torchrec.data.advance_dataset import ALSDataset
 from torchrec.ann import sampler
 from torch import optim
@@ -68,7 +68,7 @@ class Recommender(LightningModule, abc.ABC):
                 parameter['fmeval'] = True
         elif cls == AEDataset:
             parameter = {'shuffle': self.config.get('shuffle')}
-        elif cls == SeqDataset:
+        elif cls in (SeqDataset, FullSeqDataset):
             parameter = {'rep' : self.config.get('test_repetitive'),
                         'train_rep': self.config.get('train_repetitive')}
         parameter = {k: v for k, v in parameter.items() if v is not None}

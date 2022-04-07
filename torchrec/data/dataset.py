@@ -4,7 +4,7 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, Sampler
 import numpy as np
 import pandas as pd
-import os,copy, torch
+import os,copy, torch, math
 import scipy.sparse as ssp
 from torchrec.utils.utils import parser_yaml
 class MFDataset(Dataset):
@@ -283,12 +283,6 @@ class MFDataset(Dataset):
         keep &= item_list.isin(keep_items)
         self.inter_feat = self.inter_feat[keep]
         self.inter_feat.reset_index(drop=True, inplace=True)
-        #if self.user_feat is not None:
-        #    self.user_feat = self.user_feat[self.user_feat[self.fuid].isin(keep_users)]
-        #    self.user_feat.reset_index(drop=True, inplace=True)
-        #if self.item_feat is not None:
-        #    self.item_feat = self.item_feat[self.item_feat[self.fiid].isin(keep_items)]
-        #    self.item_feat.reset_index(drop=True, inplace=True)
  
     def get_graph(self, idx, value_field=None):
         from scipy.sparse import csc_matrix
@@ -423,14 +417,7 @@ class MFDataset(Dataset):
         d = copy.copy(self)
         d.data_index = idx
         return d
-
     
-    """ split interactions in entrywise, used for mf-like model
-    Args:
-        ratio (np.Array): ratio of spliting dataset
-        order (bool, optional): 
-        split_mode: user_entry, entry, user
-    """
     def build(self, ratio_or_num, shuffle=True, split_mode='user_entry', fmeval=False):
         self.fmeval = fmeval
         return self._build(ratio_or_num, shuffle, split_mode, True, False)
@@ -466,9 +453,6 @@ class MFDataset(Dataset):
             for start, end in zip(splits_[:-1], splits_[1:]):
                 self.inter_feat[start:end] = self.inter_feat[start:end].sort_values(by=self.fuid)
 
-        
-        #if isinstance(self, AEDataset) or isinstance(self, SeqDataset):
-        #    self.inter_feat.drop(self.fuid, inplace=True, axis=1)
         self.dataframe2tensors()
         datasets = [self._copy(_) for _ in self._get_data_idx(splits)]
         user_hist, user_count = datasets[0].get_hist(True)
@@ -594,15 +578,12 @@ class AEDataset(MFDataset):
     def _get_data_idx(self, splits):
         splits, uids = splits
         data_idx = [list(zip(splits[:, i-1], splits[:, i])) for i in range(1, splits.shape[1])]
-        #data_idx = [np.array([(u, slice(*e)) for e, u in zip(_, uids)]) for _ in data_idx]
         data_idx = [torch.tensor([[u, *e] for e, u in zip(_, uids)]) for _ in data_idx]
-        #data = [np.array(list(zip(data_idx[0], data_idx[i]))) for i in range(len(data_idx))]
         data = [torch.cat((data_idx[0], data_idx[i]), -1) for i in range(len(data_idx))]
         return data
 
     def __getitem__(self, index):
         idx = self.data_index[index]
-        #data = {self.fuid: idx[0][0]}
         data = {self.fuid: idx[:,0]}
         data.update(self.user_feat[data[self.fuid]])
         for i, n in enumerate(['in_', '']):
@@ -614,8 +595,6 @@ class AEDataset(MFDataset):
             for k in d:
                 d[k] = pad_sequence(d[k].split(tuple(lens.numpy())), batch_first=True)
             d.update(self.item_feat[d[self.fiid]])
-            #d = self.get_value(self.inter_feat, idx[-1])
-            #d.update(self.get_value(self.item_feat, d[self.fiid]))
             for k, v in d.items():
                 if k != self.fuid:
                     data[n+k] = v
@@ -645,7 +624,6 @@ class SeqDataset(MFDataset):
             else:
                 return part[self.first_item_idx.iloc[part[:,-1]].values]
         def get_slice(sp, u):
-            #data = [(u, slice(max(sp[0], i - maxlen), i), i) for i in range(sp[0], sp[-1])]
             data = np.array([[u, max(sp[0], i - maxlen), i] for i in range(sp[0], sp[-1])], dtype=np.int64)
             sp -= sp[0]
             return np.split(data[1:], sp[1:-1]-1)
@@ -655,13 +633,11 @@ class SeqDataset(MFDataset):
         return output
 
     def __getitem__(self, index):
-        #uid, source, target = self.data_index[index]
         idx = self.data_index[index]
         data = {self.fuid: idx[:, 0]}
         data.update(self.user_feat[data[self.fuid]])
         target_data = self.inter_feat[idx[:, 2]]
         target_data.update(self.item_feat[target_data[self.fiid]])
-        #source_data = self.get_value(self.inter_feat, idx[:, 1])
         start = idx[:, 1]
         end = idx[:, 2]
         lens = end - start
@@ -687,6 +663,19 @@ class SeqDataset(MFDataset):
     def inter_feat_subset(self):
         return self.data_index[:, -1]
         
+class FullSeqDataset(SeqDataset):
+    def _get_data_idx(self, splits):
+        splits, uids = splits
+        maxlen = self.config['max_seq_len'] or (splits[:,-1] - splits[:,0]).max()
+        def get_slice(sp, u):
+            length_ = math.ceil((sp[1]-sp[0]) / maxlen)
+            data = [np.array([[u, max(sp[0], sp[1]-(i+1)*maxlen), sp[1]-i*maxlen] for i in range(length_)])]
+            data += [np.array([[u, max(s-maxlen, sp[0]), s]]) for s in sp[2:]]
+            return tuple(data)
+        # TODO: how to remove rep. why not remove rep interections.
+        output = [get_slice(sp, u) for sp, u in zip(splits, uids)]
+        output = [torch.from_numpy(np.concatenate(_)) for _ in zip(*output)]
+        return output
 
                
 class TensorFrame(Dataset):
