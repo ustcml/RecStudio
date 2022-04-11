@@ -1,0 +1,6 @@
+embed_dim: 64
+activation: relu
+mlp_hidden_size: [32, 16, 8] 
+dropout_rate: 0.1
+mode: mf
+negative_count: 1
