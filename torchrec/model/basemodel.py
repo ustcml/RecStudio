@@ -131,8 +131,8 @@ class Recommender(LightningModule, abc.ABC):
         else:
             self.fields = set(f for f in train_data.field2type if 'time' not in f)
             
-        self.user_fields = train_data.user_feat.fields.intersection(self.fields)
-        self.item_fields = train_data.item_feat.fields.intersection(self.fields)        
+        self.user_fields = set(train_data.user_feat.fields).intersection(self.fields)
+        self.item_fields = set(train_data.item_feat.fields).intersection(self.fields)        
 
     def init_parameter(self):
         r"""Init parameters in each layer if the model.
@@ -291,6 +291,9 @@ class Recommender(LightningModule, abc.ABC):
         self.init_parameter()
         train_loader = train_data.train_loader(batch_size=self.config['batch_size'], \
             shuffle=True, num_workers=self.config['num_workers'], load_combine=iscombine)
+        multiple_trainloader_mode = 'min_size'
+        if iscombine == True and len(train_loader[0].dataset) > len(train_loader[1].dataset):
+            multiple_trainloader_mode = 'max_size_cycle'
         if val_data:
             val_loader = val_data.eval_loader(batch_size=self.config['eval_batch_size'],\
                 num_workers=self.config['num_workers'])
@@ -301,6 +304,7 @@ class Recommender(LightningModule, abc.ABC):
                             max_epochs=self.config['epochs'], 
                             num_sanity_val_steps=0,
                             progress_bar_refresh_rate=refresh_rate,
+                            multiple_trainloader_mode=multiple_trainloader_mode,
                             logger=logger,
                             accelerator="dp")
         self.config_fitloop(trainer)

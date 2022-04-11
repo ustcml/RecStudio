@@ -1,0 +1,7 @@
+embed_dim: 64
+negative_count: 1
+alg_type: bi
+pro_embed_dim: 64
+layer_size: [64]
+mess_dropout: [0.1]
+weight_decay: 1e-5

@@ -1,0 +1,8 @@
+embed_dim: 64
+negative_count: 1
+weight_decay: 0.000001
+using_all_hops: True
+item_update_mode: plus_transform  # how to update item at the end of each hop
+kge_weight: 0.01
+n_memory: 16 # size of ripple set for each hop
+n_hop: 2 # maximum hops

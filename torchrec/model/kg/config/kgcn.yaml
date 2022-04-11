@@ -1,0 +1,6 @@
+embed_dim: 64
+neighbor_sample_size: 4
+negative_count: 1
+n_iter: 2
+aggregator_type: sum 
+weight_decay: 1e-7

@@ -312,36 +312,146 @@ class MFDataset(Dataset):
         keep &= item_list.isin(keep_items)
         self.inter_feat = self.inter_feat[keep]
         self.inter_feat.reset_index(drop=True, inplace=True)
- 
-    def get_graph(self, idx, value_field=None):
-        r"""Get all network graph.
-        If multiple graphs are used, TODO: complete
+        #if self.user_feat is not None:
+        #    self.user_feat = self.user_feat[self.user_feat[self.fuid].isin(keep_users)]
+        #    self.user_feat.reset_index(drop=True, inplace=True)
+        #if self.item_feat is not None:
+        #    self.item_feat = self.item_feat[self.item_feat[self.fiid].isin(keep_items)]
+        #    self.item_feat.reset_index(drop=True, inplace=True)
+
+    def get_graph(self, idx, form='coo', value_fields=None, row_offset=0, col_offset=0, bidirectional=False, shape=None):
         """
-        from scipy.sparse import csc_matrix
-        if idx == 0:
+        Returns a single graph or a graph composed of several networks. If more than one graph is passed into the methods, ``shape`` must be specified.
+        
+        Args:
+            idx(int, list): the indices of the feat or networks. The index of ``inter_feat`` is set to ``0`` by default 
+            and the index of networks(such as knowledge graph and social network) is started by ``1`` corresponding to the dataset configuration file i.e. ``datasetname.yaml``.
+            form(str): the form of the returned graph, can be 'coo', 'csr' or 'dgl'. Default: ``None``.
+            value_fields(str, list): the value field in each graph. If value_field isn't ``None``, the values in this column will fill the adjacency matrix.
+            row_offset(int, list): the offset of each row in corrresponding graph.
+            col_offset(int, list): the offset of each column in corrresponding graph.
+            bidirectional(bool, list): whether to turn the graph into bidirectional graph or not. Default: False
+            shape(tuple): the shape of the returned graph. If more than one graph is passed into the methods, ``shape`` must be specified.
+        
+        Returns:
+           graph(coo_matrix, csr_matrix or DGLGraph): a single graph or a graph composed of several networks in specified form. 
+           If the form is ``DGLGraph``, the relaiton type of the edges is stored in graph.edata['value'].
+           num_relations(int): the number of relations in the combined graph.
+        """
+        if type(idx) == int: 
+            idx = [idx]
+        if type(value_fields) == str or value_fields == None: 
+            value_fields = [value_fields] * len(idx)
+        if type(bidirectional) == bool or bidirectional == None:
+            bidirectional = [bidirectional] * len(idx)
+        if type(row_offset) == int or row_offset == None:
+            row_offset = [row_offset] * len(idx)
+        if type(col_offset) == int or col_offset == None:
+            col_offset = [col_offset] * len(idx)
+        assert len(idx) == len(value_fields) and len(idx) == len(bidirectional)
+        rows, cols, vals = [], [], []
+        n, m, val_off = 0, 0, 0
+        for id, value_field, bidirectional, row_off, col_off in zip(idx, value_fields, bidirectional, row_offset, col_offset):
+            tmp_rows, tmp_cols, tmp_vals, val_off, tmp_n, tmp_m = self._get_one_graph(id, value_field, row_off, col_off, val_off, bidirectional)
+            rows.append(tmp_rows)
+            cols.append(tmp_cols)
+            vals.append(tmp_vals)
+            n += tmp_n
+            m += tmp_m
+        if shape == None or type(shape) != tuple:
+            if len(idx) > 1:
+                raise ValueError(f'If the length of idx is larger than 1, user should specify the shape of the combined graph.')
+            else:
+                shape = (n, m)
+        rows = torch.cat(rows)
+        cols = torch.cat(cols)
+        vals = torch.cat(vals)
+        if form == 'coo':
+            from scipy.sparse import coo_matrix
+            return coo_matrix((vals, (rows, cols)), shape), val_off
+        elif form == 'csr':
+            from scipy.sparse import csr_matrix
+            return csr_matrix((vals, (rows, cols)), shape), val_off
+        elif form == 'dgl':
+            import dgl
+            graph = dgl.graph((rows, cols))
+            graph.edata['value'] = vals
+            return graph, val_off
+
+    def _get_one_graph(self, id, value_field=None, row_offset=0, col_offset=0, val_offset=0, bidirectional=False):
+        """
+        Gets rows, cols and values in one graph. 
+        If several graphs are to be combined into one, offset should be added on the edge value in each graph to avoid conflict. 
+        Then the edge value will be: .. math:: offset + vals. (.. math:: offset + 1 in user-item graph). The offset will be reset to ``offset + len(self.field2tokens[value_field])`` in next graph. 
+        If bidirectional is True, the inverse edge values in the graph will be set to ``offset + corresponding_canonical_values + len(self.field2tokens[value_field]) - 1``.
+        If all edges in the graph are sorted by their values in a list, the list will be: 
+            ['[PAD]', canonical_edge_1, canonical_edge_2, ..., canonical_edge_n, inverse_edge_1, inverse_edge_2, ..., inverse_edge_n]  
+        
+        Args:
+            id(int): the indix of the feat or network. The index of ``inter_feat`` is set to ``0`` by default 
+            and the index of networks(such as knowledge graph and social network) is started by ``1`` corresponding to the dataset configuration file i.e. ``datasetname.yaml``.
+            value_field(str): the value field in the graph. If value_field isn't ``None``, the values in this column will fill the adjacency matrix.
+            row_offset(int): the offset of the row in the graph. Default: 0.
+            col_offset(int): the offset of the column in the graph. Default: 0. 
+            val_offset(int): the offset of the edge value in the graph. If several graphs are to be combined into one, 
+            offset should be added on the edge value in each graph to avoid conflict. Default: 0.
+            bidirectional(bool): whether to turn the graph into bidirectional graph or not. Default: False
+    
+        Returns:
+            rows(torch.Tensor): source nodes in all edges in the graph.
+            cols(torch.Tensor): destination nodes in all edges in the graph.
+            values(torch.Tensor): values of all edges in the graph.
+            num_rows(int): number of source nodes.
+            num_cols(int): number of destination nodes.
+        """
+        if id == 0:
             source_field = self.fuid
             target_field = self.fiid
             feat = self.inter_feat[self.inter_feat_subset]
         else:
             if self.network_feat is not None:
-                if idx - 1 < len(self.network_feat):
-                    feat = self.network_feat[idx - 1]
-                    source_field, target_field = feat.columns[:2]
+                if id - 1 < len(self.network_feat):
+                    feat = self.network_feat[id - 1]
+                    source_field, target_field = feat.fields[:2]
                 else:
-                    raise ValueError(f'idx [{idx}] is larger than the number of network features [{len(self.network_feat)}] minus 1' )
+                    raise ValueError(f'idx [{id}] is larger than the number of network features [{len(self.network_feat)}] minus 1' )
             else:
-                raise ValueError(f'No network feature is input while idx [{idx}] is larger than 1')
-        
-        rows = feat[source_field]
-        cols = feat[target_field]
+                raise ValueError(f'No network feature is input while idx [{id}] is larger than 1')
+        if id == 0:
+            source = feat[source_field] + row_offset
+            target = feat[target_field] + col_offset
+        else:
+            source = feat.get_col(source_field) + row_offset
+            target = feat.get_col(target_field) + col_offset
+        if bidirectional:
+            rows = torch.cat([source, target])
+            cols = torch.cat([target, source])
+        else:
+            rows = source
+            cols = target
+            
         if value_field is not None:
-            if value_field in feat:
-                vals = feat[value_field]
+            if id == 0 and value_field == 'inter':
+                if bidirectional:
+                    vals = torch.tensor([val_offset + 1] * len(source) + [val_offset + 2] * len(source))
+                    val_offset += (1 + 2)
+                else:
+                    vals = torch.tensor([val_offset + 1] * len(source))
+                    val_offset += (1 + 1)
+            elif value_field in feat.fields:
+                if bidirectional:
+                    vals = feat.get_col(value_field) + val_offset
+                    inv_vals = feat.get_col(value_field) + len(self.field2tokens[value_field]) - 1 + val_offset
+                    vals = torch.cat([vals, inv_vals])
+                    val_offset += 2 * len(self.field2tokens[value_field]) - 1
+                else:
+                    vals = feat.get_col(value_field) + val_offset
+                    val_offset += len(self.field2tokens[value_field])
             else:
                 raise ValueError(f'valued_field [{value_field}] does not exist')
         else:
-            vals = np.ones(len(rows))
-        return csc_matrix((vals, (rows, cols)), (self.num_values(source_field), self.num_values(target_field)))
+            vals = torch.ones(len(rows))
+        return rows, cols, vals, val_offset, self.num_values(source_field), self.num_values(target_field)
 
     def _split_by_ratio(self, ratio, data_count, user_mode):
         r"""Split dataset into train/valid/test by specific ratio."""
@@ -644,6 +754,21 @@ class MFDataset(Dataset):
         tensors = pad_sequence(tensors, batch_first=True)
         return tensors, user_count
 
+    def get_network_field(self, network_id, feat_id, field_id):
+        """
+        Returns the specified field name in some network.
+        For example, if the head id field is in the first feat of KG network and is the first column of the feat and the index of KG network is 1. 
+        To get the head id field, the method can be called like this ``train_data.get_network_field(1, 0, 0)``.
+
+        Args:
+            network_id(int) : the index of network corresponding to the dataset configuration file.
+            feat_id(int): the index of the feat in the network.
+            field_id(int): the index of the wanted field in above feat.
+        
+        Returns:
+            field(str): the wanted field. 
+        """
+        return self.config['network_feat_field'][network_id][feat_id][field_id].split(':')[0]
 
     @property
     def inter_feat_subset(self):
@@ -834,6 +959,7 @@ class SeqDataset(MFDataset):
     @property
     def inter_feat_subset(self):
         return self.data_index[:, -1]
+
         
 class FullSeqDataset(SeqDataset):
     def _get_data_idx(self, splits):
@@ -849,7 +975,6 @@ class FullSeqDataset(SeqDataset):
         output = [torch.from_numpy(np.concatenate(_)) for _ in zip(*output)]
         return output
 
-               
 class TensorFrame(Dataset):
     r"""The main data structure used to save interaction data in RecStudio dataset.
 
@@ -876,8 +1001,10 @@ class TensorFrame(Dataset):
             recstudio.data.TensorFrame: the TensorFrame get from the dataframe.
         """
         data = {}
+        fields = []
         length = len(dataframe.index)
         for field in dataframe:
+            fields.append(field)
             ftype = dataset.field2type[field]
             value = dataframe[field]
             if ftype == 'token_seq':
@@ -890,11 +1017,12 @@ class TensorFrame(Dataset):
                 data[field] = torch.from_numpy(dataframe[field].to_numpy(np.int64))
             else:
                 data[field] = torch.from_numpy(dataframe[field].to_numpy(np.float32))
-        return cls(data, length)
+        return cls(data, length, fields)
 
-    def __init__(self, data, length):
+    def __init__(self, data, length, fields):
         self.data = data
         self.length = length
+        self.fields = fields
 
     def get_col(self, field):
         r"""Get data from the specific field.
@@ -924,6 +1052,7 @@ class TensorFrame(Dataset):
         """
         for f in self.fields:
             if f not in keep_fields:
+                self.fields.remove(f)
                 del self.data[f]
     
     def loader(self, batch_size, shuffle=False, num_workers=1, drop_last=False):
@@ -968,11 +1097,6 @@ class TensorFrame(Dataset):
         for f in output.fields:
             output.data[f] = output.data[f][idx]
         return output
-
-    @property
-    def fields(self):
-        r"""Return all the fields in the TensorFrame."""
-        return set(self.data.keys())
 
 
 class DataSampler(Sampler):
@@ -1091,4 +1215,3 @@ class ChainedDataLoader:
     def __iter__(self):
         self.epoch += 1
         return iter(self.loaders[self.iter_idx[self.epoch % len(self.iter_idx)]])
-

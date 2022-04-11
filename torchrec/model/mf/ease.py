@@ -10,7 +10,7 @@ class EASE(basemodel.TwoTowerRecommender):
         super().__init__(config)
     
     def set_train_loaders(self, train_data):
-        train_data.loaders = [[{'user_item_matrix': train_data.get_graph(0)}]]
+        train_data.loaders = [[{'user_item_matrix': train_data.get_graph(0, 'csr')[0]}]]
         train_data.nepoch = None
         return False ## use combine loader or concate loaders
 
