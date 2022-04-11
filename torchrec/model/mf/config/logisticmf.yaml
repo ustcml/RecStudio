@@ -1,0 +1,6 @@
+negative_count: 10
+use_fields: ['user_id', 'item_id', 'rating']
+lambda: 0.01
+alpha: 0.5
+learner: 'adagrad'
+learning_rate: 0.01

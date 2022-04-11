@@ -1,7 +1,24 @@
 import torch
-from torch import nn
 from torch.nn.parameter import Parameter
 
+def get_act(activation:str):
+      if activation == None or isinstance(activation, torch.nn.Module):
+          return activation
+      elif type(activation) == str:
+          if activation.lower()=='relu':
+              return torch.nn.ReLU()
+          elif activation.lower()=='sigmoid':
+              return torch.nn.Sigmoid()
+          elif activation.lower()=='tanh':
+              return torch.nn.Tanh()
+          elif activation.lower()=='leakyrelu':
+              return torch.nn.LeakyReLU()
+          else:
+              raise ValueError(f'activation function type "{activation}"  is not supported, check spelling or pass in a instance of torch.nn.Module.')
+      else:
+          raise ValueError('"activation_func" must be a str or a instance of torch.nn.Module. ')
+
+          
 class CrossCompressUnit(nn.Module):
     """
     Cross & Compress unit.
@@ -54,6 +71,7 @@ class CrossCompressUnit(nn.Module):
 
         return (v_output, e_output)
 
+      
 class FeatInterLayers(nn.Module):
     """
     Feature interaction layers with varied feature interaction units.
@@ -90,6 +108,7 @@ class FeatInterLayers(nn.Module):
     def forward(self, v_input, e_input):
         return self.model((v_input, e_input))
 
+      
 class MLPModule(nn.Module):
     """
     MLPModule 
@@ -126,27 +145,14 @@ class MLPModule(nn.Module):
     """
     def __init__(self, mlp_layers, activation_func='ReLU', dropout=0.0):
         super().__init__()
-        if activation_func == None or isinstance(activation_func, nn.Module):
-            activation_func = activation_func
-        elif type(activation_func) == str:
-            if activation_func == 'ReLU':
-                activation_func = nn.ReLU()
-            elif activation_func == 'Sigmoid':
-                activation_func = nn.Sigmoid()
-            elif activation_func == 'Tanh':
-                activation_func = nn.Tanh()
-            elif activation_func == 'LeakyReLU':
-                activation_func = nn.LeakyReLU()
-            else:
-                raise ValueError(f'activation function type "{activation_func}"  is not supported in MLPMoudle, check spelling or pass in a instance of torch.nn.Module.')
-        else: 
-            raise ValueError('"activation_func" must be a str or a instance of torch.nn.Module. ')
+        activation_func = get_act(activation_func)
         self.mlp_layers = mlp_layers
         self.model = []
         for idx, layer in enumerate((zip(self.mlp_layers[ : -1], self.mlp_layers[1 : ]))):
             self.model.append(nn.Dropout(dropout))
             self.model.append(nn.Linear(*layer))
-            self.model.append(activation_func)
+            if activation_func is not None:
+                self.model.append(activation_func)
         self.model = nn.Sequential(*self.model)
     
     def add_modules(self, *args):
@@ -165,3 +171,46 @@ class MLPModule(nn.Module):
     def forward(self, input):
         return self.model(input)
 
+
+class GMFScorer(torch.nn.Module):
+    def __init__(self, emb_dim, bias=False, activation='relu') -> None:
+        super().__init__()
+        self.emb_dim = emb_dim
+        self.W = torch.nn.Linear(self.emb_dim, 1, bias=False)
+        self.activation = get_act(activation)
+
+    def forward(self, query, key):
+        assert query.dim() <= key.dim(), 'query dim must be smaller than or euqal to key dim'
+        if query.dim() < key.dim():
+            query = query.unsqueeze(1)
+        else:
+            if query.size(0) != key.size(0):
+                query = query.unsqueeze(1).repeat(1, key.size(0), 1)
+                key = key.unsqueeze(0).repeat(query.size(0), 1, 1)
+        h = query * key
+        return self.activation(self.W(h)).squeeze(-1)
+
+
+class FusionMFMLPScorer(torch.nn.Module):
+    def __init__(self, emb_dim, hidden_size, mlp, bias=False, activation='relu') -> None:
+        super().__init__()
+        self.emb_dim=emb_dim
+        self.hidden_size = hidden_size
+        self.bias = bias
+        self.activation = activation
+        self.W = torch.nn.Linear(self.emb_dim+self.hidden_size, 1, bias=False)
+        self.activation = get_act(activation)
+        self.mlp = mlp
+
+    def forward(self, query, key):
+        assert query.dim() <= key.dim(), 'query dim must be smaller than or euqal to key dim'
+        if query.dim() < key.dim():
+            query = query.unsqueeze(1).repeat(1, key.shape[1], 1)
+        else:
+            if query.size(0) != key.size(0):
+                query = query.unsqueeze(1).repeat(1, key.size(0), 1)
+                key = key.unsqueeze(0).repeat(query.size(0), 1, 1)
+        h_mf = query * key 
+        h_mlp = self.mlp(torch.cat([query, key], dim=-1))
+        h = self.W(torch.cat([h_mf, h_mlp], dim=-1))
+        return self.activation(h).squeeze(-1)

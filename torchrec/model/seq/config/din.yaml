@@ -1,0 +1,7 @@
+n_head: 4
+dropout: 0.3
+attention_type: multiheadattention
+negative_count: 20
+batch_size: 32
+eval_batch_size: 32
+gpu: [2,]
