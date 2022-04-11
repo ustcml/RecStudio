@@ -1,0 +1,4 @@
+embed_dim: 64
+negative_count: 1
+dropout: 0.3
+negative_count: ~

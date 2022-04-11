@@ -3,3 +3,4 @@ train_repetitive: True
 eval_batch_size: 128
 
 use_fields: ['user_id', 'item_id', 'rating']
+split_ratio: 2

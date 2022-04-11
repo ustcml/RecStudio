@@ -1,7 +1,7 @@
 from typing import Any, Optional
 import torch.nn.functional as F
 from torchrec.utils.utils import set_color, parser_yaml, color_dict, print_logger
-from torchrec.data.dataset import AEDataset, MFDataset, SeqDataset
+from torchrec.data.dataset import AEDataset, MFDataset, SeqDataset, FullSeqDataset
 from torchrec.data.advance_dataset import ALSDataset
 from torchrec.ann import sampler
 from torch import optim
@@ -18,7 +18,11 @@ from pytorch_lightning.utilities.model_helpers import is_overridden
 from collections import OrderedDict
 # configure logging at the root level of lightning
 class Recommender(LightningModule, abc.ABC):
+    r"""The basic recommender model class.
 
+    Args: 
+        config(dict): configuration for the model.
+    """
     def __init__(self, config):
         super(Recommender, self).__init__()
         seed_everything(42, workers=True) ## Trainer(deterministic=False) 
@@ -32,6 +36,14 @@ class Recommender(LightningModule, abc.ABC):
         
     @staticmethod
     def add_model_specific_args(parent_parser):
+        r"""Add model specific command arguments for model.
+
+        Args:
+            parent_parser(argparse.Parser): the command line parser.
+
+        Returns:
+            argparse.Parser: the parser after adding specific arguments.
+        """
         parent_parser = Trainer.add_argparse_args(parent_parser)
         parser = parent_parser.add_argument_group("Recommender")
         parser.add_argument("--learning_rate", type=float, default=0.001, help='learning rate')
@@ -56,9 +68,21 @@ class Recommender(LightningModule, abc.ABC):
     
     @abc.abstractmethod
     def get_dataset_class(self):
+        r"""Configure specific dataset type for the model.
+
+        The optional dataset can be referred in `torchrec.dataset`.
+        """
         pass
 
     def load_dataset(self, data_config_file):
+        r"""Load dataset for the model.
+
+        Args:
+            data_config_file(str): the file path of the dataset file.
+
+        Returns:
+            list: A list contains train/valid/test data-[train, valid, test]
+        """
         cls = self.get_dataset_class()
         dataset = cls(data_config_file)
         if cls in (MFDataset, ALSDataset):
@@ -68,14 +92,38 @@ class Recommender(LightningModule, abc.ABC):
                 parameter['fmeval'] = True
         elif cls == AEDataset:
             parameter = {'shuffle': self.config.get('shuffle')}
-        elif cls == SeqDataset:
+        elif cls in (SeqDataset, FullSeqDataset):
             parameter = {'rep' : self.config.get('test_repetitive'),
                         'train_rep': self.config.get('train_repetitive')}
+        parameter['dataset_sampling_count'] = self.config.get('dataset_sampling_count')
         parameter = {k: v for k, v in parameter.items() if v is not None}
         return dataset.build(self.config['split_ratio'], **parameter)
 
     @abc.abstractmethod
     def init_model(self, train_data):
+        """Init model with some necessary layers.
+
+        Model structures are expected to be config here. Here is a simple example for GRU4Rec model:
+
+        **Example**
+
+            >>> self.hidden_size = self.config['hidden_size']
+            >>> self.num_layers = self.config['layer_num']
+            >>> self.dropout_rate = self.config['dropout_rate']
+            >>> self.emb_dropout = torch.nn.Dropout(self.dropout_rate)
+            >>> self.GRU = torch.nn.GRU(
+            >>>     input_size = self.embed_dim,
+            >>>     hidden_size = self.hidden_size,
+            >>>     num_layers = self.num_layers,
+            >>>     bias = False,
+            >>>     batch_first = True,
+            >>>     bidirectional = False
+            >>> )
+            >>> self.dense = torch.nn.Linear(self.hidden_size, self.embed_dim)
+
+        Args:
+            train_data(recstudio.data.Dataset): the train dataset. 
+        """
         self.frating = train_data.frating
         if self.fields is not None:
             assert self.frating in self.fields
@@ -87,6 +135,10 @@ class Recommender(LightningModule, abc.ABC):
         self.item_fields = train_data.item_feat.fields.intersection(self.fields)        
 
     def init_parameter(self):
+        r"""Init parameters in each layer if the model.
+        
+        `torch.nn.init.xavier_normal_` is used to initialize all the parameters.
+        """
         self.apply(init.xavier_normal_initialization)
 
 
@@ -127,9 +179,30 @@ class Recommender(LightningModule, abc.ABC):
             
     @abc.abstractmethod  
     def config_loss(self):
+        r"""Config model loss.
+        
+        In recommendation models, several loss functions are commonly used, such as 
+        SoftmaxLoss, BPRLoss, BCELoss, SampledSoftmaxLoss and so on. We provide the most common used loss function in the framework.
+
+        To config loss, please refer to `recstudio.model.loss`
+        """
         pass
     
     def get_optimizer(self, params):
+        r"""Return optimizer for specific parameters.
+
+        The optimizer can be configured in the config file with the key ``learner``. 
+        Supported optimizer: ``Adam``, ``SGD``, ``AdaGrad``, ``RMSprop``, ``SparseAdam``.
+
+        .. note::
+            If no learner is assigned in the configuration file, then ``Adam`` will be user.
+
+        Args:
+            params: the parameters to be optimized.
+        
+        Returns:
+            torch.optim.optimizer: optimizer according to the config.
+        """
         '''@nni.variable(nni.choice(0.1, 0.05, 0.01, 0.005, 0.001), name=learning_rate)'''
         learning_rate = self.config['learning_rate']
         '''@nni.variable(nni.choice(0.1, 0.01, 0.001, 0), name=decay)'''
@@ -151,6 +224,14 @@ class Recommender(LightningModule, abc.ABC):
         return optimizer
 
     def get_scheduler(self, optimizer):
+        r"""Return learning rate scheduler for the optimizer.
+
+        Args:
+            optimizer(torch.optim.Optimizer): the optimizer which need a scheduler.
+
+        Returns:
+            torch.optim.lr_scheduler: the learning rate scheduler.
+        """
         if self.config['scheduler'] is not None:
             if self.config['scheduler'].lower() == 'exponential':
                 scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.98)
@@ -181,7 +262,21 @@ class Recommender(LightningModule, abc.ABC):
         else:
             return optimizer
 
-    def fit(self, train_data, val_data=None, run_mode='detail'): #mode='tune'|'light'|'detail'
+    def fit(self, train_data, val_data=None, run_mode='detail'):
+        """Function to train model and make validation.
+
+        Args:
+            train_data(recstudio.data.MFDataset): train dataset.
+
+            val_data(recstudio.data.MFDataset, optimal): validation dataset. If None, there is no validation step.. Default: `None`.
+
+            run_mode(str, optimal): mode for training. There are 3 choices: [``tune``,``light``,``detail``]
+
+        .. note::
+            The training procedure will run in terminal in light and detail mode, while detail mode display more training details.
+            
+            The ``tune`` mode is used under the ``nni`` environment.  
+        """
         self.run_mode = run_mode
         self.val_check = val_data is not None and self.config['val_metrics'] is not None
         if run_mode == 'tune' and "NNI_OUTPUT_DIR" in os.environ: 
@@ -215,6 +310,16 @@ class Recommender(LightningModule, abc.ABC):
         pass
 
     def evaluate(self, test_data, verbose=True):
+        r""" Predict for test data.
+
+        Args: 
+            test_data(recstudio.data.Dataset): The dataset of test data, which is generated by RecStudio.
+
+            verbose(bool, optimal): whether to show the detailed information.
+
+        Returns:
+            dict: dict of metrics. The key is the name of metrics.
+        """
         test_loader = test_data.eval_loader(batch_size=self.config['eval_batch_size'], \
             num_workers=self.config['num_workers'])
         output = self.trainer.test(dataloaders=test_loader, ckpt_path='best', verbose=False)[0]
@@ -357,10 +462,16 @@ class ItemTowerRecommender(Recommender):
                 output = sampler.PopularSamplerModel(train_data.item_freq[1:], \
                     self.score_func, self.config['item_freq_process_mode'])
             elif self.config['sampler'].lower() == 'midx_uni':
-                output = sampler.SoftmaxApprSamplerUniform(train_data.num_items-1, \
+                output = sampler.MIDXSamplerUniform(train_data.num_items-1, \
                     self.config['sampler_num_centers'], self.score_func)
             elif self.config['sampler'].lower() == 'midx_pop':
-                output = sampler.SoftmaxApprSamplerPop(train_data.item_freq[1:], self.config['sampler_num_centers'], \
+                output = sampler.MIDXSamplerPop(train_data.item_freq[1:], self.config['sampler_num_centers'], \
+                    self.score_func, self.config['item_freq_process_mode'])
+            elif self.config['sampler'].lower() == 'cluster_uni':
+                output = sampler.ClusterSamplerUniform(self.config['sampler_num_centers'], \
+                    self.score_func, self.config['item_freq_process_mode'])
+            elif self.config['sampler'].lower() == 'cluster_pop':
+                output = sampler.ClusterSamplerPop(train_data.item_freq[1:], self.config['sampler_num_centers'], \
                     self.score_func, self.config['item_freq_process_mode'])
         else:
             output = sampler.UniformSampler(train_data.num_items-1, self.score_func)
@@ -375,8 +486,6 @@ class ItemTowerRecommender(Recommender):
             return output[1:]
     
     def build_ann_index(self):
-        # faiss.METRIC_INNER_PRODUCT
-        #item_vector = self.get_item_vector().detach().clone()
         item_vector = self.item_vector
         if isinstance(self.score_func, scorer.InnerProductScorer):
             metric = faiss.METRIC_INNER_PRODUCT
@@ -388,8 +497,6 @@ class ItemTowerRecommender(Recommender):
         else:
             raise ValueError(f'ANN index do not support the {type(self.score_func).__name__}')
         num_item, dim = item_vector.shape
-        #if self.config['ann'] is None:
-        #    self.ann_search = 'Flat' if num_item < 50000 else 'IVF%d,Flat' % int(4*np.sqrt(num_item))
         if 'HNSWx' in self.config['ann']['index']:
             self.ann_search = self.config['ann']['index'].replace('x', '32')
         elif 'IVFx' in self.config['ann']['index']:
@@ -411,7 +518,6 @@ class ItemTowerRecommender(Recommender):
     
     def prepare_testing(self):
         self.register_buffer('item_vector', self.get_item_vector().detach().clone())
-        #self.item_vector = self.get_item_vector().detach().clone()
         if self.use_index:
             self.ann_index = self.build_ann_index()
             

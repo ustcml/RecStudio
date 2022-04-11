@@ -3,7 +3,14 @@ from torch.utils.data import DataLoader
 from torchrec.data.dataset import MFDataset, SeqDataset, SortedDataSampler
 import torch
 class ALSDataset(MFDataset):
-    def build(self, ratio_or_num, shuffle=True, split_mode='user_entry'):
+    r"""ALSDataset is a dataset designed for Alternating Least Squares algorithms.
+
+    For Alternating Least Squares algorithms, embeddings of users and items are optimized alternatively. 
+    So the data provided should be ``<u, Iu>`` and ``<i, Ui>`` alternatively.
+    """
+    def build(self, ratio_or_num, shuffle=True, split_mode='user_entry', dataset_sampling_count=None):
+        self.neg_sampling_count = dataset_sampling_count
+        self._init_negative_sampler()
         datasets = self._build(ratio_or_num, shuffle, split_mode, True, False)
         data_index = datasets[0].inter_feat_subset
         user_ids = self.inter_feat.get_col(self.fuid)[data_index]
@@ -13,6 +20,15 @@ class ALSDataset(MFDataset):
         return datasets
     
     def transpose(self):
+        r"""Transpose user and item.
+        
+        The transpose operation will return a copy of the dataset after exchanging user and item.
+        The returned dataset can easily return an item and all the interacted users, while the original
+        dataset can only provide the user and its interacted items.
+
+        Returns:
+            torchrec.dataset.ALSDataset: the transposed dataset.
+        """
         output = copy.copy(self)
         item_ids = self.inter_feat.get_col(self.fiid)
         data_index = self.inter_feat_subset
@@ -58,4 +74,8 @@ class ALSDataset(MFDataset):
 
 
 class SessionDataset(SeqDataset):
+    r"""Dataset for session-based recommendation.
+
+    Not implemented now.
+    """
     pass
