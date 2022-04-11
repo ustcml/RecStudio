@@ -411,6 +411,7 @@ class ClusterSamplerPop(ClusterSamplerUniform):
 #TODO: avoid sampling pos items in MIDX and Cluster
 #TODO aobpr sampler
 
+# TODO: test and plot
 def test():
     item_emb = torch.rand(100, 64).cuda()
     query = torch.rand(2, 10, 64).cuda()
@@ -436,4 +437,4 @@ def test():
     pos_prob, neg_id, neg_prob = masked_uniform(query, 100000, pos_id)
     print('end')
 
-test()
+# test()

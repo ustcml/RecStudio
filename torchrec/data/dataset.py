@@ -9,7 +9,19 @@ import scipy.sparse as ssp
 from torchrec.utils.utils import parser_yaml
 from torchrec.ann.sampler import MaskedUniformSampler
 class MFDataset(Dataset):
+    r""" Dataset for Matrix Factorized Methods.
+
+    The basic dataset class in RecStudio.
+    """
     def __init__(self, config_path):
+        r"""Load all data.
+        
+        Args:
+            config_path(str): config file path for the dataset.
+
+        Returns: 
+            recstudio.data.dataset.MFDataset: The ingredients list.
+        """
         self.config = parser_yaml(config_path)
         self._init_common_field()
         self._load_all_data(self.config['data_dir'], self.config['field_separator'])
@@ -17,9 +29,17 @@ class MFDataset(Dataset):
         self._filter(self.config['min_user_inter'], self.config['min_item_inter'])
         self._map_all_ids()
         self._post_preprocess()
-        # TODO: save and load cache here.
+        # saved_object = {
+        #     'field2type': self.field2type, 'field2token2idx': self.field2token2idx, 'field2tokens': self.field2tokens,
+        #     'field2maxlen': self.field2maxlen, 'fuid': 
+        # }
+        self.save(save_path) 
+        # self =
+        # TODO: save and load cache here. hash config as cache file name
 
     def _init_common_field(self):
+        r"""Inits several attributes.
+        """
         self.field2type = {}
         self.field2token2idx = {}
         self.field2tokens = {}
@@ -44,6 +64,7 @@ class MFDataset(Dataset):
         print(feat2)
 
     def _filter_ratings(self):
+        r"""Filter out the interactions whose rating is below `rating_threshold` in config."""
         if self.config['rating_threshold'] is not None:
             if not self.config['drop_low_rating']:
                 self.inter_feat[self.frating] = (self.inter_feat[self.frating] > self.config['rating_threshold']).astype(float)
@@ -52,6 +73,7 @@ class MFDataset(Dataset):
                 self.inter_feat[self.frating] = 1.0
 
     def _load_all_data(self, data_dir, field_sep):
+        r"""Load features for user, item, interaction and network."""
         # load interaction features
         inter_feat_path = os.path.join(data_dir, self.config['inter_feat_name'])
         self.inter_feat = self._load_feat(inter_feat_path, field_sep, self.config['inter_feat_field'])
@@ -105,6 +127,12 @@ class MFDataset(Dataset):
                     self.network_feat[i] = self._load_feat(os.path.join(data_dir, net_name), field_sep, net_field)
                 
     def _fill_nan(self, feat, mapped=False):
+        r"""Fill the missing data in the original data.
+
+        For token type, `[PAD]` token is used. 
+        For float type, the mean value is used. 
+        For token_seq type, the empty numpy array is used.
+        """
         for field in feat:
             ftype = self.field2type[field]
             if ftype == 'float':
@@ -116,6 +144,7 @@ class MFDataset(Dataset):
                 feat[field] = feat[field].map(lambda x: np.array([], dtype=dtype) if isinstance(x, float) else x)
 
     def _load_feat(self, feat_path, sep, feat_cols, update_dict=True):
+        r"""Load the feature from a given a feature file."""
         fields, types_of_fields = zip(*(_.split(':') for _ in feat_cols))
         dtype = (np.float64 if _ == 'float' else str for _ in types_of_fields)
         if update_dict:
@@ -156,6 +185,7 @@ class MFDataset(Dataset):
         return feat_list
 
     def _map_all_ids(self):
+        r"""Map tokens to index."""
         fields_share_space = self._get_map_fields()
         feat_list = self._get_feat_list()
         for field_set in fields_share_space:
@@ -289,6 +319,9 @@ class MFDataset(Dataset):
         self.inter_feat.reset_index(drop=True, inplace=True)
  
     def get_graph(self, idx, value_field=None):
+        r"""Get all network graph.
+        If multiple graphs are used, TODO: complete
+        """
         from scipy.sparse import csc_matrix
         if idx == 0:
             source_field = self.fuid
@@ -316,6 +349,7 @@ class MFDataset(Dataset):
         return csc_matrix((vals, (rows, cols)), (self.num_values(source_field), self.num_values(target_field)))
 
     def _split_by_ratio(self, ratio, data_count, user_mode):
+        r"""Split dataset into train/valid/test by specific ratio."""
         m = len(data_count)
         if not user_mode:
             splits = np.outer(data_count, ratio).astype(np.int32)
@@ -340,6 +374,14 @@ class MFDataset(Dataset):
         return splits, data_count.index if m > 1 else None
     
     def _split_by_leave_one_out(self, leave_one_num, data_count, rep=True):
+        r"""Split dataset into train/valid/test by leave one out method.
+        The split methods are usually used for sequential recommendation, where the last item of the item sequence will be used for test.
+
+        Args:
+            leave_one_num(int): the last ``leave_one_num`` items of the sequence will be splited out. 
+            data_count(pandas.DataFrame or numpy.ndarray):  entry range for each user or number of all entries.
+            rep(bool, optional): whether there should be repititive items in the sequence.
+        """
         m = len(data_count)
         cumsum = data_count.cumsum()[:-1]
         if rep:
@@ -367,6 +409,8 @@ class MFDataset(Dataset):
                 
     
     def _get_data_idx(self, splits):
+        r""" Return data index for train/valid/test dataset.
+        """
         splits, uids = splits
         data_idx = [list(zip(splits[:, i-1], splits[:, i])) for i in range(1, splits.shape[1])]
         if not getattr(self, 'fmeval', False):
@@ -383,15 +427,22 @@ class MFDataset(Dataset):
                     uids, counts = data.unique_consecutive(return_counts=True)
                     cumsum = torch.hstack([torch.tensor([0]), counts.cumsum(-1)]) + start
                     d.append(torch.tensor([[u, st, en] for u, st, en in zip(uids, cumsum[:-1], cumsum[1:])]))
-                #data_idx = [torch.from_numpy(np.hstack([np.arange(*e) for e in _])) for _ in data_idx]
                 return d
         else:
             return [torch.from_numpy(np.hstack([np.arange(*e) for e in _])) for _ in data_idx]
     
     def __len__(self):
+        r"""Return the length of the dataset."""
         return len(self.data_index)
 
     def __getitem__(self, index):
+        r"""Get data at specific index.
+
+        Args:
+            index(int): The data index.
+        Returns:
+            dict: A dict contains different feature.
+        """
         if self.data_index.dim() > 1:
             idx = self.data_index[index]
             data = {self.fuid: idx[:,0]}
@@ -428,9 +479,6 @@ class MFDataset(Dataset):
             self.negative_sampler = MaskedUniformSampler(self.num_items-1)
         else:
             self.negative_sampler = None
-        # user_count = self.user_count[uid].max()
-        # user_hist = self.user_hist[uid][:, 0:user_count]
-
 
     def _copy(self, idx):
         d = copy.copy(self)
@@ -438,6 +486,21 @@ class MFDataset(Dataset):
         return d
     
     def build(self, ratio_or_num, shuffle=True, split_mode='user_entry', fmeval=False, dataset_sampling_count=None):
+        """Build dataset.
+
+        Args:
+            ratio_or_num(numeric): split ratio for data preparition. If given list of float, the dataset will be splited by ratio. If given a integer, leave-n method will be used.
+            
+            shuffle(bool, optional): set True to reshuffle the whole dataset each epoch. Default: ``True``
+            
+            split_mode(str, optional): controls the split mode. If set to ``user_entry``, then the interactions of each user will be splited into 3 cut. 
+            If ``entry``, then dataset is splited by interactions. If ``user``, all the users will be splited into 3 cut. Default: ``user_entry``
+            
+            fmeval(bool, optional): set True for MFDataset and ALSDataset when use TowerFreeRecommender. Default: ``False``
+
+        Returns:
+            list: A list contains train/valid/test data-[train, valid, test]
+        """
         self.fmeval = fmeval
         self.neg_sampling_count = dataset_sampling_count
         self._init_negative_sampler()
@@ -490,6 +553,8 @@ class MFDataset(Dataset):
         return datasets
 
     def dataframe2tensors(self):
+        r"""Convert the data type from TensorFrame to Tensor
+        """
         self.inter_feat = TensorFrame.fromPandasDF(self.inter_feat, self)
         self.user_feat = TensorFrame.fromPandasDF(self.user_feat, self)
         self.item_feat = TensorFrame.fromPandasDF(self.item_feat, self)
@@ -498,6 +563,25 @@ class MFDataset(Dataset):
                 self.network_feat[i] = TensorFrame.fromPandasDF(self.network_feat[i], self)
     
     def train_loader(self, batch_size, shuffle=True, num_workers=1, drop_last=False, load_combine=False):
+        r"""Return a dataloader for training.
+
+        Args:
+            batch_size(int): the batch size for training data.
+
+            shuffle(bool,optimal): set to True to have the data reshuffled at every epoch. Default:``True``.
+
+            num_workers(int, optimal): how many subprocesses to use for data loading. ``0`` means that the data will be loaded in the main process. (default: ``1``)
+
+            drop_last(bool, optimal): set to True to drop the last mini-batch if the size is smaller than given batch size. Default: ``False``
+
+            load_combine(bool, optimal): set to True to combine multiple loaders as :doc:`ChainedDataLoader <chaineddataloader>`. Default: ``False``
+        
+        Returns:
+            list or ChainedDataLoader: list of loaders if load_combine is True else ChainedDataLoader.
+
+        .. note::
+            Due to that index is used to shuffle the dataset and the data keeps remained, `num_workers > 0` may get slower speed.
+        """
         if not hasattr(self, 'loaders'):
             return self.loader(batch_size, shuffle, num_workers, drop_last)
         else:
@@ -543,6 +627,16 @@ class MFDataset(Dataset):
                 self.item_feat.add_field('item_hist', self.get_hist(False))
     
     def get_hist(self, isUser=True):
+        r"""Get user or item interaction history.
+
+        Args:
+            isUser(bool, optional): Default: ``True``.
+
+        Returns:
+            torch.Tensor: padded user or item hisoty.
+
+            torch.Tensor: length of the history sequence.
+        """
         user_array = self.inter_feat.get_col(self.fuid)[self.inter_feat_subset]
         item_array = self.inter_feat.get_col(self.fiid)[self.inter_feat_subset]
         sorted, index = torch.sort(user_array if isUser else item_array)
@@ -551,7 +645,6 @@ class MFDataset(Dataset):
         tensors = [torch.tensor([], dtype=torch.int64) for _ in range(self.num_users if isUser else self.num_items)]
         for i, l in zip(user_item, list_):
             tensors[i] = l
-        #tensors = np.array(tensors, dtype=object)
         user_count = torch.tensor([len(e) for e in tensors])
         tensors = pad_sequence(tensors, batch_first=True)
         return tensors, user_count
@@ -559,6 +652,8 @@ class MFDataset(Dataset):
 
     @property
     def inter_feat_subset(self):
+        r""" Data index.
+        """
         if self.data_index.dim() > 1:
             return torch.cat([torch.arange(s, e) for s, e in zip(self.data_index[:,1], self.data_index[:, 2])])
         else:
@@ -566,6 +661,11 @@ class MFDataset(Dataset):
 
     @property
     def item_freq(self):
+        r""" Item frequency (or popularity).
+
+        Returns:
+            torch.Tensor: ``[num_items,]``. The times of each item appears in the dataset.
+        """
         if not hasattr(self, 'data_index'):
             raise ValueError('please build the dataset first by call the build method')
         l = self.inter_feat.get_col(self.fiid)[self.inter_feat_subset]
@@ -576,17 +676,43 @@ class MFDataset(Dataset):
 
     @property
     def num_users(self):
+        r"""Number of users.
+
+        Returns:
+            int: number of users.
+        """
         return self.num_values(self.fuid)
     
     @property
     def num_items(self):
+        r"""Number of items.
+
+        Returns:
+            int: number of items.
+        """
         return self.num_values(self.fiid)
     
     @property
     def num_inters(self):
+        r"""Number of total interaction numbers.
+
+        Returns:
+            int: number of interactions in the dataset.
+        """
         return len(self.inter_feat)
 
     def num_values(self, field):
+        r"""Return number of values in specific field.
+
+        Args:
+            field(str): the field to be counted.
+
+        Returns:
+            int: number of values in the field.
+
+        .. note::
+            This method is used to return ``num_items``, ``num_users`` and ``num_inters``.
+        """
         if 'token' not in self.field2type[field]:
             return self.field2maxlen[field]
         else:
@@ -594,6 +720,21 @@ class MFDataset(Dataset):
         
 class AEDataset(MFDataset):
     def build(self, ratio_or_num, shuffle=False, dataset_sampling_count=None):
+        """Build dataset.
+
+        Args:
+            ratio_or_num(numeric): split ratio for data preparition. If given list of float, the dataset will be splited by ratio. If given a integer, leave-n method will be used.
+            
+            shuffle(bool, optional): set True to reshuffle the whole dataset each epoch. Default: ``True``
+            
+            split_mode(str, optional): controls the split mode. If set to ``user_entry``, then the interactions of each user will be splited into 3 cut. 
+            If ``entry``, then dataset is splited by interactions. If ``user``, all the users will be splited into 3 cut. Default: ``user_entry``
+            
+            fmeval(bool, optional): set True for MFDataset and ALSDataset when use TowerFreeRecommender. Default: ``False``
+
+        Returns:
+            list or ChainedDataLoader: list of loaders if load_combine is True else ChainedDataLoader.
+        """
         self.neg_sampling_count = dataset_sampling_count
         self._init_negative_sampler()
         return self._build(ratio_or_num, shuffle, 'user_entry', True, False)
@@ -715,8 +856,30 @@ class FullSeqDataset(SeqDataset):
 
                
 class TensorFrame(Dataset):
+    r"""The main data structure used to save interaction data in RecStudio dataset.
+
+    TensorFrame class can be regarded as one enhanced dict, which contains several fields of data (like: ``user_id``, ``item_id``, ``rating`` and so on).
+    And TensorFrame have some useful strengths:
+    
+    - Generated from pandas.DataFrame directly.
+
+    - Easy to get/add/remove fields.
+
+    - Easy to get each interaction information.
+
+    - Compatible for torch.utils.data.DataLoader, which provides a loader method to return batch data.
+    """
     @classmethod
     def fromPandasDF(cls, dataframe, dataset):
+        r"""Get a TensorFrame from a pandas.DataFrame.
+
+        Args:
+            dataframe(pandas.DataFrame): Dataframe read from csv file.
+            dataset(recstudio.data.MFDataset): target dataset where the TensorFrame is used. 
+
+        Return:
+            recstudio.data.TensorFrame: the TensorFrame get from the dataframe.
+        """
         data = {}
         length = len(dataframe.index)
         for field in dataframe:
@@ -739,6 +902,14 @@ class TensorFrame(Dataset):
         self.length = length
 
     def get_col(self, field):
+        r"""Get data from the specific field.
+
+        Args:
+            field(str): field name.
+
+        Returns:
+            torch.Tensor: data of corresponding filed.
+        """
         return self.data[field]
 
     def __len__(self):
@@ -751,19 +922,53 @@ class TensorFrame(Dataset):
         return ret
     
     def del_fields(self, keep_fields):
+        r"""Delete fields that are *not in* ``keep_fields``.
+        
+        Args:
+            keep_fields(list[str],set[str] or dict[str]): the fields need to remain.
+        """
         for f in self.fields:
             if f not in keep_fields:
                 del self.data[f]
     
     def loader(self, batch_size, shuffle=False, num_workers=1, drop_last=False):
+        r"""Create dataloader.
+
+        Args:
+            batch_size(int): batch size for mini batch.
+
+            shuffle(bool, optional): whether to shuffle the whole data. (default `False`).
+
+            num_workers(int, optional): how many subprocesses to use for data loading. ``0`` means that the data will be loaded in the main process. (default: `1`).
+
+            drop_last(bool, optinal): whether to drop the last mini batch when the size is smaller than the `batch_size`.
+
+        Returns:
+            torch.utils.data.DataLoader: the dataloader used to load all the data in the TensorFrame.
+        """
         sampler = DataSampler(self, batch_size, shuffle, drop_last)
         output = DataLoader(self, sampler=sampler, batch_size=None, shuffle=False, num_workers=num_workers)
         return output
 
     def add_field(self, field, value):
+        r"""Add field to the TensorFrame.
+
+        Args:
+            field(str): the field name to be added.
+
+            value(torch.Tensor): the value of the field.
+        """
         self.data[field] = value
 
     def reindex(self, idx):
+        r"""Shuffle the data according to the given `idx`.
+
+        Args:
+            idx(numpy.ndarray): the given data index.
+
+        Returns:
+            recstudio.data.TensorFrame: a copy of the TensorFrame after reindexing.
+        """
         output = copy.deepcopy(self)
         for f in output.fields:
             output.data[f] = output.data[f][idx]
@@ -771,10 +976,26 @@ class TensorFrame(Dataset):
 
     @property
     def fields(self):
+        r"""Return all the fields in the TensorFrame."""
         return set(self.data.keys())
 
 
 class DataSampler(Sampler):
+    r"""Data sampler to return index for batch data.
+
+    The datasampler generate batches of index in the `data_source`, which can be used in dataloader to sample data.
+
+    Args:
+        data_source(Sized): the dataset, which is required to have length.
+        
+        batch_size(int): batch size for each mini batch.
+
+        shuffle(bool, optional): whether to shuffle the dataset each epoch. (default: `True`)
+
+        drop_last(bool, optional): whether to drop the last mini batch when the size is smaller than the `batch_size`.(default: `False`)
+
+        generator(optinal): generator to generate rand numbers. (default: `None`)
+    """
     def __init__(self, data_source:Sized, batch_size, shuffle=True, drop_last=False, generator=None):
         self.data_source = data_source
         self.batch_size = batch_size
@@ -807,6 +1028,27 @@ class DataSampler(Sampler):
 
 
 class SortedDataSampler(Sampler):
+    r"""Data sampler to return index for batch data, aiming to collect data with similar lengths into one batch.
+
+    In order to save memory in training producure, the data sampler collect data point with similar length into one batch. 
+    
+    For example, in sequential recommendation, the interacted item sequence of different users may vary differently, which may cause
+    a lot of padding. By considering the length of each sequence, gathering those sequence with similar lengths in the same batch can
+    tackle the problem. 
+
+    If `shuffle` is `True`, length of sequence and the random index are combined together to reduce padding without randomness.
+
+    Args:
+        data_source(Sized): the dataset, which is required to have length.
+        
+        batch_size(int): batch size for each mini batch.
+
+        shuffle(bool, optional): whether to shuffle the dataset each epoch. (default: `True`)
+
+        drop_last(bool, optional): whether to drop the last mini batch when the size is smaller than the `batch_size`.(default: `False`)
+
+        generator(optinal): generator to generate rand numbers. (default: `None`)
+    """
     def __init__(self, data_source:Sized, batch_size, shuffle=False, drop_last=False, generator=None):
         self.data_source = data_source
         self.batch_size = batch_size
@@ -836,6 +1078,15 @@ class SortedDataSampler(Sampler):
     
 
 class ChainedDataLoader:
+    r"""ChainedDataLoader aims to combine several loaders in a chain.
+
+    In some cases, several different dataloaders are used for one algorithm.
+
+    Args:
+        loaders(list[torch.utils.data.DataLoader]): list of dataloaders.
+
+        nepoch(list or numpy.ndarray, optional): list with the same length as loaders, controls how many epochs each dataloader iterates for. (default: `None`) 
+    """
     def __init__(self, loaders, nepoch=None) -> None:
         self.loaders = loaders
         self.epoch = -1

@@ -1,7 +1,15 @@
 import torch
 import torch.nn.functional as F
 class FullScoreLoss(torch.nn.Module):
+    r"""Calculate loss with positive scores and scores on all items.
+
+    The loss need user's perference scores on positive items(ground truth) and all other items. 
+    However, due to the item numbers are very huge in real-world datasets, calculating scores on all items
+    may be very time-consuming. So the loss is seldom used in large-scale dataset.
+    """
     def forward(self, label, pos_score, all_score):
+        r"""
+        """
         pass
 
 class PairwiseLoss(torch.nn.Module):
