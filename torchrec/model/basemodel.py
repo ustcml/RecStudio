@@ -71,6 +71,7 @@ class Recommender(LightningModule, abc.ABC):
         elif cls in (SeqDataset, FullSeqDataset):
             parameter = {'rep' : self.config.get('test_repetitive'),
                         'train_rep': self.config.get('train_repetitive')}
+        parameter['dataset_sampling_count'] = self.config.get('dataset_sampling_count')
         parameter = {k: v for k, v in parameter.items() if v is not None}
         return dataset.build(self.config['split_ratio'], **parameter)
 

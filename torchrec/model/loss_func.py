@@ -47,7 +47,7 @@ class SampledSoftmaxLoss(PairwiseLoss):
         new_pos = pos_score - log_pos_prob
         new_neg = neg_score - log_neg_prob
         if new_pos.dim() < new_neg.dim():
-            new_pos.sequeeze_(-1)
+            new_pos.unsqueeze_(-1)
         new_neg = torch.cat([new_pos, new_neg], dim=-1)
         output = torch.logsumexp(new_neg, dim=-1, keepdim=True) - new_pos
         notpadnum = torch.logical_not(torch.isinf(pos_score)).float().sum(-1)

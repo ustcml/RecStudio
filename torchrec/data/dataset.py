@@ -7,6 +7,7 @@ import pandas as pd
 import os,copy, torch, math
 import scipy.sparse as ssp
 from torchrec.utils.utils import parser_yaml
+from torchrec.ann.sampler import MaskedUniformSampler
 class MFDataset(Dataset):
     def __init__(self, config_path):
         self.config = parser_yaml(config_path)
@@ -16,6 +17,7 @@ class MFDataset(Dataset):
         self._filter(self.config['min_user_inter'], self.config['min_item_inter'])
         self._map_all_ids()
         self._post_preprocess()
+        # TODO: save and load cache here.
 
     def _init_common_field(self):
         self.field2type = {}
@@ -237,6 +239,8 @@ class MFDataset(Dataset):
             if self.field2type[self.ftime] == 'float':
                 self.inter_feat.sort_values(by=[self.fuid, self.ftime], inplace=True)
                 self.inter_feat.reset_index(drop=True, inplace=True)
+            elif self.field2type[self.ftime] == 'str':
+                self.inter_feat[self.ftime] = pd.to_datetime(self.inter_feat[self.ftime], unit='s')
             else:
                 raise ValueError('The field [{self.ftime}] should be float type')
         self._prepare_user_item_feat()
@@ -406,20 +410,37 @@ class MFDataset(Dataset):
             uid, iid = data[self.fuid], data[self.fiid]
             data.update(self.user_feat[uid])
             data.update(self.item_feat[iid])
-        
+         
         if getattr(self, 'eval_mode', False) and 'user_hist' not in data:
             user_count = self.user_count[data[self.fuid]].max()
-            data['user_hist'] = self.user_hist[data[self.fuid]][:, 0:user_count]
-
+            user_hist = self.user_hist[data[self.fuid]][:, 0:user_count]
+            
+            data['user_hist'] = user_hist
+        else: 
+            if self.neg_sampling_count is not None:
+                user_count = self.user_count[data[self.fuid]].max()
+                user_hist = self.user_hist[data[self.fuid]][:, 0:user_count]
+                _, data['neg_item'], _ = self.negative_sampler(data[self.fuid].view(-1,1), self.neg_sampling_count, user_hist)
         return data
+
+    def _init_negative_sampler(self):
+        if self.neg_sampling_count is not None:
+            self.negative_sampler = MaskedUniformSampler(self.num_items-1)
+        else:
+            self.negative_sampler = None
+        # user_count = self.user_count[uid].max()
+        # user_hist = self.user_hist[uid][:, 0:user_count]
+
 
     def _copy(self, idx):
         d = copy.copy(self)
         d.data_index = idx
         return d
     
-    def build(self, ratio_or_num, shuffle=True, split_mode='user_entry', fmeval=False):
+    def build(self, ratio_or_num, shuffle=True, split_mode='user_entry', fmeval=False, dataset_sampling_count=None):
         self.fmeval = fmeval
+        self.neg_sampling_count = dataset_sampling_count
+        self._init_negative_sampler()
         return self._build(ratio_or_num, shuffle, split_mode, True, False)
 
     def _build(self, ratio_or_num, shuffle, split_mode, drop_dup, rep):
@@ -572,7 +593,9 @@ class MFDataset(Dataset):
             return len(self.field2tokens[field])
         
 class AEDataset(MFDataset):
-    def build(self, ratio_or_num, shuffle=False):
+    def build(self, ratio_or_num, shuffle=False, dataset_sampling_count=None):
+        self.neg_sampling_count = dataset_sampling_count
+        self._init_negative_sampler()
         return self._build(ratio_or_num, shuffle, 'user_entry', True, False)
     
     def _get_data_idx(self, splits):
@@ -601,6 +624,12 @@ class AEDataset(MFDataset):
         
         if getattr(self, 'eval_mode', False) and 'user_hist' not in data:
             data['user_hist'] = data['in_item_id']
+
+        if getattr(self, 'eval_mode', False) and 'user_hist' not in data:
+            data['user_hist'] = data['in_item_id']
+        else: 
+            if self.neg_sampling_count is not None:
+                _, data['neg_item'], _ = self.negative_sampler(data[self.fuid].view(-1,1), self.neg_sampling_count, data['in_item_id'])
         
         return data
 
@@ -610,9 +639,11 @@ class AEDataset(MFDataset):
         return index
 
 class SeqDataset(MFDataset):
-    def build(self, ratio_or_num, rep=True, train_rep=True):
+    def build(self, ratio_or_num, rep=True, train_rep=True, dataset_sampling_count=None):
         self.test_rep = rep
         self.train_rep = train_rep if not rep else True
+        self.neg_sampling_count = dataset_sampling_count
+        self._init_negative_sampler()
         return self._build(ratio_or_num, False, 'user_entry', False, rep)
 
     def _get_data_idx(self, splits):
@@ -656,6 +687,11 @@ class SeqDataset(MFDataset):
         if getattr(self, 'eval_mode', False) and 'user_hist' not in data:
             user_count = self.user_count[data[self.fuid]].max()
             data['user_hist'] = self.user_hist[data[self.fuid]][:, 0:user_count]
+        else: 
+            if self.neg_sampling_count is not None:
+                user_count = self.user_count[data[self.fuid]].max()
+                user_hist = self.user_hist[data[self.fuid]][:, 0:user_count]
+                _, data['neg_item'], _ = self.negative_sampler(data[self.fuid].view(-1,1), self.neg_sampling_count, user_hist)
 
         return data
     

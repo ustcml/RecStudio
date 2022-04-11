@@ -30,11 +30,15 @@ class EuclideanScorer(InnerProductScorer):
 
 class MLPScorer(InnerProductScorer):
     def __init__(self, transform):
+        super().__init__()
         self.trans = transform
 
     def forward(self, query, items):
         if query.dim() < items.dim():
-            intput = torch.cat((query.unsqueeze(1).repeat(1, items.shape[1], 1), items), dim=-1)
+            input = torch.cat((query.unsqueeze(1).repeat(1, items.shape[1], 1), items), dim=-1)
         else:
+            if query.size(0) != items.size(0):
+                query = query.unsqueeze(1).repeat(1, items.size(0), 1)
+                items = items.unsqueeze(0).repeat(query.size(0), 1, 1)
             input = torch.cat((query, items), dim=-1)
-        return self.trans(input)
+        return self.trans(input).squeeze(-1)
