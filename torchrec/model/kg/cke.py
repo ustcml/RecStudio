@@ -4,39 +4,52 @@ from torchrec.data import dataset
 from torchrec.ann import sampler 
 import torch
 import torch.nn.functional as F
+from torchrec.model.kg import KGLearning
+
+class CKE_TransRTower(KGLearning.TransRTower):
+    def config_loss(self):
+        return loss_func.BPRLoss()
 
 class CKE_item_encoder(torch.nn.Module):
-    def __init__(self, rec_item_emb, ent_emb):
+    def __init__(self, item_emb, ent_emb):
         super().__init__()
-        self.rec_item_emb = rec_item_emb
+        self.item_emb = item_emb
         self.ent_emb = ent_emb
     def forward(self, batch_data):
-        return self.rec_item_emb(batch_data) + self.ent_emb(batch_data)
-
+        return self.item_emb(batch_data) + self.ent_emb(batch_data)
+        
+r"""
+CKE
+#############
+    Collaborative knowledge base embedding for recommender systems(KDD'16)
+    Reference: 
+        https://dl.acm.org/doi/10.1145/2939672.2939673
+"""
 class CKE(basemodel.TwoTowerRecommender):
+    r"""
+    CKE jointly learns the latent representations in collaborative filtering as well as items' semantic representations from the knowledge base, 
+    using three elaborate components which can extract items' semantic representations from structural content, textual content and visual content, respectively. 
+    In this implementation, we only use TransR to extract items' structural representations. 
+    """
+    def __init__(self, config):
+        self.kg_index = config['kg_network_index'] # the knowledge graph index in the dataset configuration file.
+        super().__init__(config)
+
     def init_model(self, train_data):
-        self.ent_emb = torch.nn.Embedding(train_data.num_entities, self.embed_dim, padding_idx=0)
-        self.rec_item_emb = torch.nn.Embedding(train_data.num_items, self.embed_dim, padding_idx=0)
+        self.item_emb = torch.nn.Embedding(train_data.num_items, self.embed_dim, padding_idx=0)
+        # kg tower
+        self.TransRTower = CKE_TransRTower(self.config)
+        self.TransRTower.init_model(train_data)
         super().init_model(train_data)
-        # kg embeddings 
-        self.pro_embed_dim = self.config['pro_embed_dim']
-        self.fhid = train_data.fhid
-        self.ftid = train_data.ftid
-        self.frid = train_data.frid
-        self.pro_matrix_emb = torch.nn.Embedding(train_data.num_relations, self.embed_dim * self.pro_embed_dim, padding_idx=0)
-        self.rel_emb = torch.nn.Embedding(train_data.num_relations, self.pro_embed_dim, padding_idx=0)
-        # kg sampler, loss and score 
-        self.kg_sampler = sampler.UniformSampler(train_data.num_entities - 1)
-        self.kg_loss_fn = loss_func.BPRLoss()
-        self.kg_score = scorer.NormScorer(2)
 
     def get_dataset_class(self):
-        return dataset.KnowledgeBasedDataset
+        return dataset.MFDataset
 
     def set_train_loaders(self, train_data):
-        train_data.loaders = [train_data.recAndKgLoader]
+        # if iscombine == True, rec loader must be the first item of loaders.
+        train_data.loaders = [train_data.loader, train_data.network_feat[self.kg_index].loader]
         train_data.nepoch = None
-        return False
+        return True
 
     def config_scorer(self):
         return scorer.InnerProductScorer()
@@ -48,33 +61,16 @@ class CKE(basemodel.TwoTowerRecommender):
         return torch.nn.Embedding(train_data.num_users, self.embed_dim, padding_idx=0)
 
     def build_item_encoder(self, train_data):
-        return CKE_item_encoder(self.rec_item_emb, self.ent_emb)
-
-    def kg_forward(self, batch):
-        h_e = self.ent_emb(batch[self.fhid]).unsqueeze(1) # [batch_size, 1, dim] 
-        pos_t_e = self.ent_emb(batch[self.ftid]).unsqueeze(1)
-        r_e = self.rel_emb(batch[self.frid]) # [batch_size, pro_dim]
-        pro_e = self.pro_matrix_emb(batch[self.frid]).reshape(-1, self.embed_dim, self.pro_embed_dim) # [batch_size, dim, pro_dim]
-        # get negative tails
-        pos_prob, neg_t_id, neg_prob = self.kg_sampler(h_e.squeeze(1), self.neg_count, batch[self.ftid]) 
-        neg_t_e = self.ent_emb(neg_t_id) # [batch_size, neg, dim]
-        
-        h_e = torch.bmm(h_e, pro_e).squeeze(1) # [batch_size, pro_dim]
-        pos_t_e = torch.bmm(pos_t_e, pro_e).squeeze(1)
-        neg_t_e = torch.bmm(neg_t_e, pro_e) #[batch_size, neg, pro_dim]
-        r_e = F.normalize(r_e, p=2, dim=1)
-        h_e = F.normalize(h_e, p=2, dim=1)
-        pos_t_e = F.normalize(pos_t_e, p=2, dim=1)
-        neg_t_e = F.normalize(neg_t_e, p=2, dim=1)
-        pos_kg_score = self.kg_score(h_e + r_e, pos_t_e)
-        neg_kg_score = self.kg_score(h_e + r_e, neg_t_e)
-        return pos_kg_score, pos_prob, neg_kg_score, neg_prob
+        return CKE_item_encoder(self.item_emb, self.TransRTower.ent_emb)
 
     def training_step(self, batch, batch_idx):
+        # combine the batches in kg and rec loaders.
+        batch[0].update(batch[1])
+        batch = batch[0]
         rec_score = self.forward(batch, isinstance(self.loss_fn, loss_func.FullScoreLoss))
-        kg_score = self.kg_forward(batch)
-        loss = self.loss_fn(batch[self.frating], *rec_score) + self.kg_loss_fn(None, *kg_score)
+        kg_score = self.TransRTower.forward(batch)
+        loss = self.loss_fn(batch[self.frating], *rec_score) + self.TransRTower.loss_fn(None, *kg_score)
         return loss
 
     def get_item_vector(self):
-        return self.rec_item_emb.weight[1 : ] + self.ent_emb.weight[1 : self.rec_item_emb.num_embeddings]
+        return self.item_emb.weight[1 : ] + self.TransRTower.ent_emb.weight[1 : self.item_emb.num_embeddings]

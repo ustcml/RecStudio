@@ -1,4 +1,4 @@
-from torchrec.model.kg.layers import MLPModule
+from torchrec.model.module.layers import MLPModule
 from torchrec.model import basemodel, loss_func, scorer
 from torchrec.data import dataset
 from torchrec.ann import sampler 
@@ -7,22 +7,39 @@ import torch.nn.functional as F
 import torch
 import collections
 import numpy as np
+from torchrec.model.module import aggregator
 
-class Aggregator(nn.Module):
-    def __init__(self, dim, dropout=0, act=torch.nn.ReLU(), aggregator_type='sum'):
+class KGCNConv(nn.Module):
+    def __init__(self, n_iter, dim, n_neighbor, dropout, alg_type):
         super().__init__()
-        self.dropout = dropout
-        self.act = act
+        self.n_iter = n_iter
         self.dim = dim
-        self.aggregator_type = aggregator_type
-        assert self.aggregator_type in {'sum', 'concat', 'neighbor'}
-        if self.aggregator_type == 'concat':
-            self.linear = nn.Linear(self.dim * 2, self.dim, bias=True)
-        else:
-            self.linear = nn.Linear(self.dim, self.dim, bias=True)
-        self.dropout = nn.Dropout(dropout)
-
+        self.n_neighbor = n_neighbor
+        self.dropout = dropout
+        if alg_type == 'sum':
+            self.aggregator_class = aggregator.GCNAggregator
+        elif alg_type == 'concat':
+            self.aggregator_class = aggregator.GraphSageAggregator
+        elif alg_type == 'neighbor':
+            self.aggregator_class = aggregator.NeighborAggregator
+        self.alg_type = alg_type
+        self.aggregators = torch.nn.ModuleList()
+        for i in range(self.n_iter):
+            if i == self.n_iter - 1:
+                self.aggregators.append(self.aggregator_class(self.dim, self.dim, dropout=self.dropout, act=torch.nn.Tanh()))
+            else:
+                self.aggregators.append(self.aggregator_class(self.dim, self.dim, dropout=self.dropout))
+        
     def _mix_neighbor_vectors(self, neighbor_vectors, neighbor_relations, user_embeddings):
+        """
+        Args: 
+            neighbor_vectors(torch.Tensor): shape: (batch_size, n_neighbor^(i-1), n_neighbor, dim)
+            embeddings of the neighbors in i-th layers. 
+            neighbor_relations(torch.Tensor): shape: (batch_size, n_neighbor^(i-1), n_neighbor, dim). embeddings of the relations in i-th layers. 
+            user_embeddings(torch.Tensor): shape: (batch_size, embed_dim). The embeddings of the query users used to calculate the weights of relations.
+        Returns:
+            neighbors_aggregated(torch.Tensor): shape: (batch_size, n_neighbor^(i-1), dim). The aggregation of neighbors and each neighbor has a different weight.
+        """
         # [batch_size, 1, 1, dim]
         user_embeddings = user_embeddings.reshape(-1, 1, 1, self.dim)
         # [batch_size, -1, n_neighbor, dim] -> [batch_size, -1, n_neighbor]
@@ -32,60 +49,64 @@ class Aggregator(nn.Module):
         # [batch_size, -1, n_neighbor, dim] -> [batch_size, -1, dim] 
         neighbors_aggregated = torch.mean(user_ralation_score_normalized * neighbor_vectors, dim=-2)
         return neighbors_aggregated
-
-    def forward(self, self_vectors, neighbor_vectors, neighbor_relations, user_embeddings):
-        # [batch_size, -1, dim]
-        neighbors_agg = self._mix_neighbor_vectors(neighbor_vectors, neighbor_relations, user_embeddings)
-        if self.aggregator_type == 'sum':
-            output = self.dropout(self_vectors + neighbors_agg)
-        elif self.aggregator_type == 'concat':
-            output = self.dropout(torch.cat([self_vectors, neighbors_agg], dim=-1))
-        elif self.aggregator_type == 'neighbor':
-            output = self.dropout(neighbors_agg)
-        # [batch_size, -1, dim]
-        output = self.linear(output) 
-        return self.act(output)
-
-class KGCNItemEncoder(nn.Module):
-    def __init__(self, ent_emb, rel_emb, adj_entity, adj_relation, config):
-        super().__init__()
-        self.ent_emb = ent_emb
-        self.rel_emb = rel_emb
-        self.n_iter = config['n_iter']
-        self.n_neighbor = config['neighbor_sample_size']
-        self.dim = config['embed_dim']
-        self.aggregator_type = config['aggregator_type']
-        self.aggregators = torch.nn.ModuleList()
-        for i in range(self.n_iter):
-            if i == self.n_iter - 1:
-                self.aggregators.append(Aggregator(self.dim, act=torch.nn.Tanh(), aggregator_type=self.aggregator_type))
-            else:
-                self.aggregators.append(Aggregator(self.dim, aggregator_type=self.aggregator_type))
-
-    def _aggregate(self, entities, relations, user_embeddings):
-        # entity_vector: [batch_size, -1, dim]
-        entity_vectors = [self.ent_emb(i) for i in entities]
-        relation_vectors = [self.rel_emb(i) for i in relations]
+    
+    def forward(self, entity_vectors, relation_vectors, user_embeddings):
         for i in range(self.n_iter):
             entity_vectors_next_iter = []
             for hop in range(self.n_iter - i):
                 shape = [entity_vectors[hop].size(0), -1, self.n_neighbor, self.dim]
-                vector = self.aggregators[i](entity_vectors[hop], 
-                                        entity_vectors[hop + 1].reshape(shape),
-                                        relation_vectors[hop].reshape(shape),
-                                        user_embeddings)
+                neighbors_agg = self._mix_neighbor_vectors(
+                    entity_vectors[hop + 1].reshape(shape), 
+                    relation_vectors[hop].reshape(shape), 
+                    user_embeddings)
+                vector = self.aggregators[i](entity_vectors[hop], neighbors_agg)
                 entity_vectors_next_iter.append(vector)
 
             entity_vectors = entity_vectors_next_iter
-
         return entity_vectors[0].reshape(-1, self.dim)
 
-    def forward(self, entities, relations, user_embeddings):
-        item_embeddings = self._aggregate(entities, relations, user_embeddings)
-        return item_embeddings
+class KGCNItemEncoder(nn.Module):
+    def __init__(self, ent_emb, rel_emb, config):
+        super().__init__()
+        self.ent_emb = ent_emb
+        self.rel_emb = rel_emb
+        self.KGCNConv = KGCNConv(config['n_iter'], config['embed_dim'], config['neighbor_sample_size'], \
+             0.0, config['aggregator_type'])
 
+    def forward(self, entities, relations, user_embeddings):
+        """
+        Args:
+            entities(list): shape: ({[batch_size, 1], [batch_size, n_neighbor], [batch_size, n_neighbor^2], ..., [batch_size, n_neighbor^n_iter]})
+            the multi-hop neighbors of the query items.
+            relations(list): shape: ({[batch_size, n_neighbor], [batch_size, n_neighbor^2], ..., [batch_size, n_neighbor^n_iter]})
+            the multi-hop relations of the query items.
+            user_embeddings(torch.Tensor): shape: (batch_size, embed_dim)
+            the embeddings of the query users used to calculate the weights of relations.
+        Returns:
+            item_embeddings(torch.Tensor): shape: (batch_size, embed_dim)
+            the item embeddings for each user.  
+        """
+        # entity_vector: [batch_size, -1, dim]
+        entity_vectors = [self.ent_emb(i) for i in entities]
+        relation_vectors = [self.rel_emb(i) for i in relations]
+        item_embeddings = self.KGCNConv(entity_vectors, relation_vectors, user_embeddings)
+        return item_embeddings
+"""
+KGCN
+#################
+    Knowledge Graph Convolutional Networks for Recommender Systems(WWW'19)
+    Reference:
+        https://dl.acm.org/doi/10.1145/3308558.3313417
+
+"""
 class KGCN(basemodel.TwoTowerRecommender):
+    """
+    KGCN adopt GCN to obtain item embeddings via their neighbors in KG. 
+    KGCN computes user-specific item embeddings by first applying a trainable function that identifies important knowledge graph relationships for a given user. 
+    This way we transform the knowledge graph into a user-specific weighted graph and then apply a graph neural network to compute personalized item embeddings.
+    """
     def __init__(self, config):
+        self.kg_index = config['kg_network_index']
         self.n_iter = config['n_iter']
         self.neighbor_sample_size = config['neighbor_sample_size']
         self.n_neighbor = self.neighbor_sample_size
@@ -93,19 +114,19 @@ class KGCN(basemodel.TwoTowerRecommender):
         super().__init__(config)
 
     def init_model(self, train_data):
-        self.fhid = train_data.fhid
-        self.ftid = train_data.ftid
-        self.frid = train_data.frid
-        self.num_entities = train_data.num_entities
+        self.fhid = train_data.get_network_field(self.kg_index, 0, 0)
+        self.ftid = train_data.get_network_field(self.kg_index, 0, 1)
+        self.frid = train_data.get_network_field(self.kg_index, 0, 2)
+        self.num_entities = train_data.num_values(self.fhid)
         self.num_items = train_data.num_items
-        self.kg = self._construct_kg(train_data.network_feat[1])
+        self.kg = self._construct_kg(train_data.network_feat[self.kg_index])
         self.adj_entity, self.adj_relation = self._construct_adj()
-        self.ent_emb = basemodel.Embedding(train_data.num_entities, self.embed_dim, padding_idx=0)
-        self.rel_emb = nn.Embedding(train_data.num_relations, self.embed_dim, padding_idx=0)     
+        self.ent_emb = basemodel.Embedding(self.num_entities, self.embed_dim, padding_idx=0)
+        self.rel_emb = nn.Embedding(train_data.num_values(self.frid), self.embed_dim, padding_idx=0)     
         super().init_model(train_data)
         
     def get_dataset_class(self):
-        return dataset.KnowledgeBasedDataset
+        return dataset.MFDataset
 
     def config_scorer(self):
         return scorer.InnerProductScorer()
@@ -114,7 +135,7 @@ class KGCN(basemodel.TwoTowerRecommender):
         return nn.BCEWithLogitsLoss()
 
     def build_item_encoder(self, train_data):
-        return KGCNItemEncoder(self.ent_emb, self.rel_emb, self.adj_entity, self.adj_relation, self.config)
+        return KGCNItemEncoder(self.ent_emb, self.rel_emb, self.config)
 
     def build_user_encoder(self, train_data):
         return torch.nn.Embedding(train_data.num_users, self.embed_dim, padding_idx=0)
@@ -124,10 +145,13 @@ class KGCN(basemodel.TwoTowerRecommender):
 
     def _construct_kg(self, kg_feat):
         """
+        Construct knowledge graph dict. 
+
         Args:
-            kg_feat(TensorFrame): Knowledge graph feature.
+            kg_feat(TensorFrame): the triplets in knowledge graph.
+
         Returns:
-            kg(defaultidict): The key is head_id, and the value is a list. The list contains all triplets whose heads are head_id.
+            kg(defaultidict): the key is ``head_id``, and the value is a list. The list contains all triplets whose heads are ``head_id``.
         """
         # head -> [(tail, relation), (tail, relation), ..., (tail, relation)]
         kg = collections.defaultdict(list)
@@ -143,7 +167,6 @@ class KGCN(basemodel.TwoTowerRecommender):
     def _construct_adj(self):
         # each line of adj_entity stores the sampled neighbor entities for a given entity
         # each line of adj_relation stores the corresponding sampled neighbor relations
-        # TODO if the entity has no neighbors? 
         adj_entity = np.zeros([self.num_entities, self.neighbor_sample_size], dtype=np.int64)
         adj_relation = np.zeros([self.num_entities, self.neighbor_sample_size], dtype=np.int64)
         for entity in range(self.num_entities):
@@ -162,6 +185,18 @@ class KGCN(basemodel.TwoTowerRecommender):
         return torch.from_numpy(adj_entity), torch.from_numpy(adj_relation)
 
     def _get_neighbors(self, seeds):
+        """
+        Given items, gets their multi-hop neighbors in knowledge graph.
+        
+        Args:
+            seeds(torch.Tensor): shape: (batch_size)
+            items that needs to get neighbors
+        Returns:
+            entities(list): shape: ({[batch_size, 1], [batch_size, n_neighbor], [batch_size, n_neighbor^2], ..., [batch_size, n_neighbor^n_iter]})
+            the multi-hop neighbors of items. The i-th element in entities correspond to the (i-1)-th hop neighbors of the items and the first element is the seeds.
+            relations(list): shape: ({[batch_size, n_neighbor], [batch_size, n_neighbor^2], ..., [batch_size, n_neighbor^n_iter]})
+            the multi-hop relations of items. The i-th element in relations correspond to the i-th hop relations of the items
+        """
         self.adj_entity = self.adj_entity.to(self.device)
         self.adj_relation = self.adj_relation.to(self.device)
         seeds = seeds.unsqueeze(dim=-1)
@@ -218,4 +253,4 @@ class KGCN(basemodel.TwoTowerRecommender):
         self.item_vector = self.item_encoder(entities, relations, user_embeddings).reshape(-1, self.num_items - 1, self.embed_dim)
         return super()._test_step(batch, metric, cutoffs)
 
-# TODO It is hard to get item_vector on train_epoch_start and prepare_testing, because item_vector depends on user_embeddings
+# TODO It is hard to get item_vector on train_epoch_start and prepare_testing, because item_vector depends on user_embeddings    

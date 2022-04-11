@@ -1,7 +1,7 @@
 from typing import Any, Optional
 import torch.nn.functional as F
 from torchrec.utils.utils import set_color, parser_yaml, color_dict, print_logger
-from torchrec.data.dataset import AEDataset, KnowledgeBasedDataset, MFDataset, SeqDataset
+from torchrec.data.dataset import AEDataset, MFDataset, SeqDataset
 from torchrec.data.advance_dataset import ALSDataset
 from torchrec.ann import sampler
 from torch import optim
@@ -61,7 +61,7 @@ class Recommender(LightningModule, abc.ABC):
     def load_dataset(self, data_config_file):
         cls = self.get_dataset_class()
         dataset = cls(data_config_file)
-        if cls in (MFDataset, ALSDataset, KnowledgeBasedDataset):
+        if cls in (MFDataset, ALSDataset):
             parameter = {'shuffle': self.config.get('shuffle'),
                         'split_mode': self.config.get('split_mode')}
             if isinstance(self, TowerFreeRecommender):
@@ -83,8 +83,8 @@ class Recommender(LightningModule, abc.ABC):
         else:
             self.fields = set(f for f in train_data.field2type if 'time' not in f)
             
-        self.user_fields = train_data.user_feat.fields.intersection(self.fields)
-        self.item_fields = train_data.item_feat.fields.intersection(self.fields)        
+        self.user_fields = set(train_data.user_feat.fields).intersection(self.fields)
+        self.item_fields = set(train_data.item_feat.fields).intersection(self.fields)        
 
     def init_parameter(self):
         self.apply(init.xavier_normal_initialization)
@@ -196,6 +196,9 @@ class Recommender(LightningModule, abc.ABC):
         self.init_parameter()
         train_loader = train_data.train_loader(batch_size=self.config['batch_size'], \
             shuffle=True, num_workers=self.config['num_workers'], load_combine=iscombine)
+        multiple_trainloader_mode = 'min_size'
+        if iscombine == True and len(train_loader[0].dataset) > len(train_loader[1].dataset):
+            multiple_trainloader_mode = 'max_size_cycle'
         if val_data:
             val_loader = val_data.eval_loader(batch_size=self.config['eval_batch_size'],\
                 num_workers=self.config['num_workers'])
@@ -206,6 +209,7 @@ class Recommender(LightningModule, abc.ABC):
                             max_epochs=self.config['epochs'], 
                             num_sanity_val_steps=0,
                             progress_bar_refresh_rate=refresh_rate,
+                            multiple_trainloader_mode=multiple_trainloader_mode,
                             logger=logger,
                             accelerator="dp")
         self.config_fitloop(trainer)

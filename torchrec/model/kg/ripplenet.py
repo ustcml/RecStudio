@@ -7,9 +7,19 @@ import torch
 import collections
 import numpy as np
 
+"""
+RippleNet
+    RippleNet: Propagating User Preferences on the Knowledge Graph for Recommender Systems(CIKM'18)
+    Reference:
+        https://doi.org/10.1145/3269206.3271739
+"""
 class RippleNet(basemodel.ItemTowerRecommender):
-    
+    """
+    RippleNet introduces the preference propagation mechanism in the KG. The h-hop neighbors and relations in h-th layer triplet set and candidate item are used to calculate the weight
+    for tail entities in the corresponding triplet. And then user's representation in the h-th layer is be calculated with the weighted average of tail entity embeddings. 
+    """
     def __init__(self, config):
+        self.kg_index = config['kg_network_index']
         self.n_hop = config['n_hop']
         self.n_memory = config['n_memory']
         self.item_update_mode  = config['item_update_mode']
@@ -22,34 +32,32 @@ class RippleNet(basemodel.ItemTowerRecommender):
         self.fuid = train_data.fuid
         self.num_items = train_data.num_items
         # kg 
-        self.fhid = train_data.fhid
-        self.ftid = train_data.ftid
-        self.frid = train_data.frid
-        self.rel_emb = nn.Embedding(train_data.num_relations, self.embed_dim * self.embed_dim, padding_idx=0)
+        self.fhid = train_data.get_network_field(self.kg_index, 0, 0)
+        self.ftid = train_data.get_network_field(self.kg_index, 0, 1)
+        self.frid = train_data.get_network_field(self.kg_index, 0, 2)
+        self.rel_emb = nn.Embedding(train_data.num_values(self.frid), self.embed_dim * self.embed_dim, padding_idx=0)
         # get ripple_set_h, ripple_set_t and ripple_set_r
-        # remember to get the sub inter_feat that only includes train data
-        # maybe need to provide sub inter_feat directly in order to prevent users from using inter_feat incorrectly.  
+        # remember to get the sub inter_feat that only includes train data 
         self.user_history_dict = self._construct_user_hist(train_data.inter_feat[train_data.inter_feat_subset]) 
-        self.kg = self._construct_kg(train_data.network_feat[1])
+        self.kg = self._construct_kg(train_data.network_feat[self.kg_index])
         self.ripple_set_h = torch.zeros(self.n_hop, train_data.num_users, self.n_memory, dtype=torch.long)
         self.ripple_set_t = torch.zeros(self.n_hop, train_data.num_users, self.n_memory, dtype=torch.long)
         self.ripple_set_r = torch.zeros(self.n_hop, train_data.num_users, self.n_memory, dtype=torch.long)
         self._get_ripple_set()
-        
         if self.item_update_mode == 'replace_transform' or self.item_update_mode == 'plus_transform':
             self.transform_matrix = nn.Linear(self.embed_dim, self.embed_dim, bias=False)
-
+        
     def get_dataset_class(self):
-        return dataset.KnowledgeBasedDataset
-
-    def build_item_encoder(self, train_data):
-        return basemodel.Embedding(train_data.num_entities, self.embed_dim, padding_idx=0)
+        return dataset.MFDataset
+        
+    def config_scorer(self):
+        return scorer.InnerProductScorer()
 
     def config_loss(self):
         return nn.BCEWithLogitsLoss()
 
-    def config_scorer(self):
-        return scorer.InnerProductScorer()
+    def build_item_encoder(self, train_data):
+        return basemodel.Embedding(train_data.num_values(train_data.get_network_field(self.kg_index, 0, 0)), self.embed_dim, padding_idx=0)
 
     def _construct_user_hist(self, inter_feat):
         user_history_dict = collections.defaultdict(list)
@@ -61,11 +69,13 @@ class RippleNet(basemodel.ItemTowerRecommender):
 
     def _construct_kg(self, kg_feat):
         """
+        Construct knowledge graph dict. 
+
         Args:
-            kg_feat(TensorFrame): Knowledge graph feature.
+            kg_feat(TensorFrame): the triplets in knowledge graph.
+
         Returns:
-            kg(defaultidict): The key is head_id, and the value is a list. 
-            The list contains all triplets whose heads are head_id.
+            kg(defaultidict): the key is ``head_id``, and the value is a list. The list contains all triplets whose heads are ``head_id``.
         """
         # head -> [(tail, relation), (tail, relation), ..., (tail, relation)]
         kg = collections.defaultdict(list)
@@ -79,8 +89,16 @@ class RippleNet(basemodel.ItemTowerRecommender):
 
     def _get_ripple_set(self):
         """
+        Gets ripple set of users in every hop.
+
         Returns:
-            ripple_set(defaultdict):
+            ripple_set_h(torch.tensor): shape: (n_hop, num_users)
+            ripple_set_h[h][user] stores the head entities in user's h-th hop ripple set.
+            ripple_set_r(torch.tensor): shape: (n_hop, num_users)
+            ripple_set_r[h][user] stores the relations in user's h-th hop ripple set.
+            ripple_set_t(torch.tensor): shape: (n_hop, num_users)
+            ripple_set_t[h][user] stores the tail entities in user's h-th hop ripple set.
+            (ripple_set_h[h][user][i], ripple_set_r[h][user][i], ripple_set_t[h][user][i]) forms a triplet.   
         """
         # user -> [(hop_0_heads, hop_0_relations, hop_0_tails), (hop_1_heads, hop_1_relations, hop_1_tails), ...]
         for user in self.user_history_dict:
@@ -88,7 +106,6 @@ class RippleNet(basemodel.ItemTowerRecommender):
                 memories_h = []
                 memories_r = []
                 memories_t = []
-
                 if h == 0:
                     tails_of_last_hop = self.user_history_dict[user]
                 else:
@@ -102,10 +119,8 @@ class RippleNet(basemodel.ItemTowerRecommender):
                         memories_h.append(entity)
                         memories_r.append(tail_and_relation[1])
                         memories_t.append(tail_and_relation[0])
-                
                 # if the current ripple set of the given user is empty, we simply copy the ripple set of the last hop here
                 if len(memories_h) == 0:
-                    # ripple_set[user].append(ripple_set[user][-1])
                     self.ripple_set_h[h][user] = self.ripple_set_h[h - 1][user]
                     self.ripple_set_r[h][user] = self.ripple_set_r[h - 1][user]
                     self.ripple_set_t[h][user] = self.ripple_set_t[h - 1][user]
@@ -146,7 +161,7 @@ class RippleNet(basemodel.ItemTowerRecommender):
             probs_normalized = torch.softmax(probs, dim=-1)
             # [batch_size, n_memories, 1] 
             probs_expanded = probs_normalized.unsqueeze(-1)
-            # [batch_size, n_memories, dim] -> [batch_size, dim]
+            # [batch_size, n_memories, dim] -> [batch_size, dim] || [batch_size, num_items, n_memories, dim] -> [batch_size, num_items, dim] 
             o = torch.sum(self.t_emb_list[hop] * probs_expanded, dim=-2)
             
             self.item_embeddings = self.update_item_embedding(self.item_embeddings, o)
@@ -166,6 +181,13 @@ class RippleNet(basemodel.ItemTowerRecommender):
         return item_embeddings
 
     def construct_query(self, batch_data):
+        """
+        Constructs user embeddings. 
+        Evaluating and training process share this function. 
+        In evaluating, the scores between a user and all items should be calculated. 
+        To do this, shape of memories_h should be reshaped into (batch_size, 1, n_memories) and 
+        in _key_addressing method, the secend dimension will be broadcasted to num_items.
+        """
         if self.ripple_set_h.device != self.device:
             self.ripple_set_h = self.ripple_set_h.to(self.device)
             self.ripple_set_r = self.ripple_set_r.to(self.device)
@@ -177,6 +199,7 @@ class RippleNet(basemodel.ItemTowerRecommender):
         self.memories_r = []
         self.memories_t = []
         if not self.training:
+            # if evaluating
             for i in range(self.n_hop):
                 # [batch_size, 1, n_memories]
                 self.memories_h.append(self.ripple_set_h[i][users].unsqueeze(-2))

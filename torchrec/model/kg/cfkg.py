@@ -3,28 +3,43 @@ from torchrec.model import basemodel, loss_func, scorer
 from torchrec.data import dataset
 from torchrec.ann import sampler 
 import torch
-
+"""
+CFKG
+#################
+    Learning over Knowledge-Base Embeddings for Recommendation(SIGIR'18)
+    Reference: 
+        https://arxiv.org/abs/1803.06540
+"""
 class CFKG(basemodel.TwoTowerRecommender):
+    """
+    In CFKG, user-item interaction is incorporated into the knowledge graph as triplets i.e. (user, interact, item) to form user-item knowledge graph.
+    And then, CFKG conducts collaborative fltering on this graph to provide personalized recommendations using TransE to learn the representation of users and items.
+    In this implementation, we sample users, items and entities from the users and items in recommender data and the entities in knowledge graph respectively, while
+    in the original paper, they are all sampled from user-item knowledge graph.
+    """
+    def __init__(self, config):
+        self.kg_index = config['kg_network_index']
+        super().__init__(config)
+
     def init_model(self, train_data):
         super().init_model(train_data)
         self.num_users = train_data.num_users
         self.num_items = train_data.num_items
         # kg  
-        self.fhid = train_data.fhid
-        self.ftid = train_data.ftid
-        self.frid = train_data.frid
-        self.rel_emb = torch.nn.Embedding(train_data.num_relations + 1, self.embed_dim, padding_idx=0)
-        self.kg_sampler = sampler.UniformSampler(train_data.num_entities - 1, self.score_func)
-
+        self.fhid = train_data.get_network_field(self.kg_index, 0, 0)
+        self.ftid = train_data.get_network_field(self.kg_index, 0, 1)
+        self.frid = train_data.get_network_field(self.kg_index, 0, 2)
+        self.rel_emb = torch.nn.Embedding(train_data.num_values(self.frid) + 1, self.embed_dim, padding_idx=0)
+        self.kg_sampler = sampler.UniformSampler(train_data.num_values(self.fhid) - 1, self.score_func)
         self.user_sampler = sampler.UniformSampler(train_data.num_users - 1, self.score_func)
 
     def get_dataset_class(self):
-        return dataset.KnowledgeBasedDataset
+        return dataset.MFDataset
 
     def set_train_loaders(self, train_data):
-        train_data.loaders = [train_data.recAndKgLoader]
+        train_data.loaders = [train_data.loader, train_data.network_feat[self.kg_index].loader]
         train_data.nepoch = None
-        return False
+        return True
 
     def config_scorer(self):
         return scorer.NormScorer(p=2)
@@ -33,7 +48,7 @@ class CFKG(basemodel.TwoTowerRecommender):
         return loss_func.HingeLoss(self.config['margin'])
 
     def build_item_encoder(self, train_data):
-        return torch.nn.Embedding(train_data.num_entities, self.embed_dim, padding_idx=0)
+        return torch.nn.Embedding(train_data.num_values(train_data.get_network_field(self.kg_index, 0, 0)), self.embed_dim, padding_idx=0)
 
     def build_user_encoder(self, train_data):
         return torch.nn.Embedding(train_data.num_users, self.embed_dim, padding_idx=0)
@@ -54,6 +69,8 @@ class CFKG(basemodel.TwoTowerRecommender):
         return pos_prob, self.user_encoder(neg_id), neg_prob
 
     def forward(self, batch_data, full_score):
+        batch_data[0].update(batch_data[1])
+        batch_data = batch_data[0]
         user_e = self.user_encoder(batch_data[self.fuid]) # [batch_size, dim]
         item_e = self.item_encoder(batch_data[self.fiid])
         inter_e = (self.rel_emb.weight[-1]).expand_as(user_e) # [dim]->[batch_size, dim]

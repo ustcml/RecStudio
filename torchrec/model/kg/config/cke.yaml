@@ -1,4 +1,4 @@
 embed_dim: 64
 pro_embed_dim: 64
 negative_count: 1
-# weight_decay: 0.00001
+weight_decay: 0.000001
