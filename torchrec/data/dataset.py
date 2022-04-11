@@ -29,12 +29,7 @@ class MFDataset(Dataset):
         self._filter(self.config['min_user_inter'], self.config['min_item_inter'])
         self._map_all_ids()
         self._post_preprocess()
-        # saved_object = {
-        #     'field2type': self.field2type, 'field2token2idx': self.field2token2idx, 'field2tokens': self.field2tokens,
-        #     'field2maxlen': self.field2maxlen, 'fuid': 
-        # }
-        self.save(save_path) 
-        # self =
+        # self.save(save_path) 
         # TODO: save and load cache here. hash config as cache file name
 
     def _init_common_field(self):
