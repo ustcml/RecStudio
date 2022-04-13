@@ -46,16 +46,12 @@ class MFDataset(Dataset):
         
     def __test__(self):
         feat = self.network_feat[1][-10:]
-        #feat = self.inter_feat[-10:]
         print(feat)
         self._map_all_ids()
         feat1 = self._recover_unmapped_feature(self.network_feat[1])
-        #feat1 = self._recover_unmapped_feature(self.inter_feat)
         print(feat1[-10:])
         self._prepare_user_item_feat()
         feat2 = self._recover_unmapped_feature(self.network_feat[1])[-10:]
-        #feat2 = self._recover_unmapped_feature(self.inter_feat)[-10:]
-        #feat2 = feat2[feat2[self.fiid].isin(feat[self.fiid])].sort_values('item_id')
         print(feat2)
 
     def _filter_ratings(self):

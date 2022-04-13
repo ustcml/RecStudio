@@ -56,10 +56,9 @@ def map(pred, target, k):
         torch.FloatTensor: a 0-dimensional tensor.
     """
     count = (target > 0).sum(-1)
-    pred = pred[:, :k]
-    output = pred.cumsum(dim=-1).float() / torch.arange(1, k+1).type_as(pred)
+    pred = pred[:, :k].float()
+    output = pred.cumsum(dim=-1) / torch.arange(1, k+1).type_as(pred)
     output = (output * pred).sum(dim=-1) / torch.minimum(count, k*torch.ones_like(count))
-    #torch.minimum(count, pred.sum(dim=-1).float())
     return output.mean()
 
 def _dcg(pred, k):
@@ -79,7 +78,7 @@ def ndcg(pred, target, k):
     Returns:
         torch.FloatTensor: a 0-dimensional tensor.
     """
-    pred_dcg = _dcg(pred, k)
+    pred_dcg = _dcg(pred.float(), k)
     ideal_dcg = _dcg(torch.sort((target>0).float(), descending=True)[0], k) ## to do replace target>0 with target
     all_irrelevant = torch.all(target <= sys.float_info.epsilon, dim=-1)
     pred_dcg[all_irrelevant] = 0

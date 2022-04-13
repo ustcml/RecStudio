@@ -19,7 +19,7 @@ def get_act(activation:str):
           raise ValueError('"activation_func" must be a str or a instance of torch.nn.Module. ')
 
           
-class CrossCompressUnit(nn.Module):
+class CrossCompressUnit(torch.nn.Module):
     """
     Cross & Compress unit.
     Performs feature interaction as below:
@@ -36,10 +36,10 @@ class CrossCompressUnit(nn.Module):
 
     Parameters:
         embed_dim(int): dimensions of embeddings.
-        weight_vv(nn.Linear): transformation weights. 
-        weight_ev(nn.Linear): transformation weights.
-        weight_ve(nn.Linear): transformation weights.
-        weight_ee(nn.Linear): transformation weights.
+        weight_vv(torch.nn.Linear): transformation weights. 
+        weight_ev(torch.nn.Linear): transformation weights.
+        weight_ve(torch.nn.Linear): transformation weights.
+        weight_ee(torch.nn.Linear): transformation weights.
         bias_v(Parameter): bias on v.
         bias_e(Parameter): bias on e.
     
@@ -50,10 +50,10 @@ class CrossCompressUnit(nn.Module):
     def __init__(self, embed_dim):
         super().__init__()
         self.embed_dim = embed_dim
-        self.weight_vv = nn.Linear(self.embed_dim, 1, False)
-        self.weight_ev = nn.Linear(self.embed_dim, 1, False)
-        self.weight_ve = nn.Linear(self.embed_dim, 1, False)
-        self.weight_ee = nn.Linear(self.embed_dim, 1, False)
+        self.weight_vv = torch.nn.Linear(self.embed_dim, 1, False)
+        self.weight_ev = torch.nn.Linear(self.embed_dim, 1, False)
+        self.weight_ve = torch.nn.Linear(self.embed_dim, 1, False)
+        self.weight_ee = torch.nn.Linear(self.embed_dim, 1, False)
         self.bias_v = Parameter(data=torch.zeros(self.embed_dim), requires_grad=True)
         self.bias_e = Parameter(data=torch.zeros(self.embed_dim), requires_grad=True)
     
@@ -72,7 +72,7 @@ class CrossCompressUnit(nn.Module):
         return (v_output, e_output)
 
       
-class FeatInterLayers(nn.Module):
+class FeatInterLayers(torch.nn.Module):
     """
     Feature interaction layers with varied feature interaction units.
     
@@ -101,7 +101,7 @@ class FeatInterLayers(nn.Module):
     """
     def __init__(self, dim, num_units, unit) -> None:
         super().__init__()
-        self.model = nn.Sequential()
+        self.model = torch.nn.Sequential()
         for id in range(num_units):
             self.model.add_module(f'unit[{id}]', unit(dim))
     
@@ -109,7 +109,7 @@ class FeatInterLayers(nn.Module):
         return self.model((v_input, e_input))
 
       
-class MLPModule(nn.Module):
+class MLPModule(torch.nn.Module):
     """
     MLPModule 
     Gets a MLP easily and quickly.
@@ -149,11 +149,11 @@ class MLPModule(nn.Module):
         self.mlp_layers = mlp_layers
         self.model = []
         for idx, layer in enumerate((zip(self.mlp_layers[ : -1], self.mlp_layers[1 : ]))):
-            self.model.append(nn.Dropout(dropout))
-            self.model.append(nn.Linear(*layer))
+            self.model.append(torch.nn.Dropout(dropout))
+            self.model.append(torch.nn.Linear(*layer))
             if activation_func is not None:
                 self.model.append(activation_func)
-        self.model = nn.Sequential(*self.model)
+        self.model = torch.nn.Sequential(*self.model)
     
     def add_modules(self, *args):
         """
@@ -163,7 +163,7 @@ class MLPModule(nn.Module):
             args(variadic argument): the modules to be added into MLP model. 
         """
         for block in args:
-            assert isinstance(block, nn.Module)
+            assert isinstance(block, torch.nn.Module)
         
         for block in args:
             self.model.add_module(str(len(self.model._modules)), block)
@@ -176,7 +176,7 @@ class GMFScorer(torch.nn.Module):
     def __init__(self, emb_dim, bias=False, activation='relu') -> None:
         super().__init__()
         self.emb_dim = emb_dim
-        self.W = torch.nn.Linear(self.emb_dim, 1, bias=False)
+        self.W = torch.nn.Linear(self.emb_dim, 1, bias=bias)
         self.activation = get_act(activation)
 
     def forward(self, query, key):
