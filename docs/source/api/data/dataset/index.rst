@@ -1,10 +1,10 @@
 =======================
-torchrec.data.dataset
+recstudio.data.dataset
 =======================
 
-- :doc:`torchrec.data.dataset.MFDataset <mfdataset>`
-- :doc:`torchrec.data.dataset.AEDataset <aedataset>`
-- :doc:`torchrec.data.dataset.SeqDataset <seqdataset>` 
-- :doc:`torchrec.data.dataset.TensorFrame <tensorframe>`
-- :doc:`torchrec.data.dataset.SortedDataSampler <sorteddatasampler>`
-- :doc:`torchrec.data.dataset.ChainedDataLoader <chaineddataloader>`
+- :doc:`recstudio.data.dataset.MFDataset <mfdataset>`
+- :doc:`recstudio.data.dataset.AEDataset <aedataset>`
+- :doc:`recstudio.data.dataset.SeqDataset <seqdataset>` 
+- :doc:`recstudio.data.dataset.TensorFrame <tensorframe>`
+- :doc:`recstudio.data.dataset.SortedDataSampler <sorteddatasampler>`
+- :doc:`recstudio.data.dataset.ChainedDataLoader <chaineddataloader>`

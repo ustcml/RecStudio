@@ -1,3 +1,3 @@
 ==================================================================
-torchrec.model.loss_func.WeightedBinaryCrossEntropyLoss
+recstudio.model.loss_func.WeightedBinaryCrossEntropyLoss
 ==================================================================

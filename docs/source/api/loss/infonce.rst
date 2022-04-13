@@ -1,4 +1,4 @@
 ============================================
-torchrec.model.loss_func.InfoNCELoss
+recstudio.model.loss_func.InfoNCELoss
 ============================================
 

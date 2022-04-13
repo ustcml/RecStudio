@@ -1,5 +1,5 @@
 =========================================
-torchrec.model.seq.NPE
+recstudio.model.seq.NPE
 =========================================
 
 
@@ -11,5 +11,5 @@ Paper Reference:
     https://www.ijcai.org/proceedings/2018/0219.pdf
 
 
-.. autoclass:: torchrec.model.seq.NPE
+.. autoclass:: recstudio.model.seq.NPE
     :members:

@@ -1,4 +1,4 @@
 ===================================
-torchrec.model.scorer
+recstudio.model.scorer
 ===================================
 

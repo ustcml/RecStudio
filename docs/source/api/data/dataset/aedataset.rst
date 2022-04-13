@@ -1,5 +1,5 @@
 =====================================
-torchrec.data.dataset.AEDataset 
+recstudio.data.dataset.AEDataset 
 =====================================
 
 AEDataset is designed for Auto Encoder methods, such as `Multi_DAE`, `Multi_VAE`, `Rec_VAE`.
@@ -16,5 +16,5 @@ To show a more clear understanding of `AEDataset`, here is an example in actual 
 
 
 
-.. autoclass:: torchrec.data.dataset.AEDataset
+.. autoclass:: recstudio.data.dataset.AEDataset
     :members:

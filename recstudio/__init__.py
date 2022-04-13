@@ -1,0 +1,1 @@
+from recstudio.quickstart import run as run

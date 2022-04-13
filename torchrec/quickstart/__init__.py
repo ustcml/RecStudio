@@ -1,1 +1,0 @@
-from torchrec.quickstart.run import run

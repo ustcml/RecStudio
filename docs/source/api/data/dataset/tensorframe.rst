@@ -1,7 +1,7 @@
 ====================================
-torchrec.data.dataset.TensorFrame
+recstudio.data.dataset.TensorFrame
 ====================================
 
 
-.. autoclass:: torchrec.data.dataset.TensorFrame
+.. autoclass:: recstudio.data.dataset.TensorFrame
     :members:

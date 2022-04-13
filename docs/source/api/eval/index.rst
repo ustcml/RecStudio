@@ -1,5 +1,5 @@
 ====================================
-torchrec.eval
+recstudio.eval
 ====================================
 
 RecStudio provides a series of functions for evaluation, which are suitable for GPU tensors with PyTorch.
@@ -16,10 +16,10 @@ In order to make those function easier to use, a unified input paramerters are d
 
 - `k`: `int`. Calculating metric on the most k relavant items. Usually, the metric will be represents as `m@k`, like `recall@10`, `NDCG@50`.
 
-.. autofunction:: torchrec.eval.precision
-.. autofunction:: torchrec.eval.recall
-.. autofunction:: torchrec.eval.ndcg
-.. autofunction:: torchrec.eval.mrr
-.. autofunction:: torchrec.eval.map
-.. autofunction:: torchrec.eval.hits
-.. autofunction:: torchrec.eval.logloss
+.. autofunction:: recstudio.eval.precision
+.. autofunction:: recstudio.eval.recall
+.. autofunction:: recstudio.eval.ndcg
+.. autofunction:: recstudio.eval.mrr
+.. autofunction:: recstudio.eval.map
+.. autofunction:: recstudio.eval.hits
+.. autofunction:: recstudio.eval.logloss
