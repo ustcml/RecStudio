@@ -1,5 +1,5 @@
 import os, nni, argparse
-from recstudio.utils.utils import get_model, print_logger, color_dict_normal, parser_yaml
+from recstudio.utils import get_model, print_logger, color_dict_normal, parser_yaml
 if __name__=='__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', '-m', type=str, default='WRMF', help='model name')

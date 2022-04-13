@@ -1,6 +1,6 @@
 from typing import Any, Optional
 import torch.nn.functional as F
-from recstudio.utils.utils import set_color, parser_yaml, color_dict, print_logger
+from recstudio.utils import set_color, parser_yaml, color_dict, print_logger
 from recstudio.data.dataset import AEDataset, MFDataset, SeqDataset, FullSeqDataset
 from recstudio.data.advance_dataset import ALSDataset
 from recstudio.ann import sampler
@@ -155,16 +155,16 @@ class Recommender(LightningModule, abc.ABC):
     
     def validation_epoch_end(self, outputs):
         val_metric = self.config['val_metrics'] if isinstance(self.config['val_metrics'], list) else [self.config['val_metrics']]
-        cutoffs = self.config['cutoff'] if isinstance(self.config['cutoff'], list) else [self.config['cutoff']]
-        val_metric = [f'{m}@{cutoff}' for cutoff in cutoffs[:1] for m in val_metric]
+        cutoffs = self.config['cutoff'] if isinstance(self.config['cutoff'], list) else [self.config.setdefault('cutoff', None)]
+        val_metric = [f'{m}@{cutoff}' if len(eval.get_rank_metrics(m)) > 0 else m  for cutoff in cutoffs[:1] for m in val_metric]
         out = self._test_epoch_end(outputs)
         out = dict(zip(val_metric, out))
         self.log_dict(out, on_step=False, on_epoch=True)
 
     def test_epoch_end(self, outputs):
         test_metric = self.config['test_metrics'] if isinstance(self.config['test_metrics'], list) else [self.config['test_metrics']]
-        cutoffs = self.config['cutoff'] if isinstance(self.config['cutoff'], list) else [self.config['cutoff']]
-        test_metric = [f'{m}@{cutoff}' for cutoff in cutoffs for m in test_metric]
+        cutoffs = self.config['cutoff'] if isinstance(self.config['cutoff'], list) else [self.config.setdefault('cutoff', None)]
+        test_metric = [f'{m}@{cutoff}' if len(eval.get_rank_metrics(m)) > 0 else m for cutoff in cutoffs for m in test_metric]
         out = self._test_epoch_end(outputs)
         out = dict(zip(test_metric, out))
         self.log_dict(out, on_step=False, on_epoch=True)
@@ -353,27 +353,19 @@ class TowerFreeRecommender(Recommender):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        return self._test_step(batch)
+        eval_metric = self.config['val_metrics']
+        return self._test_step(batch, eval_metric)
     
     def test_step(self, batch, batch_idx):
-        return self._test_step(batch)
+        eval_metric = self.config['val_metrics']
+        return self._test_step(batch, eval_metric)
     
-    def _test_step(self, batch):
-        y_ = self.forward(batch)
-        y = (batch[self.frating]>3).float()
-        return y_, y
-    
-    def validation_epoch_end(self, outputs):
-        self._test_epoch_end(outputs, self.config['val_metrics'])
-           
-    def test_epoch_end(self, outputs):
-        self._test_epoch_end(outputs, self.config['test_metrics'])
-
-    def _test_epoch_end(self, outputs, eval_metric):
+    def _test_step(self, batch, eval_metric):
+        pred = self.forward(batch)
+        target = (batch[self.frating]>3).float()
         eval_metric = eval.get_pred_metrics(eval_metric)
-        pred, target = [torch.cat(e) for e in zip(*outputs)]
-        result = {n: f(pred, target.int()) for n, f in eval_metric}
-        self.log_dict(result, on_step=False, on_epoch=True)
+        result = [f(pred, target.int()) for n, f in eval_metric]
+        return result
 
 
 class ItemTowerRecommender(Recommender):

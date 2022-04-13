@@ -12,7 +12,7 @@
   <br>
 </p>
 
-RecStudio is an efficient, unified and comprehensive recommendation library based on PyTorch. All the algorithms can be 
+RecStudio is a modular efficient, unified, and comprehensive recommendation library based on PyTorch. All the algorithms can be 
 divided into the following four categories according to the different tasks.
 
 - General Recommendation
@@ -222,6 +222,19 @@ Here are some details of some unclear arguments.
   those datasets are disjoint. `entry` means spliting all the interactions in those three dataset.
   `user_entry` means spliting interaction of each user into three parts. 
 
+
+Also, you can install RecStudio from PyPi:
+
+```bash
+pip install recstudio
+```
+
+For basic usage like below:
+
+```python
+import recstudio
+recstudio.run(model="BPR", data_dir="./datasets/", dataset='ml-100k')
+```
 
 ## Automatic Hyper-parameter Tuning
 RecStudio integrates with NNI module for tuning the hype-parameters automatically. For easy usage,

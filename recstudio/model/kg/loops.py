@@ -1,5 +1,5 @@
 from typing import Any, Dict, Iterator, List, Optional, Union
-from recstudio.utils.utils import set_color, parser_yaml, color_dict, print_logger
+from recstudio.utils import set_color, parser_yaml, color_dict, print_logger
 from pytorch_lightning.loops import FitLoop
 from pytorch_lightning.loops import TrainingBatchLoop, TrainingEpochLoop
 from pytorch_lightning.loops.dataloader.evaluation_loop import EvaluationLoop

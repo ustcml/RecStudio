@@ -1,7 +1,10 @@
 import os, nni
-from recstudio.utils.utils import get_model, print_logger, color_dict_normal, parser_yaml
+import os
+import recstudio
+from recstudio.utils import get_model, print_logger, color_dict_normal, parser_yaml
 
-def run(model:str, data_dir:str, dataset:str='ml-100k', mode:str='light', config_file:str=None):
+DATASET_DEMO_PATH = os.path.join(os.path.dirname(__file__),'../dataset_demo')
+def run(model:str, data_dir:str=DATASET_DEMO_PATH, dataset:str='ml-100k', mode:str='light', config_file:str=None):
     model_class, model_conf = get_model(model)
     if config_file is not None:
         user_config = parser_yaml(config_file)

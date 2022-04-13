@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import os,copy, torch, math, pickle
 import scipy.sparse as ssp
-from recstudio.utils.utils import parser_yaml, md5, check_valid_dataset, download_dataset, DEFAULT_CACHE_DIR
+from recstudio.utils import parser_yaml, md5, check_valid_dataset, download_dataset, DEFAULT_CACHE_DIR
 from recstudio.ann.sampler import MaskedUniformSampler
 class MFDataset(Dataset):
     r""" Dataset for Matrix Factorized Methods.
