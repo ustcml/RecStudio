@@ -1,5 +1,5 @@
 ==============================================
-torchrec.model.loss_func.PointwiseLoss
+recstudio.model.loss_func.PointwiseLoss
 ==============================================
 
-- :doc:`torchrec.model.loss_func.SquareLoss <square>`
+- :doc:`recstudio.model.loss_func.SquareLoss <square>`

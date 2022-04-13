@@ -1,6 +1,6 @@
 ==========================================
-torchrec.data.advance_dataset.ALSDataset
+recstudio.data.advance_dataset.ALSDataset
 ==========================================
 
-.. autoclass:: torchrec.data.advance_dataset.ALSDataset
+.. autoclass:: recstudio.data.advance_dataset.ALSDataset
     :members:

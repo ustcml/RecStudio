@@ -1,6 +1,6 @@
 ========================================
-torchrec.model.basemodel.Recommender
+recstudio.model.basemodel.Recommender
 ========================================
 
-.. autoclass:: torchrec.model.basemodel.Recommender
+.. autoclass:: recstudio.model.basemodel.Recommender
     :members:

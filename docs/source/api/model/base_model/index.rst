@@ -1,5 +1,5 @@
 ================================
-torchrec.model.basemodel
+recstudio.model.basemodel
 ================================
 
 The models are divided into 4 basic classes according to the number of towers(encoders).
@@ -10,7 +10,7 @@ and items, then calculating the scores with certain score function, such as inne
 
 
 
-- :doc:`torchrec.model.basemodel.Recommender <base>`
-- :doc:`torchrec.model.basemodel.TowerFreeRecommender <towerfree>`
-- :doc:`torchrec.model.basemodel.ItemTowerRecommender <itemtower>`
-- :doc:`torchrec.model.basemodel.TwoTowerRecommender <twotower>`
+- :doc:`recstudio.model.basemodel.Recommender <base>`
+- :doc:`recstudio.model.basemodel.TowerFreeRecommender <towerfree>`
+- :doc:`recstudio.model.basemodel.ItemTowerRecommender <itemtower>`
+- :doc:`recstudio.model.basemodel.TwoTowerRecommender <twotower>`

@@ -1,3 +1,3 @@
 ======================================
-torchrec.model.loss_func.SquareLoss
+recstudio.model.loss_func.SquareLoss
 ======================================

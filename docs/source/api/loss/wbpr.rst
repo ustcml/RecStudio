@@ -1,3 +1,3 @@
 =====================================================
-torchrec.model.loss_func.WeightedBPRLoss
+recstudio.model.loss_func.WeightedBPRLoss
 =====================================================

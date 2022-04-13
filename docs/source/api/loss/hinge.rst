@@ -1,3 +1,3 @@
 ============================================
-torchrec.model.loss_func.HingeLoss
+recstudio.model.loss_func.HingeLoss
 ============================================

@@ -1,6 +1,6 @@
 ======================================
-torchrec.model.ae.Multi_VAE
+recstudio.model.ae.Multi_VAE
 ======================================
 
-.. autoclass:: torchrec.model.ae.Multi_VAE
+.. autoclass:: recstudio.model.ae.Multi_VAE
     :members:

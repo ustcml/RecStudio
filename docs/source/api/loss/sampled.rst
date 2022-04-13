@@ -1,3 +1,3 @@
 ======================================================
-torchrec.model.loss_func.SampledSoftmaxLoss
+recstudio.model.loss_func.SampledSoftmaxLoss
 ======================================================

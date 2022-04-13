@@ -1,7 +1,7 @@
 =========================================
-torchrec.data.dataset.SortedDataSampler
+recstudio.data.dataset.SortedDataSampler
 =========================================
 
 
-.. autoclass:: torchrec.data.dataset.SortedDataSampler
+.. autoclass:: recstudio.data.dataset.SortedDataSampler
     :members:

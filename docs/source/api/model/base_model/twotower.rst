@@ -1,6 +1,6 @@
 ================================================
-torchrec.model.basemodel.TwoTowerRecommender
+recstudio.model.basemodel.TwoTowerRecommender
 ================================================
 
-.. autoclass:: torchrec.model.basemodel.TwoTowerRecommender
+.. autoclass:: recstudio.model.basemodel.TwoTowerRecommender
     :members:

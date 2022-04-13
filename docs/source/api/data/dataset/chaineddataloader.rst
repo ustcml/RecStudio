@@ -1,7 +1,7 @@
 ========================================
-torchrec.data.dataset.ChainedDataLoader
+recstudio.data.dataset.ChainedDataLoader
 ========================================
 
 
-.. autoclass:: torchrec.data.dataset.ChainedDataLoader
+.. autoclass:: recstudio.data.dataset.ChainedDataLoader
     :members:

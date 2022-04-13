@@ -1,7 +1,7 @@
 =====================================================
-torchrec.model.loss_func.BinaryCrossEntropyLoss
+recstudio.model.loss_func.BinaryCrossEntropyLoss
 =====================================================
 
 
-.. autoclass:: torchrec.model.loss_func.BinaryCrossEntropyLoss
+.. autoclass:: recstudio.model.loss_func.BinaryCrossEntropyLoss
     :members:

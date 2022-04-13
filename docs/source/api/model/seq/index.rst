@@ -1,6 +1,6 @@
 =======================================
-torchrec.model.seq
+recstudio.model.seq
 =======================================
 
 
-- :doc:`torchrec.model.seq.NPE <npe>`
+- :doc:`recstudio.model.seq.NPE <npe>`

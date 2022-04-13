@@ -1,6 +1,6 @@
 ================================================
-torchrec.model.basemodel.ItemTowerRecommender
+recstudio.model.basemodel.ItemTowerRecommender
 ================================================
 
-.. autoclass:: torchrec.model.basemodel.ItemTowerRecommender
+.. autoclass:: recstudio.model.basemodel.ItemTowerRecommender
     :members:

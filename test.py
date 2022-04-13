@@ -1,12 +1,12 @@
 from re import U
 import numpy as np
 from numpy.core.numeric import ones_like
-from torchrec.data.dataset import MFDataset, AEDataset, SeqDataset
-from torchrec.data.advance_dataset import ALSDataset
+from recstudio.data.dataset import MFDataset, AEDataset, SeqDataset
+from recstudio.data.advance_dataset import ALSDataset
 import torch
 from torch.utils.data import DataLoader
 from torch.nn.utils.rnn import pad_sequence
-from torchrec.model.mf.bpr import BPR
+from recstudio.model.mf.bpr import BPR
 
 if __name__=='__main__':
     dataset = MFDataset(r"datasets/ml-100k/ml-100k.yaml")

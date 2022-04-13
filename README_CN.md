@@ -78,6 +78,7 @@ python run.py
 这个简单的默认配置将会在MovieLens-100k 上进行BPR模型的训练和评估。
 
 一般来说，在使用GPU的情况下，这个例子将运行不到1分钟的时间即可完成，将会得到如下类似的输出：
+
 ```bash
 [2022-04-11 14:30:29] INFO (faiss.loader/MainThread) Loading faiss with AVX2 support.
 [2022-04-11 14:30:29] INFO (faiss.loader/MainThread) Loading faiss.
@@ -135,8 +136,6 @@ use_fields=['user_id', 'item_id', 'rating']
 [2022-04-11 14:31:26] INFO (pytorch_lightning.callbacks.early_stopping/MainThread) Monitored metric recall@10 did not improve in the last 10 records. Best score: 0.211. Signaling Trainer to stop.
 [2022-04-11 14:31:26] INFO (pytorch_lightning/MainThread) Training: Epoch= 76 [recall@10=0.2073 ndcg@10=0.2949 train_loss=0.1899]
 [2022-04-11 14:31:26] INFO (pytorch_lightning.utilities.distributed/MainThread) The following callbacks returned in `LightningModule.configure_callbacks` will override existing callbacks passed to Trainer: EarlyStopping, ModelCheckpoint
-/data1/home/huangxu/miniconda3/lib/python3.9/site-packages/pytorch_lightning/trainer/data_loading.py:105: UserWarning: The dataloader, test dataloader 0, does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` (try 80 which is the number of cpus on this machine) in the `DataLoader` init to improve performance.
-  rank_zero_warn(
 [2022-04-11 14:31:27] INFO (pytorch_lightning/MainThread) Testing:  [recall@10=0.2439 precision@10=0.1893 map@10=0.5762 ndcg@10=0.3718 mrr@10=0.4487 hit@10=0.7815]
 ```
 
@@ -200,7 +199,14 @@ python run.py -m=NCF -d=ml-1m
 
 ## 项目团队
 RecStudio由中国科学技术大学的同学和老师进行开发和维护。 
-
+|用户|贡献|
+|---|---|
+|@[DefuLian](https://github.com/DefuLian)|基础框架设计和搭建|
+|@[AngusHuang17](https://github.com/AngusHuang17)|序列化推荐模型，文档编写，bug修正|
+|@[Xiuchen519](https://github.com/Xiuchen519)|基于知识图谱的模型，bug修正|
+|@[JennahF](https://github.com/JennahF)|NCF,CML,logisticMF等矩阵分解模型|
+|@[HERECJ](https://github.com/HERECJ)|自动编码器模型|
+|@[BinbinJin](https://github.com/BinbinJin)|IRGAN模型|
 
 
 ## 免责声明
