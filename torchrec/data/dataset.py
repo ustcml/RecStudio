@@ -4,9 +4,9 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, Sampler
 import numpy as np
 import pandas as pd
-import os,copy, torch, math
+import os,copy, torch, math, pickle
 import scipy.sparse as ssp
-from torchrec.utils.utils import parser_yaml
+from torchrec.utils.utils import parser_yaml, md5, check_valid_dataset, download_dataset, DEFAULT_CACHE_DIR
 from torchrec.ann.sampler import MaskedUniformSampler
 class MFDataset(Dataset):
     r""" Dataset for Matrix Factorized Methods.
@@ -22,15 +22,32 @@ class MFDataset(Dataset):
         Returns: 
             recstudio.data.dataset.MFDataset: The ingredients list.
         """
-        self.config = parser_yaml(config_path)
-        self._init_common_field()
-        self._load_all_data(self.config['data_dir'], self.config['field_separator'])
-        ## first factorize user id and item id, and then filtering to determine the valid user set and item set
-        self._filter(self.config['min_user_inter'], self.config['min_item_inter'])
-        self._map_all_ids()
-        self._post_preprocess()
-        # self.save(save_path) 
-        # TODO: save and load cache here. hash config as cache file name
+        config_file_md5 = md5(config_path)
+        dataset_url = check_valid_dataset(config_file_md5)
+        if dataset_url is not None:
+            self._download(dataset_url, config_file_md5)
+        else:
+            self.config = parser_yaml(config_path)
+            self._init_common_field()
+            self._load_all_data(self.config['data_dir'], self.config['field_separator'])
+            ## first factorize user id and item id, and then filtering to determine the valid user set and item set
+            self._filter(self.config['min_user_inter'], self.config['min_item_inter'])
+            self._map_all_ids()
+            self._post_preprocess()
+            if self.config['save_cache']:
+                self._save_cache(config_file_md5)
+
+    def _download(self, download_url, md):
+        download_file_path = download_dataset(download_url, md)
+        with open(download_file_path, 'rb') as f:
+            download_obj = pickle.load(f)
+        for k in download_obj.__dict__:
+            attr = getattr(download_obj, k)
+            setattr(self, k, attr)
+
+    def _save_cache(self, md:str):
+        with open(os.path.join(DEFAULT_CACHE_DIR, "recstudio_dataset_{}.cache".format(md)), 'wb') as f:
+            pickle.dump(self, f) 
 
     def _init_common_field(self):
         r"""Inits several attributes.
@@ -536,14 +553,7 @@ class MFDataset(Dataset):
         r"""Return the length of the dataset."""
         return len(self.data_index)
 
-    def __getitem__(self, index):
-        r"""Get data at specific index.
-
-        Args:
-            index(int): The data index.
-        Returns:
-            dict: A dict contains different feature.
-        """
+    def _get_pos_data(self, index):
         if self.data_index.dim() > 1:
             idx = self.data_index[index]
             data = {self.fuid: idx[:,0]}
@@ -568,11 +578,29 @@ class MFDataset(Dataset):
             user_hist = self.user_hist[data[self.fuid]][:, 0:user_count]
             
             data['user_hist'] = user_hist
+
+        return data
+
+    def __getitem__(self, index):
+        r"""Get data at specific index.
+
+        Args:
+            index(int): The data index.
+        Returns:
+            dict: A dict contains different feature.
+        """
+        data = self._get_pos_data(index)
+        if getattr(self, 'eval_mode', False) and 'user_hist' not in data:
+            user_count = self.user_count[data[self.fuid]].max()
+            data['user_hist'] = self.user_hist[data[self.fuid]][:, 0:user_count]
         else: 
             if self.neg_sampling_count is not None:
                 user_count = self.user_count[data[self.fuid]].max()
                 user_hist = self.user_hist[data[self.fuid]][:, 0:user_count]
-                _, data['neg_item'], _ = self.negative_sampler(data[self.fuid].view(-1,1), self.neg_sampling_count, user_hist)
+                _, neg_id, _ = self.negative_sampler(data[self.fuid].view(-1,1), self.neg_sampling_count, user_hist)
+                neg_item_feat = self.item_feat[neg_id.long()]
+                for k in neg_item_feat:
+                    data['neg_'+k] = neg_item_feat[k]
         return data
 
     def _init_negative_sampler(self):
@@ -881,13 +909,12 @@ class AEDataset(MFDataset):
         
         if getattr(self, 'eval_mode', False) and 'user_hist' not in data:
             data['user_hist'] = data['in_item_id']
-
-        if getattr(self, 'eval_mode', False) and 'user_hist' not in data:
-            data['user_hist'] = data['in_item_id']
         else: 
             if self.neg_sampling_count is not None:
-                _, data['neg_item'], _ = self.negative_sampler(data[self.fuid].view(-1,1), self.neg_sampling_count, data['in_item_id'])
-        
+                _, neg_id, _ = self.negative_sampler(data[self.fuid].view(-1,1), self.neg_sampling_count, data['in_item_id'])
+                neg_item_feat = self.item_feat[neg_id.long()]
+                for k in neg_item_feat:
+                    data['neg_'+k] = neg_item_feat[k]
         return data
 
     @property
@@ -920,7 +947,7 @@ class SeqDataset(MFDataset):
         output = [keep_first_item(dix, _) for dix, _ in enumerate(output)]
         return output
 
-    def __getitem__(self, index):
+    def _get_pos_data(self, index):
         idx = self.data_index[index]
         data = {self.fuid: idx[:, 0]}
         data.update(self.user_feat[data[self.fuid]])
@@ -940,16 +967,6 @@ class SeqDataset(MFDataset):
             for k, v in d.items():
                 if k != self.fuid:
                     data[n+k] = v
-        
-        if getattr(self, 'eval_mode', False) and 'user_hist' not in data:
-            user_count = self.user_count[data[self.fuid]].max()
-            data['user_hist'] = self.user_hist[data[self.fuid]][:, 0:user_count]
-        else: 
-            if self.neg_sampling_count is not None:
-                user_count = self.user_count[data[self.fuid]].max()
-                user_hist = self.user_hist[data[self.fuid]][:, 0:user_count]
-                _, data['neg_item'], _ = self.negative_sampler(data[self.fuid].view(-1,1), self.neg_sampling_count, user_hist)
-
         return data
     
     @property
@@ -966,7 +983,6 @@ class FullSeqDataset(SeqDataset):
             data = [np.array([[u, max(sp[0], sp[1]-(i+1)*maxlen), sp[1]-i*maxlen] for i in range(length_)])]
             data += [np.array([[u, max(s-maxlen, sp[0]), s]]) for s in sp[2:]]
             return tuple(data)
-        # TODO: how to remove rep. why not remove rep interections.
         output = [get_slice(sp, u) for sp, u in zip(splits, uids)]
         output = [torch.from_numpy(np.concatenate(_)) for _ in zip(*output)]
         return output

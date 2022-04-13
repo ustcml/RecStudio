@@ -1,8 +1,12 @@
 from torch.nn.utils.rnn import pad_sequence
-import torch, yaml, re, importlib, os, logging, urllib,zipfile
+import torch, yaml, re, importlib, os, logging, urllib, zipfile, hashlib, requests
 import numpy as np
+from tqdm import tqdm
+
 print_logger = logging.getLogger("pytorch_lightning")
 print_logger.setLevel(logging.INFO)
+DEFAULT_CACHE_DIR = r"./.recstudio/dataset/"
+
 def set_color(log, color, highlight=True, keep=False):
     r"""Set color for log string.
     
@@ -100,66 +104,49 @@ def get_model(model_name):
         if os.path.isfile(fname):
             conf.update(parser_yaml(fname))
     return model_class, conf
+ 
+def md5(file_path: str):
+    r"""Generate md5 for a file."""
+    with open(file_path, 'rb') as fp:
+        data = fp.read()
+    file_md5= hashlib.md5(data).hexdigest()
+    return file_md5
 
-def check_valid_dataset(user_data_dir, default_data_dir, dataset_name: str, atom_file_list: list):
-    # 数据集文件夹分为用户提供的和系统内置的. 
-    # 当用户提供文件夹时,优先处理用户提供的文件夹内的原子文件. 
-    # 如果用户提供的文件夹内没有文件或者用户没有提供文件夹路径,那么则检查内置的文件夹内有没有对应数据集的文件夹
-    # 1.判断是否存在文件夹,若不存在文件夹,那么下载对应cache文件
-    # 2.若存在文件夹,检查是否存在 recstudio_{dataset}.cache 缓存文件.若不存在: 
-        # 1. 检查文件夹内是否存在所有的原子文件,如果不存在,重新下载原子文件.而后进行处理成缓存文件并存储;
-        # 2. 若文件夹内存在所有原子文件,则直接处理成缓存文件并存储.
-    default_dataset_dir = os.path.join(default_data_dir, dataset_name)
-    download_url = check_remote_server(dataset_name)
-    if (user_data_dir is not None) and (os.path.exists(os.path.join(user_data_dir, dataset_name))):
-        user_dataset_dir = os.path.join(user_data_dir, dataset_name)
-        if os.path.exists(user_dataset_dir):
-            for f in atom_file_list:
-                if not os.path.exists(os.path.join(user_dataset_dir, f)):
-                    if download_url is not None:
-                        download_dataset(download_url, default_dataset_dir)
-                        return "download_cache"
-                    else: 
-                        raise FileNotFoundError('File not found.')
-            return "user_defined" #用户提供的原子文件完备,直接处理原子文件
-    else:
-        if not os.path.exists(os.path.join(default_dataset_dir, "recstudio_{}.cache".format(dataset_name))):
-            if download_url is not None:
-                download_dataset(download_url, default_dataset_dir)
-                return "download_cache"
-            else:
-                raise FileNotFoundError("Dataset file not found.")
-        else:
-                return "cache_found"
-
-def check_remote_server(dataset_name: str) -> str:
-    remote_dataset_link = {
-        "ml-100k": "link1",
-        "ml-1m": "link2",
-        "ml-10m": "link3",
-        "ml-20m": "link4",
-        "gowalla": "link5",
-        "amazon-books": "link6",
-        "amazon-electronics": "link7",
-        "yelp": "link8"
-    }
-    if dataset_name in remote_dataset_link:
-        return remote_dataset_link[dataset_name]
+def check_valid_dataset(md5: str, default_dataset_path=DEFAULT_CACHE_DIR):
+    md2links = parser_yaml(os.path.join(os.path.dirname(__file__), 'url.yaml'))
+    if not os.path.exists(default_dataset_path):
+        os.makedirs(default_dataset_path)
+    local_files = os.listdir(default_dataset_path)
+    for fname in local_files:   # cache found in local
+        if md5 == fname.split('.')[0].split('_')[2]:
+            return os.path.join(default_dataset_path, fname)
+    if md5 in md2links: # cache in remote.
+        return md2links[md5]
     else:
         return None
 
-def download_dataset(url:str, save_dir: str):
-    try:
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
-        dataset_file_path = os.path.join(save_dir, "_temp_cache.zip")
-        urllib.urlretrieve(url, dataset_file_path)
-        zip_file = zipfile.ZipFile(dataset_file_path)
-        zipfile.extractall(save_dir)
-        zip_file.close()
-        os.remove(dataset_file_path)
-    except:
-        print("Something went wrong in downloading dataset file.")
+def download_dataset(url:str, md:str, save_dir: str=DEFAULT_CACHE_DIR):
+    if url.startswith('https://'):  # remote
+        try:
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir)
+            dataset_file_path = os.path.join(save_dir, "_temp_cache.zip")
+            response = requests.get(url,stream=True)
+            content_length = int(response.headers.get('content-length', 0))
+            with open(dataset_file_path, 'wb') as file, tqdm(desc='Downloading dataset', total=content_length, unit='iB', unit_scale=True, unit_divisor=1024) as bar:
+                for data in response.iter_content(chunk_size=1024):
+                    size = file.write(data)
+                    bar.update(size)
+            zip_file = zipfile.ZipFile(dataset_file_path)
+            zip_file.extractall(save_dir)
+            zip_file.close()
+            os.remove(dataset_file_path)
+            return os.path.join(save_dir, "recstudio_dataset_{}.cache".format(md))
+        except:
+            print("Something went wrong in downloading dataset file.")
+    else:   # local
+        return url
+
     
     
 def test():
