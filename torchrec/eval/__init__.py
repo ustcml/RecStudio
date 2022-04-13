@@ -12,6 +12,7 @@ def precision(pred, target, k):
     return output.mean()
 
 def map(pred, target, k):
+    pred = pred.float()
     count = (target > 0).sum(-1)
     pred = pred[:, :k]
     output = pred.cumsum(dim=-1).float() / torch.arange(1, k+1).type_as(pred)
@@ -20,6 +21,7 @@ def map(pred, target, k):
     return output.mean()
 
 def _dcg(pred, k):
+    pred = pred.float()
     k = min(k, pred.size(1))
     denom = torch.log2(torch.arange(k).type_as(pred) + 2.0).view(1,-1)
     return (pred[:, :k] / denom).sum(dim=-1)
