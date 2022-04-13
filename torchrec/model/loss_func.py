@@ -1,7 +1,15 @@
 import torch
 import torch.nn.functional as F
 class FullScoreLoss(torch.nn.Module):
+    r"""Calculate loss with positive scores and scores on all items.
+
+    The loss need user's perference scores on positive items(ground truth) and all other items. 
+    However, due to the item numbers are very huge in real-world datasets, calculating scores on all items
+    may be very time-consuming. So the loss is seldom used in large-scale dataset.
+    """
     def forward(self, label, pos_score, all_score):
+        r"""
+        """
         pass
 
 class PairwiseLoss(torch.nn.Module):
@@ -47,7 +55,7 @@ class SampledSoftmaxLoss(PairwiseLoss):
         new_pos = pos_score - log_pos_prob
         new_neg = neg_score - log_neg_prob
         if new_pos.dim() < new_neg.dim():
-            new_pos.sequeeze_(-1)
+            new_pos.unsqueeze_(-1)
         new_neg = torch.cat([new_pos, new_neg], dim=-1)
         output = torch.logsumexp(new_neg, dim=-1, keepdim=True) - new_pos
         notpadnum = torch.logical_not(torch.isinf(pos_score)).float().sum(-1)
@@ -97,3 +105,7 @@ class HingeLoss(PairwiseLoss):
             return torch.mean(loss * torch.log(rank + 1))
         else:
             return torch.mean(loss)
+
+class InfoNCELoss(SampledSoftmaxLoss):
+    def forward(self, label, pos_score, log_pos_prob, neg_score, log_neg_prob):
+        return super().forward(label, pos_score, log_pos_prob, neg_score, log_neg_prob)

@@ -1,0 +1,4 @@
+embed_dim: 64
+negative_count: 1
+pooling_type: avg
+negative_count: 1

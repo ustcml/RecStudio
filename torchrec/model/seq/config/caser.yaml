@@ -1,0 +1,7 @@
+embed_dim: 64
+n_v: 8
+n_h: 16
+dropout_rate: 0.5
+layer_num: 1
+negative_count: 3
+weight_decay: 1e-4
