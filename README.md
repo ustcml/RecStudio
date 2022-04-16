@@ -12,24 +12,23 @@
   <br>
 </p>
 
-RecStudio is a modular efficient, unified, and comprehensive recommendation library based on PyTorch. All the algorithms can be 
-divided into the following four categories according to the different tasks.
-
+RecStudio is a unified, highly-modularized and recommendation-efficient recommendation library based on PyTorch. All the algorithms are 
+categorized as follows according to recommendation tasks.
 - General Recommendation
 - Sequential Recommendation
 - Knowledge-based Recommendation
-- Social-Network-based Recommendation
+- Feature-based Recommendation
+- Social Recommendation
 
 ## Description
 
 ### Model Structure
 
-At the core of the library, we divide all the models into 3 basic classes according to the number of
-towers:
+At the core of the library, all recommendation models are grouped into three base classes:
 
-- `TowerFreeRecommender`: There is no explicit user tower or item tower.
-- `ItemTowerRecommender`: Only item tower.
-- `TwoTower`: There are both user tower and item tower.
+- `TowerFreeRecommender`: The most flexible base class, which enables any complex feature-interaction modeling.
+- `ItemTowerRecommender`: Item encoder are separated from recommender, enabling fast ANN and model-based negative sampling.
+- `TwoTowerRecommender`: The subclass of `ItemTowerRecommender`, where recommenders only consist of user encoder and item encoder.
 
 ### Dataset Structure
 
@@ -37,36 +36,25 @@ For the dataset structure, the datasets are divided into five categories:
 
 |Dataset    |Application   | Examples  |
 |-----------|-----------|----------|
-|MFDataset|Matrix Factorization models|BPR, NCF, et al.|
-|AEDataset|Auto Encoder based models|MultiVAE, RecVAE, et al.|
-|SeqDataset|Sequential Recommendations models|GRU4Rec, SASRec, et al.|
-|Seq2SeqDataset|Sequential Recommendations models based on Masked Language Modeling|Bert4Rec, et al.|
-|ALSDataset|Alternative optimzing models|CML, et al.|
+|MFDataset|Dataset for providing user-item-rating triplet|BPR, NCF, CML et al.|
+|AEDataset|Dataset for AutoEncoder-based ItemTowerRecommender|MultiVAE, RecVAE, et al.|
+|SeqDataset|Dataset for Sequential recommenders with Causal Prediction|GRU4Rec, SASRec, et al.|
+|Seq2SeqDataset|Dataset for Sequential recommenders with Masked Prediction|Bert4Rec, et al.|
+|ALSDataset|Dataset for recommenders optimized by alternating least square |WRMF, et al.|
 
-For dataset files, atomic files are provided for easy usage.
-Also, in order to accelerating the dataset processing, processed dataset object cache file are 
-provided for quickly read.
+In order to accelerate dataset processing, processed dataset are automatically cached for repeatable training shortly.
 
 
 ### Model Evaluation
 
-Almost all common metrics used in recommendation systems are implemented in RecStudio based on 
-PyTorch, such as `NDCG`, `Recall`, `Precsion`, et al. All of those metric functions have the same 
-interface, which is easy to understand. Besides, the whole evaluation procedure can be moved to GPU,
-resulting in a much more efficient performance.
+Almost all common metrics used in recommender systems are implemented in RecStudio based on PyTorch, such as `NDCG`, `Recall`, `Precision`, et al. All metric functions have the same interface, being fully implemented with tensor operators. Therefore, the evaluation procedure can be moved to GPU, leading to a remarkable speedup of evaluation.
 
 
 ### ANNs & Sampler
 
-In order to accelerate the training procedure, RecStudio integrates various Approximate Nearest Neighbor
-search(ANNs) and negative samplers. By building index with ANNs, topk operation can be obviously
-improved and top uninteracted items can be used as negative items to acclerete the training prodecure.
-
-Negative samplers consist of static sampler and two series of dynamic samplers developed by RecStuio
-team. Static samplers consist of `Uniform Sampler` and `Popularity Sampler`. The dynamic samplers is
-developed with quantization methods. In addition, two methods are provided for easy usage:sampling 
-in loading data and sampling in training time.
-
+In order to accelerate training and evaluation, RecStudio integrates various Approximate Nearest Neighbor
+search (ANNs) and negative samplers. By building indexes with ANNs, the topk operator based on Euclidean distance, inner product and cosine similarity can be significantly accelerated. Negative samplers consist of static sampler and model-based samplers developed by RecStudio
+team. Static samplers consist of `Uniform Sampler` and `Popularity Sampler`. The model-based samplers are based on either quantization of item vectors or importance resampling. Moreover, we also implement static sampling in the dataset, which enables us to generate negatives when loading data.
 
 ### Loss & Score
 
@@ -74,11 +62,11 @@ In RecStudio, loss functions are categorized into three types:
     - `FullScoreLoss`: Calculating scores on the whole items, such as `SoftmaxLoss`.
     - `PairwiseLoss`: Calculating scores on positive and negative items, such as `BPRLoss`, 
     `BinaryCrossEntropyLoss`, et al.
-    - `PointwiseLoss`: Calculating scores for single (user,item) interaction pair, such as `HingeLoss`.
+    - `PointwiseLoss`: Calculating scores for a single (user,item) interaction, such as `HingeLoss`.
 
-Score functions are used to model users' perference on items. Various common score functions are 
+Score functions are used to model users' preference on items. Various common score functions are 
 implemented in RecStudio, such as: `InnerProduct`, `EuclideanDistance`, `CosineDistance`, `MLPScorer`,
-et al. By trying with different score functions, you can find one for your model!
+et al. 
 
 <p align="center">
   <img src="assets/recstudio_framework.png" alt="RecStudio v0.1 Framework" width="600">
@@ -89,16 +77,15 @@ et al. By trying with different score functions, you can find one for your model
 
 ## Features
 
-- **General Dataset Structure** A unified dataset config based on atomic files and online cache files
+- **General Dataset Structure** A unified dataset config based on atomic data files and automatic data cache
 are supported in RecStudio.
-- **Modular Model Structure** By seperating the whole model into model layers, loss functions, scoring 
-functions, samplers and ANNs, you can customize your model with various modules like building blocks.
-- **GPU Acceleration** The whole operation from model training to model evaluation could be well done
-on GPUs, distributed GPUs are also supported.
-- **Simple Model Categorization** RecStudio categorizes all the models according to the number of towers,
-which is easy to understand and use. And the categorization can cover almost all models.
-- **Diverse Negative Samplers** RecStudio integrates static and dynamic sampler, which could be loaded on
-GPUs.
+- **Modular Model Structure** By organizing the whole recommender into different modules, loss functions, scoring 
+functions, samplers and ANNs, you can customize your model like building blocks.
+- **GPU Acceleration** The whole operation from model training to model evaluation could be easily moved to
+on GPUs and distributed GPUs for running.
+- **Simple Model Categorization** RecStudio categorizes all the models based on the number of encoders,
+which is easy to understand and use. The taxonomy can cover all models.
+- **Simple and Complex Negative Samplers** RecStudio integrates static and model-based samplers with only tensor operators.
 
 
 ## Quick Start
@@ -254,7 +241,7 @@ We expect all contributions firstly discussed in the issue tracker and then goin
 
 
 ## The Team
-RecStudio is developed and maintained by USTC.
+RecStudio is developed and maintained by USTC BigData Lab.
 
 |User|Contributions|
 |---|---|
