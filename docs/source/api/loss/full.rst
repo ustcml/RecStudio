@@ -9,4 +9,5 @@ recstudio.model.loss_func.FullScoreLoss
 
 Here list a full score loss, actually it's a CrossEntropyLoss on all items.
 
-- :doc:`recstudio.model.loss_func.SoftmaxLoss <softmax>`
+.. toctree::
+    softmax

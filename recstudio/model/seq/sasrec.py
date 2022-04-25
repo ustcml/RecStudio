@@ -3,6 +3,19 @@ from recstudio.data import dataset
 import torch
 
 class SASRec(basemodel.ItemTowerRecommender):
+    r"""
+    SASRec models user's sequence with a Transformer.
+
+    Model hyper parameters:
+        - ``embed_dim(int)``: The dimension of embedding layers. Default: ``64``.
+        - ``hidden_size(int)``: The output size of Transformer layer. Default: ``128``.
+        - ``layer_num(int)``: The number of layers for the Transformer. Default: ``2``.
+        - ``dropout_rate(float)``:  The dropout probablity for dropout layers after item embedding
+         | and in Transformer layer. Default: ``0.5``.
+        - ``head_num(int)``: The number of heads for MultiHeadAttention in Transformer. Default: ``2``.
+        - ``activation(str)``: The activation function in transformer. Default: ``"gelu"``.
+        - ``layer_norm_eps``: The layer norm epsilon in transformer. Default: ``1e-12``.
+    """
     def init_model(self, train_data):
         self.n_layers = self.config['layer_num']
         self.n_head = self.config['head_num']
@@ -31,7 +44,8 @@ class SASRec(basemodel.ItemTowerRecommender):
         self.dropout = torch.nn.Dropout(p=self.dropout_rate)
 
     def get_dataset_class(self):
-            return dataset.SeqDataset
+        r"""SeqDataset is used for SASRec."""
+        return dataset.SeqDataset
 
     def construct_query(self, batch_data):
         user_hist = batch_data['in_item_id']
@@ -55,7 +69,9 @@ class SASRec(basemodel.ItemTowerRecommender):
         return query_output
 
     def config_loss(self):
+        r"""SoftmaxLoss is used as the loss function."""
         return loss_func.SoftmaxLoss()
 
     def config_scorer(self):
+        r"""InnerProduct is used as the score function."""
         return scorer.InnerProductScorer()

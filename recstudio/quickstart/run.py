@@ -1,6 +1,5 @@
 import os, nni
 import os
-import recstudio
 from recstudio.utils import get_model, print_logger, color_dict_normal, parser_yaml
 
 DATASET_DEMO_PATH = os.path.join(os.path.dirname(__file__),'../dataset_demo')
@@ -18,7 +17,7 @@ def run(model:str, data_dir:str=DATASET_DEMO_PATH, dataset:str='ml-100k', mode:s
                 model_conf[k] = v
     model = model_class(model_conf)
     print_logger.info(color_dict_normal(model_conf, mode=='tune'))
-    dataset_filename = f"{data_dir}/{dataset}/{dataset}.yaml"
+    dataset_filename = os.path.join(data_dir, dataset, f"{dataset}.yaml")
     if not os.path.isfile(dataset_filename):
         raise ValueError('Please provide dataset description in a yaml file')
     datasets = model.load_dataset(dataset_filename)

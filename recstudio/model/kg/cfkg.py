@@ -100,6 +100,7 @@ class CFKG(basemodel.TwoTowerRecommender):
         return tail_score, head_score
 
     def training_step(self, batch, batch_idx):
+        r""" Training for a batch."""
         tail_score, head_score = self.forward(batch, isinstance(self.loss_fn, loss_func.FullScoreLoss))
         return self.loss_fn(None, *tail_score) + self.loss_fn(None, *head_score)
 

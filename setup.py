@@ -34,13 +34,13 @@ if on_rtd:
 setup(
     name='recstudio',
     version=
-    '0.0.5',  # please remember to edit recbole/__init__.py in response, once updating the version
+    '0.0.1a3',  # please remember to edit recbole/__init__.py in response, once updating the version
     description='A modular, efficient, unified, and comprehensive recommendation library based on PyTorch.',
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url='https://github.com/RUCAIBox/RecStudio',
+    url='https://github.com/ustcml/RecStudio',
     author='USTCML',
-    author_email='xuhuangcs@mail.ustc.edu.cn',
+    author_email='liandefu@ustc.edu.cn',
     packages=[
         package for package in find_packages()
         if package.startswith('recstudio')

@@ -108,4 +108,12 @@ class HingeLoss(PairwiseLoss):
 
 class InfoNCELoss(SampledSoftmaxLoss):
     def forward(self, label, pos_score, log_pos_prob, neg_score, log_neg_prob):
-        return super().forward(label, pos_score, log_pos_prob, neg_score, log_neg_prob)
+        return super().forward(label, pos_score, torch.zeros_like(pos_score), neg_score, torch.zeros_like(neg_score))
+
+
+class NCELoss(PairwiseLoss):
+    def forward(self, label, pos_score, log_pos_prob, neg_score, log_neg_prob):
+        new_pos = pos_score - log_pos_prob
+        new_neg = neg_score - log_neg_prob
+        loss = F.logsigmoid(new_pos) + (new_neg - F.softplus(new_neg)).sum(1)
+        return -loss.mean()

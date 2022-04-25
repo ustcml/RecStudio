@@ -2,7 +2,25 @@ from recstudio.model import basemodel, loss_func, scorer
 from recstudio.data import dataset
 import torch
 
+r"""
+Paper Reference:
+##################
+    Jing Li, et al. "Neural Attentive Session-based Recommendation" in CIKM 2017.
+    https://dl.acm.org/doi/10.1145/3132847.3132926
+"""
 class NARM(basemodel.ItemTowerRecommender):
+    r""" NARM a hybrid encoder with an attention mechanism to model the user’s sequential behavior
+    and capture the user’s main purpose in the current session, which are combined as a unified
+    session representation later.
+
+    Model hyper parameters:
+        - ``embed_dim(int)``: The dimension of embedding layers. Default: ``64``.
+        - ``hidden_size(int)``: The output size of GRU layer. Default: ``128``.
+        - ``dropout_rate(list[float])``:  The dropout probablity of two dropout layers: the first
+         | is after item embedding layer, the second is between the GRU layer and the bi-linear
+         | similarity layer. Default: ``[0.25, 0.5]``.
+        - ``layer_num(int)``: The number of layers for the GRU. Default: ``1``.
+    """
     def init_model(self, train_data):
         super().init_model(train_data)
         self.hidden_size = self.config['hidden_size']
@@ -28,6 +46,7 @@ class NARM(basemodel.ItemTowerRecommender):
         self.B = torch.nn.Linear(self.hidden_size*2, self.embed_dim, bias=False)
 
     def get_dataset_class(self):
+        r"""SeqDataset is used for NARM."""
         return dataset.SeqDataset
 
     def construct_query(self, batch_data):
@@ -47,7 +66,9 @@ class NARM(basemodel.ItemTowerRecommender):
         return query
 
     def config_loss(self):
+        r"""SoftmaxLoss is used as the loss function."""
         return loss_func.SoftmaxLoss()
 
     def config_scorer(self):
+        r"""InnerProduct is used as the score function."""
         return scorer.InnerProductScorer()

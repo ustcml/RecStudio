@@ -9,8 +9,8 @@ and get user representations with its interacted items. Typical matrix factorize
 and items, then calculating the scores with certain score function, such as inner product, multi layer perceptron.
 
 
-
-- :doc:`recstudio.model.basemodel.Recommender <base>`
-- :doc:`recstudio.model.basemodel.TowerFreeRecommender <towerfree>`
-- :doc:`recstudio.model.basemodel.ItemTowerRecommender <itemtower>`
-- :doc:`recstudio.model.basemodel.TwoTowerRecommender <twotower>`
+.. toctree::
+    base
+    towerfree
+    itemtower
+    twotower

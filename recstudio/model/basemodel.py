@@ -96,6 +96,7 @@ class Recommender(LightningModule, abc.ABC):
             parameter = {'rep' : self.config.get('test_repetitive'),
                         'train_rep': self.config.get('train_repetitive')}
         parameter['dataset_sampling_count'] = self.config.get('dataset_sampling_count')
+        parameter['dataset_sampler'] = self.config.get('dataset_sampler')
         parameter = {k: v for k, v in parameter.items() if v is not None}
         return dataset.build(self.config['split_ratio'], **parameter)
 
@@ -454,6 +455,8 @@ class ItemTowerRecommender(Recommender):
         if 'sampler' in self.config and self.config['sampler'] is not None:
             if self.config['sampler'].lower() == 'uniform':
                 output = sampler.UniformSampler(train_data.num_items-1, self.score_func)
+            elif self.config['sampler'].lower() == 'masked_uniform':
+                output = sampler.MaskedUniformSampler(train_data.num_items-1, self.score_func)
             elif self.config['sampler'].lower() == 'popularity':
                 output = sampler.PopularSamplerModel(train_data.item_freq[1:], \
                     self.score_func, self.config['item_freq_process_mode'])

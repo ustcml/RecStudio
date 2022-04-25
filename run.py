@@ -23,7 +23,7 @@ if __name__=='__main__':
                 model_conf[k] = v
     model = model_class(model_conf)
     print_logger.info(color_dict_normal(model_conf, args.mode =='tune'))
-    dataset_filename = f"{args.data_dir}/{args.dataset}/{args.dataset}.yaml"
+    dataset_filename = os.path.join(args.data_dir, args.dataset, f"{args.dataset}.yaml")
     if not os.path.isfile(dataset_filename):
         raise ValueError('Please provide dataset description in a yaml file')
     datasets = model.load_dataset(dataset_filename)

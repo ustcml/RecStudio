@@ -8,9 +8,7 @@ class ALSDataset(MFDataset):
     For Alternating Least Squares algorithms, embeddings of users and items are optimized alternatively. 
     So the data provided should be ``<u, Iu>`` and ``<i, Ui>`` alternatively.
     """
-    def build(self, ratio_or_num, shuffle=True, split_mode='user_entry', dataset_sampling_count=None):
-        self.neg_sampling_count = dataset_sampling_count
-        self._init_negative_sampler()
+    def build(self, ratio_or_num, shuffle=True, split_mode='user_entry'):
         datasets = self._build(ratio_or_num, shuffle, split_mode, True, False)
         data_index = datasets[0].inter_feat_subset
         user_ids = self.inter_feat.get_col(self.fuid)[data_index]

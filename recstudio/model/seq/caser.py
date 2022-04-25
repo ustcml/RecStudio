@@ -3,7 +3,22 @@ from recstudio.data import dataset
 from recstudio.ann import sampler
 import torch
 
+r"""
+Caser
+######################
+
+Paper Reference:
+     Jiaxi Tang, et al. "Personalized Top-N Sequential Recommendation via Convolutional Sequence Embedding" in WSDM 2018.
+     https://dl.acm.org/doi/abs/10.1145/3159652.3159656
+"""
+
 class Caser(basemodel.TwoTowerRecommender):
+    r"""
+        | Caser models user's behavior with multi CNN layers of different kernel size, which aim
+          to capture different length of behavior sequences.The idea is to embed a sequence of
+          recent itemsinto an “image” in the time and latent spaces and learn sequential patterns
+          as local features of the image using convolutional filters.
+    """
     def init_model(self, train_data):
         super().init_model(train_data)
         self.n_v = self.config['n_v']
@@ -29,15 +44,22 @@ class Caser(basemodel.TwoTowerRecommender):
         # self.bias = torch.nn.Parameter(torch.rand(train_data.num_items))
 
     def get_dataset_class(self):
+        r"""SeqDataset is used for Caser."""
         return dataset.SeqDataset
 
     def build_item_encoder(self, train_data):
+        r"""A simple item embedding is used as item encoder in Caser.
+        
+        The item embedding output dimension is twice as the dimension of user embedding.
+        """
         return torch.nn.Embedding(train_data.num_items, self.embed_dim*2, padding_idx=0)
 
     def build_user_encoder(self, train_data):
+        r"""A simple user embedding is used as user encoder in Caser."""
         return torch.nn.Embedding(train_data.num_users, self.embed_dim, padding_idx=0)
 
     def construct_query(self, batch_data):
+        r"""Construct query with user embedding and sequence with CNN layers."""
         user_hist = batch_data['in_item_id']
         # seq_len = batch_data['seqlen']
         user_id = batch_data['user_id']
@@ -67,10 +89,15 @@ class Caser(basemodel.TwoTowerRecommender):
         return query
 
     def config_loss(self):
+        r"""According to the original paper, BPR loss is applied.
+            Also, other loss functions like BCE loss can be used too.
+        """
         return loss_func.BPRLoss()
 
     def config_scorer(self):
+        r"""Innerproduct operation is applied to calculate scores between query and item."""
         return scorer.InnerProductScorer()
 
     def build_sampler(self, train_data):
+        r"""Negative items are sampled uniformly."""
         return sampler.UniformSampler(train_data.num_items-1, self.score_func)

@@ -25,7 +25,7 @@ class CML(basemodel.TwoTowerRecommender):
 
             def forward(self, label, pos_score, log_pos_prob, neg_score, neg_prob):
                 pos_score[pos_score == -float("inf")] = float("inf")
-                loss = torch.max(torch.max(neg_score, dim=-1).values.unsqueeze(-1) - pos_score + self.margin, torch.zeros(pos_score.size()))
+                loss = torch.max(torch.max(neg_score, dim=-1).values.unsqueeze(-1) - pos_score + self.margin, pos_score.new_zeros(pos_score.size(1)))
                 if self.n_items is not None:
                     impostors = neg_score.unsqueeze(1) - pos_score.unsqueeze(-1) + self.margin > 0
                     rank = torch.mean(impostors.to(torch.float32), -1) * self.n_items

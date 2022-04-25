@@ -4,7 +4,7 @@
 <p float="left">
 <img src="https://img.shields.io/badge/python-v3.7+-blue">
 <img src="https://img.shields.io/badge/pytorch-v1.9+-blue">
-<img src="https://img.shields.io/badge/pytorch--lightning-v1.5.9-red">
+<img src="https://img.shields.io/badge/pytorch--lightning-v1.4.9-red">
 <img src="https://img.shields.io/badge/License-MIT-blue">
 </p>
 <p align="left">
@@ -67,6 +67,17 @@ In RecStudio, loss functions are categorized into three types:
 Score functions are used to model users' preference on items. Various common score functions are 
 implemented in RecStudio, such as: `InnerProduct`, `EuclideanDistance`, `CosineDistance`, `MLPScorer`,
 et al. 
+
+| Loss | Math Type | Sampling Distribution | Calculation Complexity | Sampling Complexity | Convergence Speed | Related Metrics |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Softmax | <!-- $-\log \frac{\exp f_{\theta}(c, {\color{red}k})}{\sum_{i=1}^{N} \exp f_{\theta}(c, i)}$ --> <img style="transform: translateY(0.1em);" src="https://latex.codecogs.com/svg.image?\small&space;-\log&space;\frac{\exp&space;f_{\theta}(c,&space;{\color{red}k})}{\sum_{i=1}^{N}&space;\exp&space;f_{\theta}(c,&space;i)}">  | No sampling | <!-- $O(N)$ --> <img style="transform: translateY(0.1em);" src="https://latex.codecogs.com/svg.image?\small&space;O(N)"> | - | very fast | NDCG |
+| Sampled Softmax | <!-- $-\log \frac{\exp \left(f_{\theta}(c, {\color{red}k})-\log Q({\color{red}k} \mid c)\right)}{\sum_{i \in S \cup\{k\}} \exp \left(f_{\theta}(c, i)-\log Q(i \mid c)\right)}$ --> <img style="transform: translateY(0.1em);" src="https://latex.codecogs.com/svg.image?\small&space;-\log&space;\frac{\exp&space;\left(f_{\theta}(c,&space;{\color{red}k})-\log&space;Q({\color{red}k}&space;\mid&space;c)\right)}{\sum_{i&space;\in&space;S&space;\cup\{k\}}&space;\exp&space;\left(f_{\theta}(c,&space;i)-\log&space;Q(i&space;\mid&space;c)\right)}"> | No sampling | <!-- $O(N)$ --> <img style="transform: translateY(0.1em);" src="https://latex.codecogs.com/svg.image?\small&space;O(N)"> | - | fast | NDCG |
+| BPR | <!-- $-\log \left(\sigma\left(f_{\theta}(c, {\color{red}k})-f_{\theta}(c, {\color{red}j})\right)\right)$ --> <img style="transform: translateY(0.1em);" src="https://latex.codecogs.com/svg.image?\small&space;-\log&space;\left(\sigma\left(f_{\theta}(c,&space;{\color{red}k})-f_{\theta}(c,&space;{\color{red}j})\right)\right)"> | Uniform sampling | <!-- $O(1)$ --> <img style="transform: translateY(0.1em);" src="https://latex.codecogs.com/svg.image?\small&space;O(1)"> | <!-- $O(1)$ --> <img style="transform: translateY(0.1em);" src="https://render.githubusercontent.com/render/math?math=O(1)"> | slow | AUC |
+| WARP | <!-- $L\left(\left\lfloor \frac{Y-1}{N}\right\rfloor\right)\lvert 1-f_{\theta}(c, {\color{red}k})+f_{\theta}(c, {\color{red}j})\rvert_{+}$ --> <img style="transform: translateY(0.1em);" src="https://latex.codecogs.com/svg.image?\small&space;L\left(\left\lfloor&space;\frac{Y-1}{N}\right\rfloor\right)\lvert&space;1-f_{\theta}(c,&space;{\color{red}k})&plus;f_{\theta}(c,&space;{\color{red}j})\rvert_{&plus;}"> | Reject Sampling | <!-- $O(1)$ --> <img style="transform: translateY(0.1em);" src="https://latex.codecogs.com/svg.image?\small&space;O(1)"> | slower and slower | slow | Precision |
+| InfoNCE | <!-- $-\log \frac{\exp \left(f_{\theta}(c, {\color{red}k})\right)}{\sum_{i \in S \cup\{k\}} \exp \left(f_{\theta}(c, i)\right)}$ --> <img style="transform: translateY(0.1em);" src="https://latex.codecogs.com/svg.image?\small&space;-\log&space;\frac{\exp&space;\left(f_{\theta}(c,&space;{\color{red}k})\right)}{\sum_{i&space;\in&space;S&space;\cup\{k\}}&space;\exp&space;\left(f_{\theta}(c,&space;i)\right)}"> | Popularity sampling | <!-- $O(\lvert S\rvert)$ --> <img style="transform: translateY(0.1em);" src="https://latex.codecogs.com/svg.image?\small&space;O(\lvert&space;S\rvert)"> | <!-- $O(1)$ --> <img style="transform: translateY(0.1em);" src="https://latex.codecogs.com/svg.image?\small&space;O(1)"> | fast | DCG |
+| WRMF | <!-- $\sum_{j} {\color{red}w_{c j}}\left(f_{\theta}(c, j)-y(c, j)\right)^{2}$ --> <img style="transform: translateY(0.1em);" src="https://latex.codecogs.com/svg.image?\small&space;\sum_{j}&space;{\color{red}w_{c&space;j}}\left(f_{\theta}(c,&space;j)-y(c,&space;j)\right)^{2}"> | No sampling | <!-- $O(N)$ --> <img style="transform: translateY(0.1em);" src="https://latex.codecogs.com/svg.image?\small&space;O(N)"> | - | very fast | - |
+| PRIS | <!-- $-\sum_{j \in S} \frac{\exp \left(f_{\theta}(c, {\color{red}j})-\log Q({\color{red}j} \mid c)\right)}{\sum_{{j^{\prime}} \in S} \exp \left(f_{\theta}\left(c, {j^{\prime}}\right)-\log Q\left({j^{\prime}} \mid c\right)\right)} \log \left(\sigma\left(f_{\theta}(c, {\color{red}k})-f_{\theta}(c, {\color{red}j})\right)\right)$ --> <img style="transform: translateY(0.1em);" src="https://latex.codecogs.com/svg.image?-\sum_{j&space;\in&space;S}&space;\frac{\exp&space;\left(f_{\theta}(c,&space;{\color{red}j})-\log&space;Q({\color{red}j}&space;\mid&space;c)\right)}{\sum_{{j^{\prime}}&space;\in&space;S}&space;\exp&space;\left(f_{\theta}\left(c,&space;{j^{\prime}}\right)-\log&space;Q\left({j^{\prime}}&space;\mid&space;c\right)\right)}&space;\log&space;\left(\sigma\left(f_{\theta}(c,&space;{\color{red}k})-f_{\theta}(c,&space;{\color{red}j})\right)\right)"> | Cluster sampling | <!-- $O(\lvert S\rvert)$ --> <img style="transform: translateY(0.1em);" src="https://latex.codecogs.com/svg.image?\small&space;O(\lvert&space;S\rvert)"> | <!-- $O(K)$ --> <img style="transform: translateY(0.1em);" src="https://latex.codecogs.com/svg.image?\small&space;O(K)"> | very fast | DCG |
+
 
 <p align="center">
   <img src="assets/recstudio_framework.png" alt="RecStudio v0.1 Framework" width="600">
@@ -222,6 +233,8 @@ For basic usage like below:
 import recstudio
 recstudio.run(model="BPR", data_dir="./datasets/", dataset='ml-100k')
 ```
+
+For more detailed information, please refer to our documentation https://recstudio.readthedocs.io/.
 
 ## Automatic Hyper-parameter Tuning
 RecStudio integrates with NNI module for tuning the hype-parameters automatically. For easy usage,

@@ -13,6 +13,7 @@ gpu: ~
 ann: ~
 sampler: ~
 negative_count: 1
+dataset_sampler: masked_uniform
 dataset_sampling_count: ~
 embed_dim: 64
 item_bias: False

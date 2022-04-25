@@ -7,7 +7,7 @@ import pandas as pd
 import os,copy, torch, math, pickle
 import scipy.sparse as ssp
 from recstudio.utils import parser_yaml, md5, check_valid_dataset, download_dataset, DEFAULT_CACHE_DIR
-from recstudio.ann.sampler import MaskedUniformSampler
+from recstudio.ann.sampler import UniformSampler, MaskedUniformSampler, PopularSamplerModel
 class MFDataset(Dataset):
     r""" Dataset for Matrix Factorized Methods.
 
@@ -22,20 +22,21 @@ class MFDataset(Dataset):
         Returns: 
             recstudio.data.dataset.MFDataset: The ingredients list.
         """
-        config_file_md5 = md5(config_path)
-        dataset_url = check_valid_dataset(config_file_md5)
+        self.config = parser_yaml(config_path)
+        config_md5 = md5(self.config)
+        dataset_url = check_valid_dataset(config_md5)
         if dataset_url is not None:
-            self._download(dataset_url, config_file_md5)
+            self._download(dataset_url, config_md5)
         else:
-            self.config = parser_yaml(config_path)
+            data_dir = os.path.dirname(config_path)
             self._init_common_field()
-            self._load_all_data(self.config['data_dir'], self.config['field_separator'])
+            self._load_all_data(data_dir, self.config['field_separator'])
             ## first factorize user id and item id, and then filtering to determine the valid user set and item set
             self._filter(self.config['min_user_inter'], self.config['min_item_inter'])
             self._map_all_ids()
             self._post_preprocess()
             if self.config['save_cache']:
-                self._save_cache(config_file_md5)
+                self._save_cache(config_md5)
 
     def _download(self, download_url, md):
         download_file_path = download_dataset(download_url, md)
@@ -605,7 +606,14 @@ class MFDataset(Dataset):
 
     def _init_negative_sampler(self):
         if self.neg_sampling_count is not None:
-            self.negative_sampler = MaskedUniformSampler(self.num_items-1)
+            if self.sampler == 'uniform':
+                self.negative_sampler = UniformSampler(self.num_items-1)
+            elif self.sampler == 'masked_uniform':
+                self.negative_sampler = MaskedUniformSampler(self.num_items-1)
+            elif self.sampler == 'popular':
+                self.negative_sampler = PopularSamplerModel(self.item_freq[1:])
+            else:
+                raise ValueError("Only `uniform`, `masked_uniform`, `popular` sampler is supported in dataset sampling.")
         else:
             self.negative_sampler = None
 
@@ -614,7 +622,7 @@ class MFDataset(Dataset):
         d.data_index = idx
         return d
     
-    def build(self, ratio_or_num, shuffle=True, split_mode='user_entry', fmeval=False, dataset_sampling_count=None):
+    def build(self, ratio_or_num, shuffle=True, split_mode='user_entry', fmeval=False, dataset_sampling_count=None, dataset_sampler='uniform'):
         """Build dataset.
 
         Args:
@@ -632,6 +640,7 @@ class MFDataset(Dataset):
         """
         self.fmeval = fmeval
         self.neg_sampling_count = dataset_sampling_count
+        self.sampler = dataset_sampler
         self._init_negative_sampler()
         return self._build(ratio_or_num, shuffle, split_mode, True, False)
 
@@ -863,7 +872,7 @@ class MFDataset(Dataset):
             return len(self.field2tokens[field])
         
 class AEDataset(MFDataset):
-    def build(self, ratio_or_num, shuffle=False, dataset_sampling_count=None):
+    def build(self, ratio_or_num, shuffle=False, dataset_sampling_count=None, dataset_sampler='uniform'):
         """Build dataset.
 
         Args:
@@ -923,7 +932,7 @@ class AEDataset(MFDataset):
         return index
 
 class SeqDataset(MFDataset):
-    def build(self, ratio_or_num, rep=True, train_rep=True, dataset_sampling_count=None):
+    def build(self, ratio_or_num, rep=True, train_rep=True, dataset_sampling_count=None, dataset_sampler='uniform'):
         self.test_rep = rep
         self.train_rep = train_rep if not rep else True
         self.neg_sampling_count = dataset_sampling_count

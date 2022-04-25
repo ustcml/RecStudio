@@ -3,7 +3,19 @@ from recstudio.data import dataset
 from recstudio.ann import sampler
 import torch
 
+r"""
+HGN
+########
+
+Paper Reference:
+    Chen ma, et al. "HGN: Hierarchical Gating Networks for Sequential Recommendation" in KDD2019.
+    https://dl.acm.org/doi/abs/10.1145/3292500.3330984
+"""
+
 class HGN(basemodel.TwoTowerRecommender):
+    r"""HGN proposes a hierarchical gating network, integrated with the Bayesian Personalized Ranking
+    (BPR) to capture both the long-term and short-term user interests. HGN consists of a feature
+    gating module, an instance gating module, and an item-item product module."""
     def init_model(self, train_data):
         super().init_model(train_data)
         self.max_seq_len = train_data.config['max_seq_len']
@@ -44,15 +56,18 @@ class HGN(basemodel.TwoTowerRecommender):
         return query
 
     def get_dataset_class(self):
+        r"""The dataset is SeqDataset."""
         return dataset.SeqDataset
 
     def config_loss(self):
+        r"""BPR loss is used."""
         return loss_func.BPRLoss()
 
     def config_scorer(self):
         return scorer.InnerProductScorer()
 
     def build_sampler(self, train_data):
+        r"""Uniform sampler is used to generate negative samples."""
         return sampler.UniformSampler(train_data.num_items-1, self.score_func)
 
 
