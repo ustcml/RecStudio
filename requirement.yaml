@@ -1,4 +1,4 @@
-name: Torchrec
+name: RecStudio
 channels:
   - pytorch
   - https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/pytorch
@@ -122,4 +122,3 @@ dependencies:
     - werkzeug==2.0.2
     - yarl==1.7.2
     - zipp==3.6.0
-prefix: /data1/home/huangxu/miniconda3/envs/Torchrec

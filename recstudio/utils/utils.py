@@ -1,11 +1,11 @@
 from torch.nn.utils.rnn import pad_sequence
-import torch, yaml, re, importlib, os, logging, urllib, zipfile, hashlib, requests
-import numpy as np
+import yaml, re, importlib, os, logging, zipfile, hashlib, requests, json
 from tqdm import tqdm
 
 print_logger = logging.getLogger("pytorch_lightning")
 print_logger.setLevel(logging.INFO)
 DEFAULT_CACHE_DIR = r"./.recstudio/dataset/"
+URL_UPDATE_URL = r"http://home.ustc.edu.cn/~angus_huang/recstudio/url.yaml"
 
 def set_color(log, color, highlight=True, keep=False):
     r"""Set color for log string.
@@ -104,16 +104,64 @@ def get_model(model_name):
         if os.path.isfile(fname):
             conf.update(parser_yaml(fname))
     return model_class, conf
- 
-def md5(file_path: str):
-    r"""Generate md5 for a file."""
-    with open(file_path, 'rb') as fp:
-        data = fp.read()
-    file_md5= hashlib.md5(data).hexdigest()
-    return file_md5
+
+def md5(config:dict):
+    s = ''
+    for k in sorted(config):
+        s += f"{k}:{config[k]}\n"
+    md = hashlib.md5(s.encode('utf8')).hexdigest()
+    return md
+
+def get_download_url_from_recstore(share_number:str):
+    headers = {
+        "Host":"recapi.ustc.edu.cn",
+        "Content-Type":"application/json",
+    }
+    data_resource_list={
+        "share_number": share_number,
+        "share_resource_number": None,
+        "is_rec": "false",
+        "share_constraint": {}
+    }
+    resource = requests.post('https://recapi.ustc.edu.cn/api/v2/share/target/resource/list', json=data_resource_list, headers=headers)
+    resource = resource.text.encode("utf-8").decode("utf-8-sig")
+    resource = json.loads(resource)
+    resource = resource['entity'][0]['number']
+    data = {
+        "share_number": share_number,
+        "share_constraint": {},
+        "share_resources_list": [
+            resource
+        ]
+    }
+    res = requests.post("https://recapi.ustc.edu.cn/api/v2/share/download", json=data, headers=headers)
+    res = res.text.encode("utf-8").decode("utf-8-sig")
+    res = json.loads(res)
+    download_url = res['entity'][resource] + "&download=download"
+    return download_url
 
 def check_valid_dataset(md5: str, default_dataset_path=DEFAULT_CACHE_DIR):
-    md2links = parser_yaml(os.path.join(os.path.dirname(__file__), 'url.yaml'))
+    r""" Check existed dataset according to the md5 string.
+
+    Args:
+        md5(str): the md5 string of the config.
+        default_data_set_path:(str, optional): path of the local cache foler.
+
+    Returns:
+        str: download url of the dataset file or the local file path.
+    """
+    # update url.yaml
+    url_path = os.path.join(DEFAULT_CACHE_DIR, '../url.yaml')
+    try:
+        response = requests.get(URL_UPDATE_URL)
+        with open(url_path, 'wb') as f:
+            f.write(response.content)
+    except:
+        if os.path.exists(url_path):
+            pass
+        else:
+            raise ConnectionError("Can not update url file to get download url, please check your internet.")
+    md2links = parser_yaml(url_path)
     if not os.path.exists(default_dataset_path):
         os.makedirs(default_dataset_path)
     local_files = os.listdir(default_dataset_path)
@@ -121,7 +169,7 @@ def check_valid_dataset(md5: str, default_dataset_path=DEFAULT_CACHE_DIR):
         if md5 == fname.split('.')[0].split('_')[2]:
             return os.path.join(default_dataset_path, fname)
     if md5 in md2links: # cache in remote.
-        return md2links[md5]
+        return get_download_url_from_recstore(md2links[md5].split('/')[-1])
     else:
         return None
 
@@ -131,7 +179,7 @@ def download_dataset(url:str, md:str, save_dir: str=DEFAULT_CACHE_DIR):
             if not os.path.exists(save_dir):
                 os.makedirs(save_dir)
             dataset_file_path = os.path.join(save_dir, "_temp_cache.zip")
-            response = requests.get(url,stream=True)
+            response = requests.get(url, stream=True)
             content_length = int(response.headers.get('content-length', 0))
             with open(dataset_file_path, 'wb') as file, tqdm(desc='Downloading dataset', total=content_length, unit='iB', unit_scale=True, unit_divisor=1024) as bar:
                 for data in response.iter_content(chunk_size=1024):
@@ -146,11 +194,3 @@ def download_dataset(url:str, md:str, save_dir: str=DEFAULT_CACHE_DIR):
             print("Something went wrong in downloading dataset file.")
     else:   # local
         return url
-
-    
-    
-def test():
-    user_data_dir = "testdataset"
-    default_data_dir = "dataset" 
-    dataset_name = "ml-100k"
-    atom_file_list = ["ml-100k.inter"]

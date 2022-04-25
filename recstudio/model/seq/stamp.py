@@ -3,6 +3,14 @@ from recstudio.data import dataset
 import torch
 
 class STAMP(basemodel.ItemTowerRecommender):
+    r"""
+    STAMP is capable of capturing users’ general interests from the long-term memory of a session
+    context, while taking into account users’ current interests from the short-term memory of the
+    last-clicks. 
+
+    Model hyper parameters:
+        - ``embed_dim(int)``: The dimension of embedding layers. Default: ``64``.
+    """
     def init_model(self, train_data):
         super().init_model(train_data)
         self.W_0 = torch.nn.Linear(self.embed_dim, 1, bias=False)
@@ -21,6 +29,7 @@ class STAMP(basemodel.ItemTowerRecommender):
         )
 
     def get_dataset_class(self):
+        r"""SeqDataset is used for STAMP."""
         return dataset.SeqDataset
     
     def construct_query(self, batch_data):
@@ -40,8 +49,10 @@ class STAMP(basemodel.ItemTowerRecommender):
         return query
 
     def config_loss(self):
+        r"""SoftmaxLoss is used as the loss function."""
         return loss_func.SoftmaxLoss()
 
     def config_scorer(self):
+        r"""InnerProduct is used as the score function."""
         return scorer.InnerProductScorer()
         

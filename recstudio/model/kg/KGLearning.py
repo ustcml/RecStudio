@@ -59,6 +59,7 @@ class TransModel(basemodel.TowerFreeRecommender):
         if self.normalize:
             r_e = F.normalize(r_e, p=2, dim=1)
             h_e = F.normalize(h_e, p=2, dim=1)
+            t_e = F.normalize(t_e, p=2, dim=1)
         pos_score = self.score_func(h_e + r_e, t_e)
 
         pos_tail_prob, neg_t_idx, neg_tail_prob = self.sampler(h_e + r_e, self.neg_count, batch_data[self.ftid])

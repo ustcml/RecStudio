@@ -4,16 +4,24 @@ from recstudio.ann import sampler
 import torch
 
 class TransRec(basemodel.TwoTowerRecommender):
+    r"""
+    TransRec embeds items into a ‘transition space’ where users are modeled as translation vectors operating on item sequences.
+
+    Model hyper parameters:
+        - ``embed_dim(int)``: The dimension of embedding layers. Default: ``64``.
+    """
     def init_model(self, train_data):
-        # TODO: bias here is not easy to construct query, abandoned now
-        # self.bias = nn.Embedding(train_data.num_items, 1, padding_idx=0)
         self.global_user_emb = torch.nn.Parameter(torch.zeros(self.embed_dim))
+        # self.bias = nn.Embedding(train_data.num_items, 1, padding_idx=0)
+        # TODO: bias here is not easy to construct query, abandoned now
         super().init_model(train_data)
 
     def get_dataset_class(self):
+        r"""SeqDataset is used for TransRec."""
         return dataset.SeqDataset
 
     def build_user_encoder(self, train_data):
+        r"""User encoder is bulit with an embedding layer."""
         return torch.nn.Embedding(train_data.num_users, embedding_dim=self.embed_dim, padding_idx=0)
 
     def construct_query(self, batch_data):
@@ -30,7 +38,9 @@ class TransRec(basemodel.TwoTowerRecommender):
         return sampler.UniformSampler(train_data.num_items-1, self.score_func)
 
     def config_scorer(self):
+        r"""InnerProduct is used as the score function."""
         return scorer.EuclideanScorer()
 
     def config_loss(self):
+        r"""BPRLoss is used as the loss function."""
         return loss_func.BPRLoss()

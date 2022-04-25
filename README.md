@@ -4,7 +4,7 @@
 <p float="left">
 <img src="https://img.shields.io/badge/python-v3.7+-blue">
 <img src="https://img.shields.io/badge/pytorch-v1.9+-blue">
-<img src="https://img.shields.io/badge/pytorch--lightning-v1.5.9-red">
+<img src="https://img.shields.io/badge/pytorch--lightning-v1.4.9-red">
 <img src="https://img.shields.io/badge/License-MIT-blue">
 </p>
 <p align="left">
@@ -79,6 +79,16 @@ In RecStudio, loss functions are categorized into three types:
 Score functions are used to model users' perference on items. Various common score functions are 
 implemented in RecStudio, such as: `InnerProduct`, `EuclideanDistance`, `CosineDistance`, `MLPScorer`,
 et al. By trying with different score functions, you can find one for your model!
+
+| Loss | Math Type | Sampling Distribution | Calculation Complexity | Sampling Complexity | Convergence Speed | Related Metrics |
+| --- | --- | --- | --- | --- | --- | --- |
+| Softmax | $-\log \frac{\exp f_{\theta}(c, \textcolor{red}{k})}{\sum_{i=1}^{N} \exp f_{\theta}(c, i)}$ | No sampling | $O(N)$ | - | very fast | NDCG |
+| Sampled Softmax | $-\log \frac{\exp \left(f_{\theta}(c, \textcolor{red}{k})-\log Q(\textcolor{red}{k} \mid c)\right)}{\sum_{i \in S \cup\{k\}} \exp \left(f_{\theta}(c, i)-\log Q(i \mid c)\right)}$ | No sampling | $O(N)$ | - | fast | NDCG |
+| BPR | $-\log \left(\sigma\left(f_{\theta}(c, \textcolor{red}{k})-f_{\theta}(c, \textcolor{red}{j})\right)\right)$ | Uniform sampling | $O(1)$ | $O(1)$ | slow | AUC |
+| WARP | $L\left(\left\lfloor \frac{Y-1}{N}\right\rfloor\right)\left\|1-f_{\theta}(c, \textcolor{red}{k})+f_{\theta}(c, \textcolor{red}{j})\right\|_{+}$ | Reject Sampling | $O(1)$ | slower and slower | slow | Precision |
+| InfoNCE | $-\log \frac{\exp \left(f_{\theta}(c, \textcolor{red}{k})\right)}{\sum_{i \in S \cup\{k\}} \exp \left(f_{\theta}(c, i)\right)}$ | Popularity sampling | $O(\left\|S\right\|)$ | O(1) | fast | DCG |
+| WRMF | $\sum_{j} \textcolor{red}{w_{c j}}\left(f_{\theta}(c, j)-y(c, j)\right)^{2}$ | No sampling | $O(N)$ | - | very fast | - |
+| PRIS | $-\sum_{j \in S} \frac{\exp \left(f_{\theta}(c, \textcolor{red}{j})-\log Q(\textcolor{red}{j} \mid c)\right)}{\sum_{j^{\prime} \in S} \exp \left(f_{\theta}\left(c, j^{\prime}\right)-\log Q\left(j^{\prime} \mid c\right)\right)} \log \left(\sigma\left(f_{\theta}(c, \textcolor{red}{k})-f_{\theta}(c, \textcolor{red}{j})\right)\right)$ | Cluster sampling | $O(\left\|S\right\|)$ | $O(K)$ | very fast | DCG |
 
 <p align="center">
   <img src="assets/recstudio_framework.png" alt="RecStudio v0.1 Framework" width="600">
@@ -235,6 +245,8 @@ For basic usage like below:
 import recstudio
 recstudio.run(model="BPR", data_dir="./datasets/", dataset='ml-100k')
 ```
+
+For more detailed information, please refer to our documentation https://recstudio.readthedocs.io/.
 
 ## Automatic Hyper-parameter Tuning
 RecStudio integrates with NNI module for tuning the hype-parameters automatically. For easy usage,

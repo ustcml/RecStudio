@@ -154,8 +154,9 @@ class Rec_VAE(basemodel.ItemTowerRecommender):
     
     def training_step(self, batch, batch_idx, optimizer_idx):
         # optimizer_idx is required for multi optimizers
-        loss = super().training_step(batch, batch_idx)
-        return loss + self.kld_loss
+        if optimizer_idx == self.iter_idx[self.current_epoch % (self.enc_n_epoch + self.dec_n_epoch)]:
+            loss = super().training_step(batch, batch_idx)
+            return loss + self.kld_loss
 
     def update_prior(self):
         self.prior.encoder_old.load_state_dict(deepcopy(self.encoder.state_dict()))

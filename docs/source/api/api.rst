@@ -9,3 +9,5 @@ Here is the API documentation for RecStudio.
    loss/index
    score/index
    eval/index
+   sampler/index
+   

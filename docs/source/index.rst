@@ -1,15 +1,15 @@
-.. Torchrec documentation master file, created by
+.. RecStudio documentation master file, created by
    sphinx-quickstart on Sat Mar 19 20:57:00 2022.
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to Torchrec's documentation!
-====================================
+Welcome to RecStudio's documentation!
+========================================
 
 Introduction
 ---------------
 
-Torchrec is a unified and efficient recommendation engine developed on PyTorch. 
+RecStudio is a unified and efficient recommendation engine developed on PyTorch. 
 Here you can try almost all the state-of-art methods in recommender system. 
 Covering four major categories:
 

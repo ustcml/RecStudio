@@ -12,6 +12,8 @@
 #
 import os
 import sys
+sys.path.insert(0, os.path.abspath("."))
+sys.path.insert(0, os.path.abspath("../"))
 sys.path.insert(0, os.path.abspath('../../'))
 
 
@@ -36,7 +38,14 @@ extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.autosummary',
     'sphinx.ext.napoleon',
+    'recommonmark',
+    'sphinx_markdown_tables',
 ]
+
+source_suffix = {
+    '.rst': 'restructuredtext',
+    '.md': 'markdown',
+} 
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
