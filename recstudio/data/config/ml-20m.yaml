@@ -1,0 +1,40 @@
+url: https://files.grouplens.org/datasets/movielens/ml-20m.zip
+user_id_field: &u userId:token # TODO: comments for &u and *u
+item_id_field: &i movieId:token
+rating_field: &r rating:float
+time_field: &t timestamp:float
+time_format: ~
+
+encoding_method: ISO-8859-1
+inter_feat_name: ratings.csv
+inter_feat_field: [*u, *i, *r, *t]
+inter_feat_header: 0
+
+
+user_feat_name: ~
+user_feat_field: ~
+user_feat_header: ~
+
+
+item_feat_name: [movies.csv]
+item_feat_field: [[*i, title:token_seq:" ", genres:token_seq:"|")]]
+item_feat_header: 0
+
+
+use_fields: ~  # TODO: 
+field_separator: ","
+min_user_inter: 0
+min_item_inter: 0
+field_max_len: ~
+rating_threshold: ~
+drop_low_rating: ~
+max_seq_len: 20
+
+# network feature, including social network and knowledge graph, the first two fields are remapped the corresponding features
+network_feat_name: ~ #[[social.txt], [ml-100k.kg, ml-100k.link]]
+mapped_feat_field: [*u, *i]
+network_feat_field: [[[source_id:token, target_id:token]], [[head_id:token, tail_id:token, relation_id:token], [*i, entity_id:token]]]
+network_feat_header: [~, ~]
+
+
+save_cache: True # whether to save processed dataset to cache.

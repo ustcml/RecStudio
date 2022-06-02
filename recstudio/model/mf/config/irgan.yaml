@@ -1,0 +1,17 @@
+negative_count: 1
+batch_size: 16
+embed_dim: 64
+weight_decay_dis: 0.0001
+weight_decay_gen: 0.0001
+learning_rate_gen: 0.001
+learning_rate_dis: 0.001
+every_n_epoch_gen: 2
+every_n_epoch_dis: 5
+T_dis: 0.2
+T_gen: 1
+
+sample_lambda: 0.2
+epochs: 1000
+
+early_stop_patience: 100
+

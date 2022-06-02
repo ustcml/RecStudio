@@ -1,0 +1,4 @@
+fmeval: True
+
+val_metrics: [auc, logloss]
+test_metrics: [auc, logloss]

@@ -1,0 +1,5 @@
+test_repetitive: True # user # entry
+train_repetitive: True
+eval_batch_size: 128
+
+split_ratio: 2

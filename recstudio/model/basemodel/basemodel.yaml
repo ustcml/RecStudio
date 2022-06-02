@@ -1,0 +1,45 @@
+# for training all models
+learning_rate: 0.001
+weight_decay: 0
+learner: adam
+scheduler: ~
+epochs: 100
+batch_size: 2048
+num_workers: 0 # please do not use this parameter, slowing down the training process
+gpu: [0,] # TODO: gpu=int: number of gpus, use free gpus;  gpu=list: gpu ids
+accelerator: gpu
+seed: 2022
+
+# used for training tower-based model
+#ann: {index: 'IVFx,Flat', parameter: ~}  ## 1 HNSWx,Flat; 2 Flat; 3 IVFx,Flat ## {nprobe: 1}  {efSearch: 1}
+ann: ~
+
+# sampler: ~  # [uniform, popularity, midx_uni, midx_pop, cluster_uni, cluster_pop, retriever_ipts, retriever_dns]
+# negative_count: 1
+# sampling_method: ~
+# sampling_temperature: 1.0
+# excluding_hist: False
+
+
+# the sampler is configured for dataset
+dataset_sampler: ~
+dataset_neg_count: ~
+
+negative_count: ~ # negative sample number in training procedure
+excluding_hist: False
+
+embed_dim: 64
+item_bias: False
+
+# used for evaluating tower-based model
+eval_batch_size: 128
+split_ratio: [0.8,0.1,0.1]
+test_metrics: [recall, precision, map, ndcg, mrr, hit]
+val_metrics: [recall, ndcg]
+topk: 100
+cutoff: 10
+early_stop_mode: max
+early_stop_patience: 10
+
+# 
+save_path: './saved/'

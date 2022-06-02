@@ -1,0 +1,12 @@
+embed_dim: 200
+dropout_rate: 0.5
+encoder_dims: [64]
+decoder_dims: [64]
+activation: relu
+
+learning_rate: 0.01
+weight_decay: 0.00001
+learner: adam
+epochs: 200
+batch_size: 256
+eval_batch_size: 200

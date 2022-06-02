@@ -1,0 +1,6 @@
+split_mode: user_entry # user # entry
+shuffle: True
+fmeval: False
+eval_batch_size: 20
+
+embed_dim: 64

@@ -1,0 +1,41 @@
+url: https://rec.ustc.edu.cn/share/62299ea0-e083-11ec-8586-b7917c2cff26
+user_id_field: &u User_id:token # TODO: comments for &u and *u
+item_id_field: &i Item_id:token
+rating_field: &r Online_Action_id:float
+time_field: &t Time_Stamp:str
+time_format: "%Y%m%d"
+
+encoding_method: utf-8
+inter_feat_name: ijcai2016_taobao.csv
+inter_feat_field: [*u, Seller_id:token, *i, Category_id:token, *r, *t]
+inter_feat_header: ~
+
+
+user_feat_name: ~
+user_feat_field: ~
+user_feat_header: ~
+
+
+item_feat_name: ~
+item_feat_field: ~
+item_feat_header: ~
+
+
+use_fields: ~  # TODO: 
+field_separator: "::"
+min_user_inter: 0
+min_item_inter: 0
+field_max_len: ~
+rating_threshold: ~
+ranker_rating_threshold: ~
+drop_low_rating: ~
+max_seq_len: 20
+
+# network feature, including social network and knowledge graph, the first two fields are remapped the corresponding features
+network_feat_name: ~ #[[social.txt], [ml-100k.kg, ml-100k.link]]
+mapped_feat_field: [*u, *i]
+network_feat_field: [[[source_id:token, target_id:token]], [[head_id:token, tail_id:token, relation_id:token], [*i, entity_id:token]]]
+network_feat_header: [~, ~]
+
+
+save_cache: True # whether to save processed dataset to cache.

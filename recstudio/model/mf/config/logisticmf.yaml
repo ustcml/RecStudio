@@ -1,0 +1,7 @@
+negative_count: 10
+excluding_hist: False
+
+lambda: 0.01
+alpha: 0.5
+learner: adagrad
+learning_rate: 0.01
