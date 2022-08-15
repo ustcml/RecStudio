@@ -1,4 +1,4 @@
-url: "../datasets/ml-100k"
+url: "recstudio:dataset_demo/ml-100k"
 user_id_field: &u user_id:token # TODO: comments for &u and *u
 item_id_field: &i item_id:token
 rating_field: &r rating:float
@@ -10,12 +10,12 @@ inter_feat_name: ml-100k.inter
 inter_feat_field: [*u, *i, *r, *t]
 inter_feat_header: 0
 
-user_feat_name: [ml-100k.user]
-user_feat_field: [[*u, age:token, gender:token, occupation:token]]
+user_feat_name: ~ # [ml-100k.user]
+user_feat_field: [[*u, age:token, gender:token, occupation:token, zip_code:token]]
 user_feat_header: 0
 
 
-item_feat_name: [ml-100k.item]
+item_feat_name: ~ # [ml-100k.item]
 item_feat_field: [[*i, movie_title:token_seq:" ", release_year:token, class:token_seq:" "]]
 item_feat_header: 0
 
@@ -30,9 +30,10 @@ drop_low_rating: ~
 max_seq_len: 20
 
 # network feature, including social network and knowledge graph, the first two fields are remapped the corresponding features
-network_feat_name: ~ #[[social.txt], [ml-100k.kg, ml-100k.link]]
-mapped_feat_field: [*u, *i]
-network_feat_field: [[[source_id:token, target_id:token]], [[head_id:token, tail_id:token, relation_id:token], [*i, entity_id:token]]]
-network_feat_header: [0, 0]
+network_feat_name: [[social.txt], [ml-100k.kg, ml-100k.link]]
+# mapped_feat_field: [*u, *i]
+mapped_feat_field: [[*u, *u], [*i, ~, *i]]
+network_feat_field: [[[source_id:token, target_id:token]], [[head_id:token, relation_id:token, tail_id:token], [*i, entity_id:token]]]
+network_feat_header: [[0], [0, 0]]
 
 save_cache: False # whether to save processed dataset to cache.

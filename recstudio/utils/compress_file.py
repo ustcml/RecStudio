@@ -4,7 +4,6 @@ import zipfile
 import gzip
 
 
-
 class CompressedFile(object):
     magic = None
     file_type = None
@@ -61,13 +60,12 @@ def extract_compressed_file(filename, save_dir):
         
         f.seek(0)
         if filename.endswith('csv'):
-            basename = os.path.basename(filename)
-            with open(os.path.join(save_dir, basename), 'wb') as f_out:
-                shutil.copyfileobj(f, f_out)
+            pass
         else:
             for cls in (ZIPFile, GZFile):
                 if cls.is_magic(start_of_file):
                     cls(filename, save_dir)
                     break
+            os.remove(filename)
 
 
