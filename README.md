@@ -27,7 +27,7 @@ categorized as follows according to recommendation tasks.
 At the core of the library, all recommendation models are grouped into three base classes:
 
 - `TowerFreeRecommender`: The most flexible base class, which enables any complex feature-interaction modeling.
-- `ItemTowerRecommender`: Item encoder are separated from recommender, enabling fast ANN and model-based negative sampling.
+- `ItemTowerRecommender`: Item encoders are separated from recommender, enabling fast ANN and model-based negative sampling.
 - `TwoTowerRecommender`: The subclass of `ItemTowerRecommender`, where recommenders only consist of user encoder and item encoder.
 
 ### Dataset Structure
@@ -62,10 +62,10 @@ In RecStudio, loss functions are categorized into three types:
     - `FullScoreLoss`: Calculating scores on the whole items, such as `SoftmaxLoss`.
     - `PairwiseLoss`: Calculating scores on positive and negative items, such as `BPRLoss`, 
     `BinaryCrossEntropyLoss`, et al.
-    - `PointwiseLoss`: Calculating scores for a single (user,item) interaction, such as `HingeLoss`.
+    - `PointwiseLoss`: Calculating scores for a single (user, item) interaction, such as `HingeLoss`.
 
 Score functions are used to model users' preference on items. Various common score functions are 
-implemented in RecStudio, such as: `InnerProduct`, `EuclideanDistance`, `CosineDistance`, `MLPScorer`,
+implemented in RecStudio, such as `InnerProduct`, `EuclideanDistance`, `CosineDistance`, `MLPScorer`,
 et al. 
 
 | Loss | Math Type | Sampling Distribution | Calculation Complexity | Sampling Complexity | Convergence Speed | Related Metrics |
@@ -100,7 +100,7 @@ which is easy to understand and use. The taxonomy can cover all models.
 
 
 ## Quick Start
-By downloading the source code, you can run th provided script `run.py` for initial usage of RecStudio.
+By downloading the source code, you can run the provided script `run.py` for initial usage of RecStudio.
 
 ```bash
 python run.py
@@ -176,7 +176,7 @@ If you want to change models or datasets, command line is ready for you.
 python run.py -m=NCF -d=ml-1m 
 ```
 
-- Supported commandline arguments:
+- Supported command line arguments:
 
   |args|type|description|default|optional|
   |---|---|---|---|---|
@@ -207,16 +207,16 @@ python run.py -m=NCF -d=ml-1m
   |--split_mode|str|split methods for the dataset|user_entry|['user','entry','user_entry']|
 
 Here are some details of some unclear arguments.
-  > 1. `mode` ：in `light` mode and `detail` mode, the output will displayed on the terminal, while 
+  > 1. `mode`: in `light` mode and `detail` mode, the output will displayed on the terminal, while 
   the latter provide more detailed info. `tune` mode will use Neural Network Intelligence(NNI) to show 
-  a beautiful visual interface. You can run like `tune.sh` with a config file like `config.yaml`. For
+  a beautiful visual interface. You can run `tune.sh` with a config file like `config.yaml`. For
   more details about NNI, please refer to [NNI Documentation](https://nni.readthedocs.io/zh/stable/).
   > 2. `sampler`: `uniform` stands for UniformSampler is used. `popularity` stands for sampling according
-  to the item popularity (more popular items are sampled with higher probablities). `midx_uni`,`midx_pop`
+  to the item popularity (more popular items are sampled with higher probabilities). `midx_uni`,`midx_pop`
   are `midx` dynamic sampler, please refer to [FastVAE](https://arxiv.org/abs/2109.05773) for more details.
   `cluster_uni`,`cluster_pop` are `cluster` dynamic sampler, please refer to
   [PRIS](https://dl.acm.org/doi/10.1145/3366423.3380187) for more details.
-  > 3. `split_mode`: `user` means spliting all users into train/valid/test datasets, users in
+  > 3. `split_mode`: `user` means splitting all users into train/valid/test datasets, users in
   those datasets are disjoint. `entry` means spliting all the interactions in those three dataset.
   `user_entry` means spliting interaction of each user into three parts. 
 
@@ -240,7 +240,7 @@ For more detailed information, please refer to our documentation https://recstud
 RecStudio integrates with NNI module for tuning the hype-parameters automatically. For easy usage,
 you can run `tune.sh` script with your specific config file like the provided file `config.yaml`.
 
-For more detailed infomation about NNI, please refer to
+For more detailed information about NNI, please refer to
 [NNI Documentation](https://nni.readthedocs.io/zh/stable/).
 
 
