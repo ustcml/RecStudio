@@ -1,7 +1,7 @@
+from copy import copy
 from typing import Dict, List, Optional, Tuple, Union
-
+import inspect
 from attr import has
-
 import recstudio.eval as eval
 import torch
 import torch.nn.functional as F
@@ -9,7 +9,8 @@ from recstudio.data import dataset
 from recstudio.model import loss_func
 from recstudio.model import scorer
 from recstudio.model.basemodel import Recommender
-from recstudio.utils.utils import  print_logger
+from recstudio.model.module import data_augmentation
+from recstudio.utils.utils import print_logger
 from recstudio.ann.sampler import RetriverSampler, UniformSampler, MaskedUniformSampler, Sampler, uniform_sample_masked_hist
 
 
@@ -67,11 +68,9 @@ class BaseRetriever(Recommender):
         self.fuid = train_data.fuid
         assert self.fiid in self.item_fields, 'item id is required to use.'
 
-        self.sampler = self._get_sampler(train_data) if not self.sampler else self.sampler
-
         self.item_encoder = self._get_item_encoder(train_data) if not self.item_encoder else self.item_encoder
         self.query_encoder = self._get_query_encoder(train_data) if not self.query_encoder else self.query_encoder
-
+        self.sampler = self._get_sampler(train_data) if not self.sampler else self.sampler
 
     def _get_item_feat(self, data):
         if isinstance(data, dict): ## batch
@@ -106,7 +105,7 @@ class BaseRetriever(Recommender):
     def _get_query_encoder(self, train_data):
         if self.fuid in self.query_fields:
             print_logger.warning("No specific query_encoder is configured, query_encoder "\
-                "is set as Embedding for user id by default due to detect user id is in"\
+                "is set as Embedding for user id by default because user id is detected in"\
                 "use_fields")
             return torch.nn.Embedding(train_data.num_users, self.embed_dim, padding_idx=0)
         else:
@@ -125,11 +124,11 @@ class BaseRetriever(Recommender):
         #     assert hasattr(self, 'item_vector') and self.item_vector is not None, \
         #         'model without item_encoder should have item_vector.'
         #     return self.item_vector
-        if len(self.item_fields) == 1:
+        if len(self.item_fields) == 1 and isinstance(self.item_encoder, torch.nn.Embedding):
             return self.item_encoder.weight[1:]
         else:
             # TODO: the batch_size should be configured
-            output = [self.item_encoder(self._get_item_feat(batch)) 
+            output = [self.item_encoder(self._get_item_feat(self._to_device(batch, self.device))) 
                 for batch in self.item_feat.loader(batch_size=1024)]
             output = torch.cat(output, dim=0)
             return output[1:]
@@ -140,13 +139,17 @@ class BaseRetriever(Recommender):
         #     self.item_vector = item_vector
         # else:
         item_vector = self._get_item_vector()
-        self.register_buffer('item_vector', item_vector.detach().clone())
+        if not hasattr(self, "item_vector"):
+            self.register_buffer('item_vector', item_vector.detach().clone() if isinstance(item_vector, torch.Tensor) else item_vector.copy()) 
+        else: 
+            self.item_vector = item_vector
 
         if self.use_index:
             self.ann_index = self.build_ann_index()
 
 
-    def forward(self, batch, full_score):
+    def forward(self, batch, full_score, return_query=False, return_item=False):
+        output_dict = {}
         pos_items = self._get_item_feat(batch)
         if self.sampler is not None:
             if self.neg_count is None:
@@ -158,13 +161,29 @@ class BaseRetriever(Recommender):
                 neg = self.neg_count,
                 excluding_hist = self.config['excluding_hist']
             )
-            pos_score = self.score_func(query, self.item_encoder(pos_items))
+
+            pos_items_rep = self.item_encoder(pos_items)
+            pos_score = self.score_func(query, pos_items_rep)
             if batch[self.fiid].dim() > 1:
                 pos_score[batch[self.fiid] == 0] = -float('inf') # padding
 
             neg_items = self._get_item_feat(neg_item_idx)
-            neg_score = self.score_func(query, self.item_encoder(neg_items))
-            return pos_score, pos_prob, neg_score, neg_prob
+            neg_items_rep = self.item_encoder(neg_items)
+            neg_score = self.score_func(query, neg_items_rep)
+            
+            output_dict['score'] = (pos_score, pos_prob, neg_score, neg_prob) 
+            if return_query: output_dict['query'] = query
+            if return_item: output_dict['item'] = pos_items_rep
+
+            # data_augmentation 
+            if self.training and hasattr(self, 'data_augmentation'):
+                data_augmentation_args = {"batch": batch} 
+                if 'query' in inspect.getargspec(self.data_augmentation).args:
+                        data_augmentation_args['query'] = query
+                output_dict.update(self.data_augmentation(**data_augmentation_args))
+
+            return output_dict
+            # return (pos_score, pos_prob, neg_score, neg_prob)
         else:
             query = self.query_encoder(self._get_query_feat(batch))
             pos_score = self.score_func(query, self.item_encoder(pos_items))
@@ -174,9 +193,11 @@ class BaseRetriever(Recommender):
                 #TODO: item_vectors here to calculate should be real-time?
                 item_vectors = self._get_item_vector()
                 all_item_scores = self.score_func(query, item_vectors)
-                return pos_score, all_item_scores
+                output_dict['score'] = pos_score, all_item_scores
+                return output_dict
             else:
-                return (pos_score, )
+                output_dict['score'] = (pos_score, )
+                return output_dict
 
 
     def _sample(
@@ -203,10 +224,10 @@ class BaseRetriever(Recommender):
             if not "user_hist" in batch:
                 print_logger.warning("`user_hist` are not in batch data, so the \
                     target item will be used as user_hist.")
-                user_hist = batch['user_hist']
-            else:
                 #TODO: user hist v.s. pos item
                 user_hist = batch[self.fiid]
+            else:
+                user_hist = batch['user_hist']
         else:
             user_hist = None
 
@@ -331,15 +352,10 @@ class BaseRetriever(Recommender):
         else:
             return score, topk_items
 
-
-    def _get_score_func(self):
-        return scorer.InnerProductScorer()
-
-
     def training_step(self, batch):
-        y_h = self.forward(batch, isinstance(self.loss_fn, loss_func.FullScoreLoss))
-        loss_value = self.loss_fn(batch[self.frating], *y_h)
-        del y_h
+        output = self.forward(batch, isinstance(self.loss_fn, loss_func.FullScoreLoss))
+        loss_value = self.loss_fn(batch[self.frating], *output['score'])
+        # del y_h
         return loss_value
     
 

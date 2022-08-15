@@ -213,26 +213,25 @@ class MFDataset(Dataset):
             self.network_feat = [None] * len(self.config['network_feat_name'])
             self.node_link = [None] * len(self.config['network_feat_name'])
             self.node_relink = [None] * len(self.config['network_feat_name'])
-            self.mapped_fields = [_.split(':')[0]
-                                  for _ in self.config['mapped_feat_field']]
+            self.mapped_fields = [[field.split(':')[0] if field != None else field for field in fields] for fields in self.config['mapped_feat_field']]
             for i, (name, fields) in enumerate(zip(self.config['network_feat_name'], self.config['network_feat_field'])):
                 if len(name) == 2:
                     net_name, link_name = name
                     net_field, link_field = fields
-                    link = self._load_feat(os.path.join(data_dir, link_name), self.config['network_feat_header'][i], 
+                    link = self._load_feat(os.path.join(data_dir, link_name), self.config['network_feat_header'][i][1], 
                                            field_sep, link_field, update_dict=False).to_numpy()
                     self.node_link[i] = dict(link)
                     self.node_relink[i] = dict(link[:, [1, 0]])
-                    feat = self._load_feat(os.path.join(
-                        data_dir, net_name), field_sep, net_field)
-                    for col in feat.columns[:2]:
-                        feat[col] = [self.node_relink[i][id]
-                                     if id in self.node_relink[i] else id for id in feat[col]]
+                    feat = self._load_feat(
+                        os.path.join(data_dir, net_name), self.config['network_feat_header'][i][0], field_sep, net_field)
+                    for j, col in enumerate(feat.columns):
+                        if self.mapped_fields[i][j] != None:
+                            feat[col] = [self.node_relink[i][id] if id in self.node_relink[i] else id for id in feat[col]]
                     self.network_feat[i] = feat
                 else:
                     net_name, net_field = name[0], fields[0]
                     self.network_feat[i] = self._load_feat(
-                        os.path.join(data_dir, net_name), field_sep, net_field)
+                        os.path.join(data_dir, net_name), self.config['network_feat_header'][i][0], field_sep, net_field)
 
     def _fill_nan(self, feat, mapped=False):
         r"""Fill the missing data in the original data.
@@ -297,12 +296,10 @@ class MFDataset(Dataset):
     def _get_map_fields(self):
         #fields_share_space = self.config['fields_share_space'] or []
         if self.config['network_feat_name'] is not None:
-            network_fields = {col: mf for _, mf in zip(
-                self.network_feat, self.mapped_fields) for col in _.columns[:2]}
+            network_fields = {col: self.mapped_fields[i][j] for i, net in enumerate(self.network_feat) for j, col in enumerate(net.columns) if self.mapped_fields[i][j] != None}
         else:
             network_fields = {}
-        fields_share_space = [[f] for f, t in self.field2type.items() if (
-            'token' in t) and (f not in network_fields)]
+        fields_share_space = [[f] for f, t in self.field2type.items() if ('token' in t) and (f not in network_fields)]
         for k, v in network_fields.items():
             for field_set in fields_share_space:
                 if v in field_set:
@@ -499,7 +496,8 @@ class MFDataset(Dataset):
         Returns:
            graph(coo_matrix, csr_matrix or DGLGraph): a single graph or a graph composed of several networks in specified form. 
            If the form is ``DGLGraph``, the relaiton type of the edges is stored in graph.edata['value'].
-           num_relations(int): the number of relations in the combined graph.
+           num_relations(int): the number of relations in the combined graph. 
+           [ ['pad'], relation_0_0, relation_0_1, ..., relation_0_n, ['pad'], relation_1_0, relation_1_1, ..., relation_1_n]
         """
         if type(idx) == int:
             idx = [idx]
@@ -577,7 +575,10 @@ class MFDataset(Dataset):
             if self.network_feat is not None:
                 if id - 1 < len(self.network_feat):
                     feat = self.network_feat[id - 1]
-                    source_field, target_field = feat.fields[:2]
+                    if len(feat.fields) == 2:
+                        source_field, target_field = feat.fields[:2]
+                    elif len(feat.fields) == 3:
+                        source_field, target_field = feat.fields[0], feat.fields[2]
                 else:
                     raise ValueError(
                         f'idx [{id}] is larger than the number of network features [{len(self.network_feat)}] minus 1')
@@ -696,7 +697,7 @@ class MFDataset(Dataset):
                 d = [torch.from_numpy(np.hstack([np.arange(*e)
                                       for e in data_idx[0]]))]
                 for _ in data_idx[1:]:
-                    d.append(torch.tensor([[u, *e] for u, e in zip(uids, _)]))
+                    d.append(torch.tensor([[u, *e] for u, e in zip(uids, _) if e[1] > e[0]])) # skip users who don't have interactions in valid or test dataset.
                 return d
             else:
                 d = [torch.from_numpy(np.hstack([np.arange(*e)
@@ -739,13 +740,6 @@ class MFDataset(Dataset):
             data.update(self.user_feat[uid])
             data.update(self.item_feat[iid])
 
-        if getattr(self, 'eval_mode', False) and 'user_hist' not in data:
-            # user_count = self.user_count[data[self.fuid]].max()
-            # user_hist = self.user_hist[data[self.fuid]][:, 0:user_count]
-            user_hist = self.user_hist[data[self.fuid]]
-
-            data['user_hist'] = user_hist
-
         return data
 
     def __getitem__(self, index):
@@ -757,7 +751,7 @@ class MFDataset(Dataset):
             dict: A dict contains different feature.
         """
         data = self._get_pos_data(index)
-        if getattr(self, 'eval_mode', False) and 'user_hist' not in data:
+        if self.eval_mode and 'user_hist' not in data:
             user_count = self.user_count[data[self.fuid]].max()
             data['user_hist'] = self.user_hist[data[self.fuid]][:, 0:user_count]
         else:
@@ -878,7 +872,7 @@ class MFDataset(Dataset):
                 self.network_feat[i] = TensorFrame.fromPandasDF(
                     self.network_feat[i], self)
 
-    def train_loader(self, batch_size, shuffle=True, num_workers=1, drop_last=False, load_combine=False):
+    def train_loader(self, batch_size, shuffle=True, num_workers=1, drop_last=False, ddp=False):
         r"""Return a dataloader for training.
 
         Args:
@@ -898,15 +892,8 @@ class MFDataset(Dataset):
         .. note::
             Due to that index is used to shuffle the dataset and the data keeps remained, `num_workers > 0` may get slower speed.
         """
-        if not hasattr(self, 'loaders'):
-            return self.loader(batch_size, shuffle, num_workers, drop_last)
-        else:
-            loaders = [l(batch_size, shuffle, num_workers, drop_last)
-                       if callable(l) else l for l in self.loaders]
-            if load_combine:
-                return loaders
-            else:
-                return ChainedDataLoader(loaders, getattr(self, 'nepoch', None))
+        self.eval_mode = False # set mode to training.
+        return self.loader(batch_size, shuffle, num_workers, drop_last, ddp)
 
     def loader(self, batch_size, shuffle=True, num_workers=1, drop_last=False, ddp=False):
         # if not ddp:
@@ -1122,7 +1109,7 @@ class AEDataset(MFDataset):
                 if k != self.fuid:
                     data[n+k] = v
 
-        if getattr(self, 'eval_mode', False) and 'user_hist' not in data:
+        if self.eval_mode and 'user_hist' not in data:
             data['user_hist'] = data['in_item_id']
         else:
             if self.neg_sampling_count is not None:
@@ -1151,7 +1138,7 @@ class SeqDataset(MFDataset):
         self.sampler = dataset_sampler
         self.neg_sampling_count = dataset_neg_count
         self._init_negative_sampler()
-        return self._build(split_ratio, False, 'user_entry', False, rep)
+        return self._build(split_ratio, False, 'user_entry', False, rep) #TODO: add split method 'user'
 
     def _get_data_idx(self, splits):
         splits, uids = splits
@@ -1168,9 +1155,11 @@ class SeqDataset(MFDataset):
             data = np.array([[u, max(sp[0], i - maxlen), i]
                             for i in range(sp[0], sp[-1])], dtype=np.int64)
             sp -= sp[0]
+            # split_point = sp[1:-1]-1 
+            # split_point[split_point < 0] = 0 #TODO: to fix user split mode in seqdataset
             return np.split(data[1:], sp[1:-1]-1)
         output = [get_slice(sp, u) for sp, u in zip(splits, uids)]
-        output = [torch.from_numpy(np.concatenate(_)) for _ in zip(*output)]
+        output = [torch.from_numpy(np.concatenate(_)) for _ in zip(*output)] # [[user, start, end]]
         output = [keep_first_item(dix, _) for dix, _ in enumerate(output)]
         return output
 
@@ -1218,6 +1207,83 @@ class FullSeqDataset(SeqDataset):
         output = [torch.from_numpy(np.concatenate(_)) for _ in zip(*output)]
         return output
 
+
+class SeqToSeqSeqDataset(SeqDataset):
+    
+    def _get_data_idx(self, splits):
+        # bug to fix : "user" split mode 
+        # split: [start, train_end, valid_end, test_end]
+        splits, uids = splits 
+        maxlen = self.config['max_seq_len'] or (
+            splits[:, -1] - splits[:, 0]).max()
+
+        def keep_first_item(dix, part):
+            # self.drop_dup is set to False in SeqDataset
+            if ((dix == 0) and self.train_rep) or ((dix > 0) and self.test_rep):
+                return part
+            else:
+                return part[self.first_item_idx.iloc[part[:, -1]].values] 
+
+        def get_slice(sp, u):
+            # the length of the train slice should be maxlen + 1 to get train data with length maxlen
+            data = [np.array([[u, max(sp[0], i - 1 - maxlen), i - 1]]) for i in sp[1:]] 
+            return tuple(data)
+
+        output = [get_slice(sp, u) for sp, u in zip(splits, uids)]
+        output = [torch.from_numpy(np.concatenate(_)) for _ in zip(*output)]
+        output = [keep_first_item(dix, _) for dix, _ in enumerate(output)] # figure out 
+        return output
+
+    def _get_pos_data(self, index):
+        # training: 
+        # source: interval [idx[:, 1], idx[:, 2] - 1]
+        # target: interval [idx[:, 1] + 1, idx[:, 2]]
+        # valid/test: 
+        # source: interval [idx[:, 1], idx[:, 2] - 1]
+        # target: idx[:, 2]
+        idx = self.data_index[index]
+        data = {self.fuid: idx[:, 0]}
+        data.update(self.user_feat[data[self.fuid]])
+        start = idx[:, 1]
+        end = idx[:, 2]
+        lens = end - start
+        data['seqlen'] = lens
+        l_source = torch.cat([torch.arange(s, e) for s, e in zip(start, end)])
+        # source_data
+        source_data = self.inter_feat[l_source]
+        for k in source_data:
+            source_data[k] = pad_sequence(source_data[k].split(
+                tuple(lens.numpy())), batch_first=True)
+        source_data.update(self.item_feat[source_data[self.fiid]])
+        # target_data
+        if not self.eval_mode: 
+            l_target = l_source + 1
+            target_data = self.inter_feat[l_target]
+            for k in target_data:
+                target_data[k] = pad_sequence(target_data[k].split(
+                    tuple(lens.numpy())), batch_first=True)
+            target_data.update(self.item_feat[target_data[self.fiid]])
+        else: 
+            target_data = self.inter_feat[idx[:, 2]]
+            target_data.update(self.item_feat[target_data[self.fiid]])
+        
+        for n, d in zip(['in_', ''], [source_data, target_data]):
+            for k, v in d.items():
+                if k != self.fuid:
+                    data[n+k] = v
+        return data
+
+    @property
+    def inter_feat_subset(self):
+        """self.data_index : [num_users, 3]
+        The intervel in data_index is both closed. 
+        data_index only includes interactions in the truncated sequence of a user, instead of all interactions. 
+        Return:
+            torch.tensor: the history index in inter_feat. shape: [num_interactions_in_train]
+        """
+        start = self.data_index[:, 1]
+        end = self.data_index[:, 2]
+        return torch.cat([torch.arange(s, e + 1, dtype=s.dtype) for s, e in zip(start, end)], dim=0)
 
 class TensorFrame(Dataset):
     r"""The main data structure used to save interaction data in RecStudio dataset.
@@ -1432,8 +1498,7 @@ class SortedDataSampler(Sampler):
     def __iter__(self):
         n = len(self.data_source)
         if self.shuffle:
-            output = torch.div(torch.randperm(
-                n), (self.batch_size * 10), rounding_mode='floor')
+            output = torch.div(torch.randperm(n), (self.batch_size * 10), rounding_mode='floor')
             output = self.data_source.sample_length + output * \
                 (self.data_source.sample_length.max() + 1)
         else:

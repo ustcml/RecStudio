@@ -19,7 +19,6 @@ from recstudio.utils.compress_file import extract_compressed_file
 
 LOG_DIR = r"./log/"
 DEFAULT_CACHE_DIR = r"./.recstudio/"
-URL_UPDATE_URL = r"http://home.ustc.edu.cn/~angus_huang/recstudio/url.yaml"
 
 
 if not os.path.exists(LOG_DIR):
@@ -184,14 +183,22 @@ def check_valid_dataset(name: str, config: Dict, default_dataset_path=DEFAULT_CA
     r""" Check existed dataset according to the md5 string.
 
     Args:
-        md5(str): the md5 string of the config.
-        default_data_set_path:(str, optional): path of the local cache foler.
+        name(str): the name of the dataset
+        config(Dict): the config of the dataset 
+        default_data_set_path:(str, optional): the path of the local cache folder.
 
     Returns:
         str: download url of the dataset file or the local file path.
     """
-    # update url.yaml
-    # url_path = os.path.join(DEFAULT_CACHE_DIR, '../url.yaml')
+    def get_files(vs):
+        res = []
+        for v in vs:
+            if not isinstance(v, list):
+                res.append(v)
+            else:
+                res = res + get_files(v)
+        return res 
+
     if not os.path.exists(default_dataset_path):
         os.makedirs(default_dataset_path)
 
@@ -205,13 +212,19 @@ def check_valid_dataset(name: str, config: Dict, default_dataset_path=DEFAULT_CA
         default_dir = os.path.join(default_dataset_path, name)
         for k,v in config.items():
             if k.endswith('feat_name'):
-                if not isinstance(v, List) and v is not None:
-                    files = [v]
-                for f in files:
-                    fpath = os.path.join(default_dir, f)
-                    if not os.path.exists(fpath):
-                        download_flag = True
-                        break
+                # if not isinstance(v, List) and v is not None:
+                #     files = [v]
+                if v is not None: 
+                    v = [v] if not isinstance(v, List) else v
+                    files = get_files(v)
+                
+                    for f in files:
+                        fpath = os.path.join(default_dir, f)
+                        if not os.path.exists(fpath):
+                            download_flag = True
+                            break        
+            if download_flag == True:
+                break
 
         if not download_flag:
             print_logger.info(f"dataset is read from {default_dir}.")
@@ -220,6 +233,10 @@ def check_valid_dataset(name: str, config: Dict, default_dataset_path=DEFAULT_CA
             if config['url'].startswith('http'):
                 print_logger.info(f"will download dataset {name} fron the url {config['url']}.")
                 return False, download_dataset(config['url'], name, default_dir)
+            elif config['url'].startswith('recstudio:'): # use dataset privided in dataset_demo
+                dir = os.path.dirname(os.path.dirname(__file__)) # recstudio dir 
+                dir = os.path.join(dir, config['url'].split(':')[1])
+                return False, dir
             else:   # user provide original file
                 print_logger.info(f"dataset is read from {config['url']}.")
                 return False, config['url']
@@ -251,7 +268,6 @@ def download_dataset(url: str, name: str, save_dir: str):
                     size = file.write(data)
                     bar.update(size)
             extract_compressed_file(dataset_file_path, save_dir)
-            os.remove(dataset_file_path)
             return save_dir
         except:
             print("Something went wrong in downloading dataset file.")
@@ -318,10 +334,6 @@ def get_dataset_default_config(dataset_name: str) -> Dict:
             "configuration dict you've assigned.")
         config = {}
     return config
-
-
-
-
 
 
 class RemoveColorFilter(logging.Filter):
