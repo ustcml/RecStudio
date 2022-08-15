@@ -1,22 +1,19 @@
 from typing import Dict, List, Optional, Tuple, Union
 
-from attr import has
-
+import numpy as np
 import recstudio.eval as eval
 import torch
 import torch.nn.functional as F
-from recstudio.data import dataset
-from recstudio.model import loss_func
-from recstudio.model import scorer
-from recstudio.model.basemodel import Recommender
-from recstudio.utils.utils import  print_logger
-from recstudio.ann.sampler import RetriverSampler, UniformSampler, MaskedUniformSampler, Sampler, uniform_sample_masked_hist
+from recstudio.ann.sampler import *
+from recstudio.data import AEDataset, SeqDataset
 
-
+from ..loss_func import FullScoreLoss
+from ..scorer import *
+from . import Recommender
 
 
 class BaseRetriever(Recommender):
-    def __init__(self, config: Dict=None, **kwargs):
+    def __init__(self, config: Dict = None, **kwargs):
         super(BaseRetriever, self).__init__(config, **kwargs)
 
         if 'item_encoder' in kwargs:
@@ -47,78 +44,73 @@ class BaseRetriever(Recommender):
         else:
             self.sampler = None
 
-
         self.use_index = self.config['ann'] is not None and \
-            (not config['item_bias'] or \
-                (isinstance(self.score_func, scorer.InnerProductScorer) or \
-                 isinstance(self.score_func, scorer.EuclideanScorer)))
+            (not config['item_bias'] or
+                (isinstance(self.score_func, InnerProductScorer) or
+                 isinstance(self.score_func, EuclideanScorer)))
 
-        
     def _init_model(self, train_data):
         super()._init_model(train_data)
-
         self.query_fields = set(train_data.user_feat.fields).intersection(train_data.use_field)
-        if isinstance(train_data, dataset.AEDataset) or isinstance(train_data, dataset.SeqDataset):
+        if isinstance(train_data, AEDataset) or isinstance(train_data, SeqDataset):
             self.query_fields = self.query_fields | set(["in_"+f for f in self.item_fields])
-            if isinstance(train_data, dataset.SeqDataset):
+            if isinstance(train_data, SeqDataset):
                 self.query_fields = self.query_fields | set(['seqlen'])
 
         self.fiid = train_data.fiid
         self.fuid = train_data.fuid
         assert self.fiid in self.item_fields, 'item id is required to use.'
 
-        self.sampler = self._get_sampler(train_data) if not self.sampler else self.sampler
-
         self.item_encoder = self._get_item_encoder(train_data) if not self.item_encoder else self.item_encoder
         self.query_encoder = self._get_query_encoder(train_data) if not self.query_encoder else self.query_encoder
-
+        self.sampler = self._get_sampler(train_data) if not self.sampler else self.sampler
 
     def _get_item_feat(self, data):
-        if isinstance(data, dict): ## batch
+        if isinstance(data, dict):  # batch
             if len(self.item_fields) == 1:
                 return data[self.fiid]
             else:
                 return dict((field, value) for field, value in data.items() if field in self.item_fields)
-        else: ## neg_item_idx
+        else:  # neg_item_idx
             if len(self.item_fields) == 1:
                 return data
             else:
-                return self.item_feat[data]
-
+                device = next(self.parameters()).device
+                return self._to_device(self.item_feat[data], device)
 
     def _get_item_encoder(self, train_data):
         return torch.nn.Embedding(train_data.num_items, self.embed_dim, padding_idx=0)
 
-
     def _get_query_feat(self, data):
-        if isinstance(data, dict): ## batch
+        if isinstance(data, dict):  # batch
             if (len(self.query_fields) == 1):
                 return data[list(self.query_fields)[0]]
             else:
                 return dict((field, value) for field, value in data.items() if field in self.query_fields)
-        else: ## neg_user as query?
+        else:  # neg_user as query?
             if len(self.query_fields) == 1:
                 return data
             else:
-                return self.user_feat[data]
-
+                device = next(self.parameters()).device
+                return self._to_device(self.user_feat[data], device)
 
     def _get_query_encoder(self, train_data):
         if self.fuid in self.query_fields:
-            print_logger.warning("No specific query_encoder is configured, query_encoder "\
-                "is set as Embedding for user id by default due to detect user id is in"\
-                "use_fields")
+            self.logger.warning("No specific query_encoder is configured, query_encoder "
+                                "is set as Embedding for user id by default due to detect user id is in"
+                                "use_fields")
             return torch.nn.Embedding(train_data.num_users, self.embed_dim, padding_idx=0)
         else:
-            print_logger.error("query_encoder missing. please configure query_encoder. if you "\
-                "want to use Embedding for user id as query_encoder, please add user id "\
-                "field name in use_field in your configuration.")
+            self.logger.error("query_encoder missing. please configure query_encoder. if you "
+                              "want to use Embedding for user id as query_encoder, please add user id "
+                              "field name in use_field in your configuration.")
             raise ValueError("query_encoder missing.")
 
-
     def _get_score_func(self):
-        return scorer.InnerProductScorer()
+        return InnerProductScorer()
 
+    def _get_sampler(self, train_data):
+        return UniformSampler(train_data.num_items)
 
     def _get_item_vector(self):
         # if self.item_encoder is None:
@@ -129,239 +121,290 @@ class BaseRetriever(Recommender):
             return self.item_encoder.weight[1:]
         else:
             # TODO: the batch_size should be configured
-            output = [self.item_encoder(self._get_item_feat(batch)) 
-                for batch in self.item_feat.loader(batch_size=1024)]
+            device = next(self.parameters()).device
+            output = [self.item_encoder(self._get_item_feat(self._to_device(batch, device)))
+                      for batch in self.item_feat.loader(batch_size=1024)]
             output = torch.cat(output, dim=0)
             return output[1:]
 
-
-    def _update_item_vector(self): #TODO: update frequency setting
-        # if not hasattr(self, 'item_vector'): # EASE based model
-        #     self.item_vector = item_vector
-        # else:
+    def _update_item_vector(self):  # TODO: update frequency setting
         item_vector = self._get_item_vector()
-        self.register_buffer('item_vector', item_vector.detach().clone())
+        if not hasattr(self, 'item_vector'):
+            self.register_buffer('item_vector', item_vector.detach().clone())
+        else:
+            self.item_vector = item_vector
 
         if self.use_index:
             self.ann_index = self.build_ann_index()
 
-
-    def forward(self, batch, full_score):
+    def forward(self, batch, full_score, return_query=False, return_item=False, return_neg_item=False):
+        # query_vec, pos_item_vec, neg_item_vec,
+        output = {}
         pos_items = self._get_item_feat(batch)
+        pos_item_vec = self.item_encoder(pos_items)
         if self.sampler is not None:
             if self.neg_count is None:
-                raise ValueError("`negative_count` value is required when "\
-                    "`sampler` is not none.")
+                raise ValueError("`negative_count` value is required when "
+                                 "`sampler` is not none.")
 
-            (pos_prob, neg_item_idx, neg_prob), query = self._sample(
-                batch, 
-                neg = self.neg_count,
-                excluding_hist = self.config['excluding_hist']
-            )
-            pos_score = self.score_func(query, self.item_encoder(pos_items))
+            (log_pos_prob, neg_item_idx, log_neg_prob), query = self.sampling(batch=batch, num_neg=self.neg_count,
+                                                                              excluding_hist=self.config.get('excluding_hist', False),
+                                                                              method=self.config.get('sampling_method', 'none'), return_query=True)
+            pos_score = self.score_func(query, pos_item_vec)
             if batch[self.fiid].dim() > 1:
-                pos_score[batch[self.fiid] == 0] = -float('inf') # padding
+                pos_score[batch[self.fiid] == 0] = -float('inf')  # padding
 
             neg_items = self._get_item_feat(neg_item_idx)
-            neg_score = self.score_func(query, self.item_encoder(neg_items))
-            return pos_score, pos_prob, neg_score, neg_prob
+            neg_item_vec = self.item_encoder(neg_items)
+            neg_score = self.score_func(query, neg_item_vec)
+            output['score'] = {'pos_score': pos_score, 'log_pos_prob': log_pos_prob,
+                               'neg_score': neg_score, 'log_neg_prob': log_neg_prob}
+
+            if return_neg_item:
+                output['neg_item'] = neg_item_vec
+
         else:
             query = self.query_encoder(self._get_query_feat(batch))
-            pos_score = self.score_func(query, self.item_encoder(pos_items))
+            pos_score = self.score_func(query, pos_item_vec)
             if batch[self.fiid].dim() > 1:
-                pos_score[batch[self.fiid] == 0] = -float('inf') # padding
+                pos_score[batch[self.fiid] == 0] = -float('inf')  # padding
+            output['score'] = {'pos_score': pos_score}
             if full_score:
-                #TODO: item_vectors here to calculate should be real-time?
                 item_vectors = self._get_item_vector()
                 all_item_scores = self.score_func(query, item_vectors)
-                return pos_score, all_item_scores
-            else:
-                return (pos_score, )
+                output['score']['all_score'] = all_item_scores
 
+        if return_query:
+            output['query'] = query
+        if return_item:
+            output['item'] = pos_item_vec
+        return output
+
+    def score(self, batch, query=None, neg_id=None):
+        # designed for cascade models like RankFlow or CoRR
+        if neg_id is not None:
+            if query is None:
+                query = self.scorer.query_encoder(self.scorer._get_query_feat(batch))
+            neg_vec = self.scorer.item_encoder(self.scorer_get_item_feat(neg_id))
+            return self.scorer.score_func(query, neg_vec)
+        else:   # score on positive items in batch
+            if query is None:
+                query = self.scorer.query_encoder(self.scorer._get_query_feat(batch))
+            pos_vec = self.scorer.item_encoder(self.scorer_get_item_feat(batch))
+            return self.scorer.score_func(query, pos_vec)
 
     def _sample(
-        self, 
-        batch, 
-        neg = 1, 
-        excluding_hist: bool = False, 
-        ):
-        if hasattr(self, 'query_encoder'):
-            # Retriever
-            query = self.query_encoder(self._get_query_feat(batch))
-        else:
-            # Ranker
-            query = torch.zero(
-                (batch[self.frating].size(0), 1), 
-                device=batch[self.frating].device
-            )
-            assert isinstance(self.sampler, RetriverSampler) \
-                or isinstance(self.sampler, UniformSampler) \
-                or isinstance(self.sampler, MaskedUniformSampler),\
-                "sampler for ranker must be retriever or uniform sampler."
-
+        self,
+        batch,
+        neg: int = 1,
+        excluding_hist: bool = False,
+        return_query: bool = True
+    ):
+        query = self.query_encoder(self._get_query_feat(batch))
+        pos_items = batch.get(self.fiid, None)
         if excluding_hist:
-            if not "user_hist" in batch:
-                print_logger.warning("`user_hist` are not in batch data, so the \
+            if user_hist is None:
+                self.logger.warning("user_hist is None, so the \
                     target item will be used as user_hist.")
-                user_hist = batch['user_hist']
+                user_hist = batch.get(self.fiid, None)
             else:
-                #TODO: user hist v.s. pos item
-                user_hist = batch[self.fiid]
+                user_hist = batch.get('user_hist', None)
+                # TODO(@AngusHuang17): user hist v.s. pos item, if user_hist, user_hist should be passed
+                # in train_loaders
         else:
             user_hist = None
 
         if isinstance(self.sampler, Sampler):
-            #TODO: mask user_hist for sampler.Sampler
             kwargs = {
-                'num_neg': neg, 
-                'pos_items': batch[self.fiid], 
+                'num_neg': neg,
+                'pos_items': pos_items,
             }
-            if isinstance(self.sampler, RetriverSampler):
+            if isinstance(self.sampler, RetrieverSampler):
+                # assert not _is_query, "RetreiverSampler expected a batch of data instead of queries."
                 kwargs.update({
-                    'batch': batch, 
-                    'user_hist': user_hist,
+                    'batch': batch if self.sampler.retriever is not None else query,
                 })
 
             else:
                 kwargs['query'] = query
 
-            if hasattr(self.sampler, "_update"):
-                self.sampler._update()  #TODO: add frequency
             pos_prob, neg_id, neg_prob = self.sampler(**kwargs)
 
         else:
-            raise TypeError("`sampler` only support Sampler type.")        
-        return (pos_prob, neg_id, neg_prob), query
+            raise TypeError("`sampler` only support Sampler type.")
 
+        if return_query:
+            return pos_prob, neg_id, neg_prob, query
+        else:
+            return pos_prob, neg_id, neg_prob
 
+    def sampling(
+            self, batch, num_neg, method='none', excluding_hist=False, t=1,
+            return_query=False, query=None):
+        pos_items = batch.get(self.fiid, None)
+        user_hist = batch.get('user_hist', None)
+        if isinstance(num_neg, int):
+            num_neg = [num_neg, num_neg]
+        elif isinstance(num_neg, (List, Tuple)):
+            assert len(num_neg) == 2, "length of negative_count must be 2 \
+                when it's list type for retriever_dns sampler."
+            assert num_neg[0] >= num_neg[1], "the first element of \
+                negative_count must be larger than the second element."
+        else:
+            raise TypeError("num_neg only support int and List/Tuple type.")
 
-    def sampling(self, batch, num_neg, pos_items, user_hist=None, method='ips', excluding_hist=False, t=1):
-        query = self.query_encoder(self._get_query_feat(batch))
-        if method == 'brute': # brute force sampling
-            # TODO: maybe item vector should be updated
-            item_vectors = self.item_vector
-            all_score = self.score_func(query, item_vectors) / t
-            all_prob = torch.softmax(all_score, dim=-1)
-            all_prob = F.pad(all_prob, pad=(1,0))   # padding
-            pos_prob = torch.gather(all_prob, dim=-1, index=pos_items)
-            if excluding_hist:
-                row_index = torch.arange(
-                    user_hist.size(0), 
-                    device=pos_items.device
-                )
-                row_index = row_index.view(-1, 1).repeat(1, pos_items.size(1))
-                sampling_prob = all_prob
-                sampling_prob[row_index, pos_items] = 0.0
-            else:
-                sampling_prob = all_prob
-            sampled_idx = torch.multinomial(sampling_prob, num_neg * pos_items.size(-1), replacement=True)
-            neg_id = sampled_idx
-            neg_prob = torch.gather(sampling_prob, dim=-1, index=sampled_idx)
-
-        elif method == 'ips' or method == 'dns':
+        if method.endswith('&rand'):
             if isinstance(num_neg, int):
-                num_neg = [num_neg, num_neg]
-            elif isinstance(num_neg, Union[List, Tuple]):
-                assert len(num_neg) == 2, "length of negative_count must be 2 \
-                    when it's list type for retriever_dns sampler."
-                assert num_neg[0] >= num_neg[1], "the first element of \
-                    negative_count must be larger than the second element."
-            else:
-                raise TypeError("num_neg only support int and List/Tuple type.")
-            
-            log_pos_prob, neg_id_pool, log_neg_prob_pool = self._sample(batch, num_neg[0], excluding_hist)
+                num_neg_0 = num_neg // 2
+                num_neg_1 = num_neg - num_neg_0
+            elif isinstance(num_neg, (Tuple, List)):
+                num_neg_0 = [num_neg[0], num_neg[1] // 2]
+                num_neg_1 = num_neg[1] - num_neg_0[1]
+            method_0 = method.split("&")[0]
+            (_, neg_id_0, __), query = self.sampling(batch, num_neg_0, method_0, excluding_hist, t, True, query)
+            num_queries = np.prod(query.shape[:-1])
+            rand_sampled_idx = torch.randint(1, self.sampler.num_items+1,
+                                             size=(num_queries, num_neg_1), device=query.device)
+            neg_id = torch.cat((neg_id_0, rand_sampled_idx), dim=-1)
+            log_neg_prob = torch.zeros_like(neg_id)
+            log_pos_prob = None if pos_items is None else torch.zeros_like(pos_items)
 
-            neg_item_vector = self.item_encoder(self._get_item_feat(neg_id_pool))
-            scores_on_pool_items = self.score_func(query, neg_item_vector)
-            
-            if method == 'dns':
-                topk_id = torch.topk(scores_on_pool_items, num_neg[1])
-                neg_id = torch.gather(neg_id_pool, dim=-1, index=topk_id)
-                neg_prob = torch.ones_like(neg_id)
-                pos_prob = torch.ones_like(pos_items)
-            else:
-                pos_item_vector = self.item_encoder(self._get_item_feat(batch))
-                pos_score = self.score_func(query, pos_item_vector)
-                pos_prob = pos_score - log_pos_prob
-                probs_on_pool_items = torch.softmax(
-                    scores_on_pool_items+torch.finfo(torch.float32).eps, dim=-1)
-                resampled_id = torch.multinomial(probs_on_pool_items, num_neg[1], replacement=True)
-                neg_id = torch.gather(neg_id_pool, dim=-1, index=resampled_id)
-                neg_prob = torch.gather(scores_on_pool_items, dim=-1, index=resampled_id) - \
-                    torch.gather(log_neg_prob_pool, dim=-1, index=resampled_id)
-        
-        return pos_prob, neg_id, neg_prob
+        elif method in ("none", "top", "sir", "dns", "toprand", "brute"):
 
+            if method == 'none':
+                assert self.sampler is not None, "excepted sampler of retriever to be Sampler, but get None."
+                log_pos_prob, neg_id, log_neg_prob, query = self._sample(
+                    batch, num_neg[1], excluding_hist, True)
 
+            elif method == 'toprand':
+                scores, topk_items, query = self.topk(batch, k=num_neg[0], user_h=user_hist, return_query=True)
+                rand_idx = torch.randint(0, num_neg[0], (topk_items.size(0), num_neg[1]),
+                                         device=topk_items.device)
+                neg_id = torch.gather(topk_items, -1, rand_idx)
+                log_neg_prob = torch.zeros_like(neg_id)
+                log_pos_prob = None if pos_items is None else torch.zeros_like(pos_items)
+
+            elif method == 'top':
+                scores, neg_id, query = self.topk(batch, k=num_neg[1], user_h=user_hist, return_query=True)
+                log_neg_prob = torch.zeros_like(neg_id)
+                log_pos_prob = None if pos_items is None else torch.zeros_like(pos_items)
+
+            elif method == 'brute':  # brute force sampling
+                query = self.query_encoder(self._get_query_feat(batch)) if query is None else query
+
+                item_vectors = self.item_vector
+                all_score = self.score_func(query, item_vectors) / t
+                all_prob = torch.softmax(all_score, dim=-1)
+                all_prob = F.pad(all_prob, pad=(1, 0))   # padding
+                sampling_prob = all_prob
+
+                num_pos = 1
+                if pos_items is not None:
+                    log_pos_prob = torch.log(torch.gather(all_prob, dim=-1, index=pos_items))
+                    num_pos = pos_items.size(-1)
+
+                if excluding_hist:
+                    # TODO(@AngusHuang17): mask items in user_hist instead of pos_items
+                    row_index = torch.arange(pos_items.size(0), device=pos_items.device)
+                    row_index = row_index.view(-1, 1).repeat(1, pos_items.size(1))
+                    sampling_prob[row_index, pos_items] = 0.0
+
+                sampled_idx = torch.multinomial(sampling_prob, num_neg[1] * num_pos, replacement=True)
+                neg_id = sampled_idx
+                log_neg_prob = torch.log(torch.gather(sampling_prob, dim=-1, index=sampled_idx))
+
+            elif method in ('sir', 'dns'):
+                if pos_items is not None:
+                    log_pos_prob, neg_id_pool, _, query = self._sample(
+                        batch, num_neg[0], excluding_hist, True)
+                else:
+                    neg_id_pool, _, query = self._sample(batch,
+                                                         num_neg[0], excluding_hist, True)
+
+                neg_item_vector = self.item_encoder(self._get_item_feat(neg_id_pool))
+                scores_on_pool_items = self.score_func(query, neg_item_vector)
+
+                if method == 'dns':
+                    _, topk_id = torch.topk(scores_on_pool_items, num_neg[1])
+                    neg_id = torch.gather(neg_id_pool, -1, topk_id)
+                    log_neg_prob = torch.zeros_like(neg_id)
+                    log_pos_prob = None if pos_items is None else torch.zeros_like(pos_items)
+                else:
+                    if pos_items is not None:
+                        pos_item_vector = self.item_encoder(self._get_item_feat(batch))
+                        pos_score = self.score_func(query, pos_item_vector)
+                        log_pos_prob = pos_score
+                    probs_on_pool_items = torch.softmax(
+                        scores_on_pool_items+torch.finfo(torch.float32).eps, dim=-1)
+                    resampled_id = torch.multinomial(probs_on_pool_items, num_neg[1], replacement=True)
+                    neg_id = torch.gather(neg_id_pool, dim=-1, index=resampled_id)
+                    log_neg_prob = torch.gather(scores_on_pool_items, dim=-1, index=resampled_id)
+        else:
+            raise NotImplementedError(
+                'sampling method only support one of none/brute/is/dns/top/toprand/top&rand/dns&rand')
+
+        if pos_items is not None:
+            sampled_result = (log_pos_prob, neg_id, log_neg_prob)
+        else:
+            sampled_result = (None, neg_id, log_neg_prob)
+
+        if return_query:
+            return sampled_result, query
+        else:
+            return sampled_result, None
 
     def build_index(self):
         raise NotImplementedError("build_index  for ranker not implemented.")
 
-
-    def topk(self, query, k, user_h):
+    def topk(self, batch, k, user_h=None, return_query=False):
         # TODO: complete topk with retriever
-        # if self.config['retriever'] is None:
-        #     # topk on all items
-        #     pass
-        # elif self.config['retriever']=='uniform':
-        #     # unform(num_items)
-        #     pass
-        # elif self.config['retriever']=='retriever':
-        #     # retriever_query = self.retriever.query_encoder(batch)
-        #     score, topk_items = self.retriever.topk(batch, k0, user_h)
-        
-
+        query = self.query_encoder(self._get_query_feat(batch))
         more = user_h.size(1) if user_h is not None else 0
         if self.use_index:
-            if isinstance(self.score_func, scorer.CosineScorer):
+            if isinstance(self.score_func, CosineScorer):
                 score, topk_items = self.ann_index.search(
                     torch.nn.functional.normalize(query, dim=1).numpy(), k + more)
             else:
                 score, topk_items = self.ann_index.search(query.numpy(), k + more)
         else:
             score, topk_items = torch.topk(self.score_func(query, self.item_vector), k + more)
-        topk_items += 1
+        topk_items = topk_items + 1
         if user_h is not None:
             existing, _ = user_h.sort()
             idx_ = torch.searchsorted(existing, topk_items)
             idx_[idx_ == existing.size(1)] = existing.size(1) - 1
             score[torch.gather(existing, 1, idx_) == topk_items] = -float('inf')
-            score1, idx = score.topk(k)
-            return score1, torch.gather(topk_items, 1, idx)
+            score, idx = score.topk(k)
+            topk_items = torch.gather(topk_items, 1, idx)
+
+        if return_query:
+            return score, topk_items, query
         else:
             return score, topk_items
 
-
-    def _get_score_func(self):
-        return scorer.InnerProductScorer()
-
-
     def training_step(self, batch):
-        y_h = self.forward(batch, isinstance(self.loss_fn, loss_func.FullScoreLoss))
-        loss_value = self.loss_fn(batch[self.frating], *y_h)
-        del y_h
+        output = self.forward(batch, isinstance(self.loss_fn, FullScoreLoss))
+        score = output['score']
+        score['label'] = batch[self.frating]
+        loss_value = self.loss_fn(**score)
         return loss_value
-    
 
     def validation_step(self, batch):
         eval_metric = self.config['val_metrics']
         cutoff = self.config['cutoff'][0] if isinstance(self.config['cutoff'], list) else self.config['cutoff']
         return self._test_step(batch, eval_metric, [cutoff])
 
-
     def test_step(self, batch):
         eval_metric = self.config['test_metrics']
         cutoffs = self.config['cutoff'] if isinstance(self.config['cutoff'], list) else [self.config['cutoff']]
         return self._test_step(batch, eval_metric, cutoffs)
 
-
     def _test_step(self, batch, metric, cutoffs):
         rank_m = eval.get_rank_metrics(metric)
         topk = self.config['topk']
         bs = batch[self.frating].size(0)
-        assert len(rank_m)>0
-        query = self.query_encoder(self._get_query_feat(batch))
-        score, topk_items = self.topk(query, topk, batch['user_hist'])
+        assert len(rank_m) > 0
+        score, topk_items = self.topk(batch, topk, batch['user_hist'])
         if batch[self.fiid].dim() > 1:
             target, _ = batch[self.fiid].sort()
             idx_ = torch.searchsorted(target, topk_items)
@@ -372,4 +415,3 @@ class BaseRetriever(Recommender):
             label = batch[self.fiid].view(-1, 1) == topk_items
             pos_rating = batch[self.frating].view(-1, 1)
         return [func(label, pos_rating, cutoff) for cutoff in cutoffs for name, func in rank_m], bs
-    
