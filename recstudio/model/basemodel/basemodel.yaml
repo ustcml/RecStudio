@@ -19,7 +19,8 @@ ann: ~
 # sampling_method: ~
 # sampling_temperature: 1.0
 # excluding_hist: False
-
+init_method: xavier_normal
+init_range: ~
 
 # the sampler is configured for dataset
 dataset_sampler: ~
@@ -41,5 +42,5 @@ cutoff: 10
 early_stop_mode: max
 early_stop_patience: 10
 
-# 
+#
 save_path: './saved/'

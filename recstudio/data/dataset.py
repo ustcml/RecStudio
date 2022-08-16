@@ -1,9 +1,8 @@
 import copy
-import math
 import os
 import pickle
+import logging
 from typing import Sized, Dict, Optional, Iterator, Union
-from operator import itemgetter
 
 import numpy as np
 import pandas as pd
@@ -11,12 +10,11 @@ import scipy.sparse as ssp
 import torch
 from recstudio.ann.sampler import (MaskedUniformSampler, PopularSamplerModel,
                                    UniformSampler)
-from recstudio.utils import (DEFAULT_CACHE_DIR, check_valid_dataset, set_color, print_logger,
+from recstudio.utils import (DEFAULT_CACHE_DIR, check_valid_dataset, set_color,
                              download_dataset, md5, parser_yaml, get_dataset_default_config)
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, Dataset, Sampler
 from torch.utils.data.distributed import DistributedSampler
-
 
 
 class MFDataset(Dataset):
@@ -25,16 +23,19 @@ class MFDataset(Dataset):
     The basic dataset class in RecStudio.
     """
 
-    def __init__(self, name: str='ml-100k', config:Union[Dict, str]=None):
+    def __init__(self, name: str = 'ml-100k', config: Union[Dict, str] = None):
         r"""Load all data.
 
         Args:
             config(str): config file path or config dict for the dataset.
 
-        Returns: 
+        Returns:
             recstudio.data.dataset.MFDataset: The ingredients list.
         """
         self.name = name
+
+        self.logger = logging.getLogger('recstudio')
+
         self.config = get_dataset_default_config(name)
         if config is not None:
             if isinstance(config, str):
@@ -42,18 +43,17 @@ class MFDataset(Dataset):
             elif isinstance(config, Dict):
                 self.config.update(config)
             else:
-                raise TypeError("expecting `config` to be Dict or string," \
-                    f"while get {type(config)} instead.")
-        
+                raise TypeError("expecting `config` to be Dict or string,"
+                                f"while get {type(config)} instead.")
+
         cache_flag, data_dir = check_valid_dataset(self.name, self.config)
         if cache_flag:
-            print_logger.info("Load dataset from cache.")
+            self.logger.info("Load dataset from cache.")
             self._load_cache(data_dir)
         else:
-            # data_dir = os.path.dirname(config_path)
             self._init_common_field()
             self._load_all_data(data_dir, self.config['field_separator'])
-            # first factorize user id and item id, and then filtering to 
+            # first factorize user id and item id, and then filtering to
             # determine the valid user set and item set
             self._filter(self.config['min_user_inter'],
                          self.config['min_item_inter'])
@@ -76,7 +76,6 @@ class MFDataset(Dataset):
     def use_field(self, fields):
         self._use_field = set(fields)
 
-
     @property
     def drop_dup(self):
         return True
@@ -95,7 +94,6 @@ class MFDataset(Dataset):
         with open(os.path.join(cache_dir, md), 'wb') as f:
             pickle.dump(self, f)
 
-
     def _init_common_field(self):
         r"""Inits several attributes.
         """
@@ -111,7 +109,6 @@ class MFDataset(Dataset):
         else:
             self.frating = None
 
-
     def __test__(self):
         feat = self.network_feat[1][-10:]
         print(feat)
@@ -122,7 +119,6 @@ class MFDataset(Dataset):
         feat2 = self._recover_unmapped_feature(self.network_feat[1])[-10:]
         print(feat2)
 
-    
     def __repr__(self):
         info = {"item": {}, "user": {}, "interaction": {}}
         feat = {"item": self.item_feat, "user": self.user_feat, "interaction": self.inter_feat}
@@ -132,11 +128,10 @@ class MFDataset(Dataset):
         for k in info:
             info[k]['field'] = list(feat[k].fields)
             info[k]['type'] = [self.field2type[f] for f in info[k]['field']]
-            info[k]['##'] = [str(self.num_values(f)) if "token" in t else "-" \
-                for f,t in zip(info[k]['field'], info[k]['type'])]
+            info[k]['##'] = [str(self.num_values(f)) if "token" in t else "-"
+                             for f, t in zip(info[k]['field'], info[k]['type'])]
             max_num_fields = max(max_num_fields, len(info[k]['field'])) + 1
-            
-            
+
         info_str = f"\n{set_color('Dataset Info','green')}: \n"
         info_str += "\n" + "=" * (max_len_field*max_num_fields) + '\n'
         for k in info:
@@ -146,11 +141,11 @@ class MFDataset(Dataset):
                 info_str += "".join(["{}".format(i)+" "*(max_len_field-len(i)) for i in v])
                 info_str += "\n"
             info_str += "=" * (max_len_field*max_num_fields) + '\n'
-        info_str += "{}: {:.6f}\n".format(set_color('Sparsity','blue') , (1-self.num_inters / ((self.num_items-1)*(self.num_users-1))) )
+        info_str += "{}: {}\n".format(set_color('Total Interactions', 'blue'), self.num_inters)
+        info_str += "{}: {:.6f}\n".format(set_color('Sparsity', 'blue'),
+                                          (1-self.num_inters / ((self.num_items-1)*(self.num_users-1))))
         info_str += "=" * (max_len_field*max_num_fields)
         return info_str
-
-        
 
     def _filter_ratings(self):
         r"""Filter out the interactions whose rating is below `rating_threshold` in config."""
@@ -163,7 +158,6 @@ class MFDataset(Dataset):
                                                   > self.config['rating_threshold']]
                 self.inter_feat[self.frating] = 1.0
 
-
     def _load_all_data(self, data_dir, field_sep):
         r"""Load features for user, item, interaction and network."""
         # load interaction features
@@ -175,9 +169,9 @@ class MFDataset(Dataset):
         if self.frating is None:
             # add ratings when implicit feedback
             self.frating = 'rating'
-            self.config['rating_field'] = 'rating'
-            self.inter_feat.insert(0, self.frating, 0)
+            self.inter_feat.insert(0, self.frating, 1)
             self.field2type[self.frating] = 'float'
+            self.field2maxlen[self.frating] = 1
 
         # load user features
         self.user_feat = None
@@ -218,7 +212,7 @@ class MFDataset(Dataset):
                 if len(name) == 2:
                     net_name, link_name = name
                     net_field, link_field = fields
-                    link = self._load_feat(os.path.join(data_dir, link_name), self.config['network_feat_header'][i][1], 
+                    link = self._load_feat(os.path.join(data_dir, link_name), self.config['network_feat_header'][i][1],
                                            field_sep, link_field, update_dict=False).to_numpy()
                     self.node_link[i] = dict(link)
                     self.node_relink[i] = dict(link[:, [1, 0]])
@@ -236,8 +230,8 @@ class MFDataset(Dataset):
     def _fill_nan(self, feat, mapped=False):
         r"""Fill the missing data in the original data.
 
-        For token type, `[PAD]` token is used. 
-        For float type, the mean value is used. 
+        For token type, `[PAD]` token is used.
+        For float type, the mean value is used.
         For token_seq type, the empty numpy array is used.
         """
         for field in feat:
@@ -252,7 +246,6 @@ class MFDataset(Dataset):
                     np.int64 if mapped else str) if ftype == 'token_seq' else np.float64
                 feat[field] = feat[field].map(lambda x: np.array(
                     [], dtype=dtype) if isinstance(x, float) else x)
-
 
     def _load_feat(self, feat_path, header, sep, feat_cols, update_dict=True):
         r"""Load the feature from a given a feature file."""
@@ -270,7 +263,7 @@ class MFDataset(Dataset):
         dtype = (np.float64 if _ == 'float' else str for _ in types_of_fields)
         if update_dict:
             self.field2type.update(dict(zip(fields, types_of_fields)))
-        
+
         if not "encoding_method" in self.config:
             self.config['encoding_method'] = 'utf-8'
         if self.config['encoding_method'] is None:
@@ -415,7 +408,7 @@ class MFDataset(Dataset):
                     f'The field [{self.ftime}] should be float or str type')
 
             self.inter_feat.sort_values(
-                    by=[self.fuid, self.ftime], inplace=True)
+                by=[self.fuid, self.ftime], inplace=True)
             self.inter_feat.reset_index(drop=True, inplace=True)
         self._prepare_user_item_feat()
 
@@ -484,7 +477,7 @@ class MFDataset(Dataset):
         Returns a single graph or a graph composed of several networks. If more than one graph is passed into the methods, ``shape`` must be specified.
 
         Args:
-            idx(int, list): the indices of the feat or networks. The index of ``inter_feat`` is set to ``0`` by default 
+            idx(int, list): the indices of the feat or networks. The index of ``inter_feat`` is set to ``0`` by default
             and the index of networks(such as knowledge graph and social network) is started by ``1`` corresponding to the dataset configuration file i.e. ``datasetname.yaml``.
             form(str): the form of the returned graph, can be 'coo', 'csr' or 'dgl'. Default: ``None``.
             value_fields(str, list): the value field in each graph. If value_field isn't ``None``, the values in this column will fill the adjacency matrix.
@@ -494,9 +487,9 @@ class MFDataset(Dataset):
             shape(tuple): the shape of the returned graph. If more than one graph is passed into the methods, ``shape`` must be specified.
 
         Returns:
-           graph(coo_matrix, csr_matrix or DGLGraph): a single graph or a graph composed of several networks in specified form. 
+           graph(coo_matrix, csr_matrix or DGLGraph): a single graph or a graph composed of several networks in specified form.
            If the form is ``DGLGraph``, the relaiton type of the edges is stored in graph.edata['value'].
-           num_relations(int): the number of relations in the combined graph. 
+           num_relations(int): the number of relations in the combined graph.
            [ ['pad'], relation_0_0, relation_0_1, ..., relation_0_n, ['pad'], relation_1_0, relation_1_1, ..., relation_1_n]
         """
         if type(idx) == int:
@@ -512,7 +505,8 @@ class MFDataset(Dataset):
         assert len(idx) == len(value_fields) and len(idx) == len(bidirectional)
         rows, cols, vals = [], [], []
         n, m, val_off = 0, 0, 0
-        for id, value_field, bidirectional, row_off, col_off in zip(idx, value_fields, bidirectional, row_offset, col_offset):
+        for id, value_field, bidirectional, row_off, col_off in zip(
+                idx, value_fields, bidirectional, row_offset, col_offset):
             tmp_rows, tmp_cols, tmp_vals, val_off, tmp_n, tmp_m = self._get_one_graph(
                 id, value_field, row_off, col_off, val_off, bidirectional)
             rows.append(tmp_rows)
@@ -543,20 +537,20 @@ class MFDataset(Dataset):
 
     def _get_one_graph(self, id, value_field=None, row_offset=0, col_offset=0, val_offset=0, bidirectional=False):
         """
-        Gets rows, cols and values in one graph. 
-        If several graphs are to be combined into one, offset should be added on the edge value in each graph to avoid conflict. 
-        Then the edge value will be: .. math:: offset + vals. (.. math:: offset + 1 in user-item graph). The offset will be reset to ``offset + len(self.field2tokens[value_field])`` in next graph. 
+        Gets rows, cols and values in one graph.
+        If several graphs are to be combined into one, offset should be added on the edge value in each graph to avoid conflict.
+        Then the edge value will be: .. math:: offset + vals. (.. math:: offset + 1 in user-item graph). The offset will be reset to ``offset + len(self.field2tokens[value_field])`` in next graph.
         If bidirectional is True, the inverse edge values in the graph will be set to ``offset + corresponding_canonical_values + len(self.field2tokens[value_field]) - 1``.
-        If all edges in the graph are sorted by their values in a list, the list will be: 
-            ['[PAD]', canonical_edge_1, canonical_edge_2, ..., canonical_edge_n, inverse_edge_1, inverse_edge_2, ..., inverse_edge_n]  
+        If all edges in the graph are sorted by their values in a list, the list will be:
+            ['[PAD]', canonical_edge_1, canonical_edge_2, ..., canonical_edge_n, inverse_edge_1, inverse_edge_2, ..., inverse_edge_n]
 
         Args:
-            id(int): the indix of the feat or network. The index of ``inter_feat`` is set to ``0`` by default 
+            id(int): the indix of the feat or network. The index of ``inter_feat`` is set to ``0`` by default
             and the index of networks(such as knowledge graph and social network) is started by ``1`` corresponding to the dataset configuration file i.e. ``datasetname.yaml``.
             value_field(str): the value field in the graph. If value_field isn't ``None``, the values in this column will fill the adjacency matrix.
             row_offset(int): the offset of the row in the graph. Default: 0.
-            col_offset(int): the offset of the column in the graph. Default: 0. 
-            val_offset(int): the offset of the edge value in the graph. If several graphs are to be combined into one, 
+            col_offset(int): the offset of the column in the graph. Default: 0.
+            val_offset(int): the offset of the edge value in the graph. If several graphs are to be combined into one,
             offset should be added on the edge value in each graph to avoid conflict. Default: 0.
             bidirectional(bool): whether to turn the graph into bidirectional graph or not. Default: False
 
@@ -655,7 +649,7 @@ class MFDataset(Dataset):
         The split methods are usually used for sequential recommendation, where the last item of the item sequence will be used for test.
 
         Args:
-            leave_one_num(int): the last ``leave_one_num`` items of the sequence will be splited out. 
+            leave_one_num(int): the last ``leave_one_num`` items of the sequence will be splited out.
             data_count(pandas.DataFrame or numpy.ndarray):  entry range for each user or number of all entries.
             rep(bool, optional): whether there should be repititive items in the sequence.
         """
@@ -784,7 +778,8 @@ class MFDataset(Dataset):
         d.data_index = idx
         return d
 
-    def build(self, split_ratio=[0.8,0.1,0.1], shuffle=True, split_mode='user_entry', fmeval=False, dataset_sampler=None, dataset_neg_count=None, **kwargs):
+    def build(self, split_ratio=[0.8, 0.1, 0.1],
+              shuffle=True, split_mode='user_entry', fmeval=False, dataset_sampler=None, dataset_neg_count=None, **kwargs):
         """Build dataset.
 
         Args:
@@ -792,7 +787,7 @@ class MFDataset(Dataset):
 
             shuffle(bool, optional): set True to reshuffle the whole dataset each epoch. Default: ``True``
 
-            split_mode(str, optional): controls the split mode. If set to ``user_entry``, then the interactions of each user will be splited into 3 cut. 
+            split_mode(str, optional): controls the split mode. If set to ``user_entry``, then the interactions of each user will be splited into 3 cut.
             If ``entry``, then dataset is splited by interactions. If ``user``, all the users will be splited into 3 cut. Default: ``user_entry``
 
             fmeval(bool, optional): set True for MFDataset and ALSDataset when use TowerFreeRecommender. Default: ``False``
@@ -901,12 +896,13 @@ class MFDataset(Dataset):
             sampler = SortedDataSampler(self, batch_size, shuffle, drop_last)
         else:
             sampler = DataSampler(self, batch_size, shuffle, drop_last)
-        
+
         if ddp:
             sampler = DistributedSamplerWrapper(sampler, shuffle=False)
 
         output = DataLoader(self, sampler=sampler, batch_size=None,
-                                shuffle=False, num_workers=num_workers)
+                            shuffle=False, num_workers=num_workers,
+                            persistent_workers=False)
 
         # if ddp:
         #     sampler = torch.utils.data.distributed.DistributedSampler(self, shuffle=shuffle, drop_last=drop_last)
@@ -932,7 +928,8 @@ class MFDataset(Dataset):
             if ddp:
                 sampler = DistributedSamplerWrapper(sampler, shuffle=False)
             output = DataLoader(
-                self, sampler=sampler, batch_size=None, shuffle=False, num_workers=num_workers)
+                self, sampler=sampler, batch_size=None, shuffle=False,
+                num_workers=num_workers, persistent_workers=False)
             return output
         else:
             return self.loader(batch_size, shuffle=False, num_workers=num_workers, ddp=ddp)
@@ -976,7 +973,7 @@ class MFDataset(Dataset):
     def get_network_field(self, network_id, feat_id, field_id):
         """
         Returns the specified field name in some network.
-        For example, if the head id field is in the first feat of KG network and is the first column of the feat and the index of KG network is 1. 
+        For example, if the head id field is in the first feat of KG network and is the first column of the feat and the index of KG network is 1.
         To get the head id field, the method can be called like this ``train_data.get_network_field(1, 0, 0)``.
 
         Args:
@@ -985,7 +982,7 @@ class MFDataset(Dataset):
             field_id(int): the index of the wanted field in above feat.
 
         Returns:
-            field(str): the wanted field. 
+            field(str): the wanted field.
         """
         return self.config['network_feat_field'][network_id][feat_id][field_id].split(':')[0]
 
@@ -1060,7 +1057,7 @@ class MFDataset(Dataset):
 
 
 class AEDataset(MFDataset):
-    def build(self, split_ratio=[0.8,0.1,0.1], shuffle=False, dataset_sampler=None, dataset_neg_count=None, **kwargs):
+    def build(self, split_ratio=[0.8, 0.1, 0.1], shuffle=False, dataset_sampler=None, dataset_neg_count=None, **kwargs):
         """Build dataset.
 
         Args:
@@ -1068,7 +1065,7 @@ class AEDataset(MFDataset):
 
             shuffle(bool, optional): set True to reshuffle the whole dataset each epoch. Default: ``True``
 
-            split_mode(str, optional): controls the split mode. If set to ``user_entry``, then the interactions of each user will be splited into 3 cut. 
+            split_mode(str, optional): controls the split mode. If set to ``user_entry``, then the interactions of each user will be splited into 3 cut.
             If ``entry``, then dataset is splited by interactions. If ``user``, all the users will be splited into 3 cut. Default: ``user_entry``
 
             fmeval(bool, optional): set True for MFDataset and ALSDataset when use TowerFreeRecommender. Default: ``False``
@@ -1110,7 +1107,7 @@ class AEDataset(MFDataset):
                     data[n+k] = v
 
         if self.eval_mode and 'user_hist' not in data:
-            data['user_hist'] = data['in_item_id']
+            data['user_hist'] = data['in_'+self.fiid]
         else:
             if self.neg_sampling_count is not None:
                 _, neg_id, _ = self.negative_sampler(
@@ -1155,7 +1152,7 @@ class SeqDataset(MFDataset):
             data = np.array([[u, max(sp[0], i - maxlen), i]
                             for i in range(sp[0], sp[-1])], dtype=np.int64)
             sp -= sp[0]
-            # split_point = sp[1:-1]-1 
+            # split_point = sp[1:-1]-1
             # split_point[split_point < 0] = 0 #TODO: to fix user split mode in seqdataset
             return np.split(data[1:], sp[1:-1]-1)
         output = [get_slice(sp, u) for sp, u in zip(splits, uids)]
@@ -1198,22 +1195,26 @@ class FullSeqDataset(SeqDataset):
             splits[:, -1] - splits[:, 0]).max()
 
         def get_slice(sp, u):
-            length_ = math.ceil((sp[1]-sp[0]) / maxlen)
-            data = [np.array(
-                [[u, max(sp[0], sp[1]-(i+1)*maxlen), sp[1]-i*maxlen] for i in range(length_)])]
+            # length_ = math.ceil((sp[1]-sp[0]) / maxlen)
+            sp[1:] = sp[1:] - 1
+            data = [np.array([[u, max(sp[0], sp[1]-maxlen), sp[1]]])]
             data += [np.array([[u, max(s-maxlen, sp[0]), s]]) for s in sp[2:]]
-            return tuple(data)
+            # data = [np.array(
+            #     [[u, max(sp[0], sp[1]-(i+1)*maxlen), sp[1]-i*maxlen] for i in range(length_)])]
+            # data += [np.array([[u, max(s-maxlen, sp[0]), s]]) for s in sp[2:]]
+            return data
         output = [get_slice(sp, u) for sp, u in zip(splits, uids)]
         output = [torch.from_numpy(np.concatenate(_)) for _ in zip(*output)]
+        # output = [keep_first_item(dix, _) for dix, _ in enumerate(output)] # figure out
         return output
 
 
-class SeqToSeqSeqDataset(SeqDataset):
-    
+class SeqToSeqDataset(SeqDataset):
+
     def _get_data_idx(self, splits):
-        # bug to fix : "user" split mode 
+        # bug to fix : "user" split mode
         # split: [start, train_end, valid_end, test_end]
-        splits, uids = splits 
+        splits, uids = splits
         maxlen = self.config['max_seq_len'] or (
             splits[:, -1] - splits[:, 0]).max()
 
@@ -1222,23 +1223,23 @@ class SeqToSeqSeqDataset(SeqDataset):
             if ((dix == 0) and self.train_rep) or ((dix > 0) and self.test_rep):
                 return part
             else:
-                return part[self.first_item_idx.iloc[part[:, -1]].values] 
+                return part[self.first_item_idx.iloc[part[:, -1]].values]
 
         def get_slice(sp, u):
             # the length of the train slice should be maxlen + 1 to get train data with length maxlen
-            data = [np.array([[u, max(sp[0], i - 1 - maxlen), i - 1]]) for i in sp[1:]] 
+            data = [np.array([[u, max(sp[0], i - 1 - maxlen), i - 1]]) for i in sp[1:]]
             return tuple(data)
 
         output = [get_slice(sp, u) for sp, u in zip(splits, uids)]
         output = [torch.from_numpy(np.concatenate(_)) for _ in zip(*output)]
-        output = [keep_first_item(dix, _) for dix, _ in enumerate(output)] # figure out 
+        output = [keep_first_item(dix, _) for dix, _ in enumerate(output)] # figure out
         return output
 
     def _get_pos_data(self, index):
-        # training: 
+        # training:
         # source: interval [idx[:, 1], idx[:, 2] - 1]
         # target: interval [idx[:, 1] + 1, idx[:, 2]]
-        # valid/test: 
+        # valid/test:
         # source: interval [idx[:, 1], idx[:, 2] - 1]
         # target: idx[:, 2]
         idx = self.data_index[index]
@@ -1256,17 +1257,17 @@ class SeqToSeqSeqDataset(SeqDataset):
                 tuple(lens.numpy())), batch_first=True)
         source_data.update(self.item_feat[source_data[self.fiid]])
         # target_data
-        if not self.eval_mode: 
+        if not self.eval_mode:
             l_target = l_source + 1
             target_data = self.inter_feat[l_target]
             for k in target_data:
                 target_data[k] = pad_sequence(target_data[k].split(
                     tuple(lens.numpy())), batch_first=True)
             target_data.update(self.item_feat[target_data[self.fiid]])
-        else: 
+        else:
             target_data = self.inter_feat[idx[:, 2]]
             target_data.update(self.item_feat[target_data[self.fiid]])
-        
+
         for n, d in zip(['in_', ''], [source_data, target_data]):
             for k, v in d.items():
                 if k != self.fuid:
@@ -1276,8 +1277,8 @@ class SeqToSeqSeqDataset(SeqDataset):
     @property
     def inter_feat_subset(self):
         """self.data_index : [num_users, 3]
-        The intervel in data_index is both closed. 
-        data_index only includes interactions in the truncated sequence of a user, instead of all interactions. 
+        The intervel in data_index is both closed.
+        data_index only includes interactions in the truncated sequence of a user, instead of all interactions.
         Return:
             torch.tensor: the history index in inter_feat. shape: [num_interactions_in_train]
         """
@@ -1305,7 +1306,7 @@ class TensorFrame(Dataset):
 
         Args:
             dataframe(pandas.DataFrame): Dataframe read from csv file.
-            dataset(recstudio.data.MFDataset): target dataset where the TensorFrame is used. 
+            dataset(recstudio.data.MFDataset): target dataset where the TensorFrame is used.
 
         Return:
             recstudio.data.TensorFrame: the TensorFrame get from the dataframe.
@@ -1387,7 +1388,8 @@ class TensorFrame(Dataset):
         """
         sampler = DataSampler(self, batch_size, shuffle, drop_last)
         output = DataLoader(self, sampler=sampler, batch_size=None,
-                            shuffle=False, num_workers=num_workers)
+                            shuffle=False, num_workers=num_workers,
+                            persistent_workers=False)
         return output
 
     def add_field(self, field, value):
@@ -1468,11 +1470,11 @@ class DataSampler(Sampler):
 class SortedDataSampler(Sampler):
     r"""Data sampler to return index for batch data, aiming to collect data with similar lengths into one batch.
 
-    In order to save memory in training producure, the data sampler collect data point with similar length into one batch. 
+    In order to save memory in training producure, the data sampler collect data point with similar length into one batch.
 
     For example, in sequential recommendation, the interacted item sequence of different users may vary differently, which may cause
     a lot of padding. By considering the length of each sequence, gathering those sequence with similar lengths in the same batch can
-    tackle the problem. 
+    tackle the problem.
 
     If `shuffle` is `True`, length of sequence and the random index are combined together to reduce padding without randomness.
 
@@ -1525,7 +1527,7 @@ class ChainedDataLoader:
     Args:
         loaders(list[torch.utils.data.DataLoader]): list of dataloaders.
 
-        nepoch(list or numpy.ndarray, optional): list with the same length as loaders, controls how many epochs each dataloader iterates for. (default: `None`) 
+        nepoch(list or numpy.ndarray, optional): list with the same length as loaders, controls how many epochs each dataloader iterates for. (default: `None`)
     """
 
     def __init__(self, loaders, nepoch=None) -> None:
@@ -1540,7 +1542,6 @@ class ChainedDataLoader:
         return iter(self.loaders[self.iter_idx[self.epoch % len(self.iter_idx)]])
 
 
-
 class CombinedLoaders(object):
     def __init__(self, loaders) -> None:
         r"""
@@ -1548,17 +1549,14 @@ class CombinedLoaders(object):
         """
         self.loaders = loaders
 
-
     def __len__(self):
         return len(self.loaders[0])
-
 
     def __iter__(self):
         for i, l in enumerate(self.loaders):
             self.loaders[i] = iter(l)
         return self
 
-    
     def __next__(self):
         batch = next(self.loaders[0])
         for i, l in enumerate(self.loaders[1:]):
@@ -1568,7 +1566,6 @@ class CombinedLoaders(object):
                 self.loaders[i+1] = iter(self.loaders[i+1])
                 batch.update(next(self.loaders[i+1]))
         return batch
-
 
 
 class DatasetFromSampler(Dataset):
@@ -1599,8 +1596,6 @@ class DatasetFromSampler(Dataset):
             int: length of the dataset
         """
         return len(self.sampler)
-
-
 
 
 class DistributedSamplerWrapper(DistributedSampler):

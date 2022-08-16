@@ -5,17 +5,15 @@ import logging
 import os
 import random
 import re
-import time
 from collections import OrderedDict
-from typing import Optional, Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 import requests
-import yaml
 import torch
-from tqdm import tqdm
+import yaml
 from recstudio.utils.compress_file import extract_compressed_file
-
+from tqdm import tqdm
 
 LOG_DIR = r"./log/"
 DEFAULT_CACHE_DIR = r"./.recstudio/"
@@ -32,7 +30,7 @@ def set_color(log, color, highlight=True, keep=False):
     r"""Set color for log string.
 
     Args:
-        log(str): the 
+        log(str): the
     """
     if keep:
         return log
@@ -104,7 +102,7 @@ def color_dict_normal(dict_, keep=True):
     return info
 
 
-def get_model(model_name):
+def get_model(model_name: str):
     r"""Automatically select model class based on model name
 
     Args:
@@ -158,7 +156,7 @@ def get_download_url_from_recstore(share_number: str):
         "share_constraint": {}
     }
     resource = requests.post(
-        'https://recapi.ustc.edu.cn/api/v2/share/target/resource/list', 
+        'https://recapi.ustc.edu.cn/api/v2/share/target/resource/list',
         json=data_resource_list, headers=headers)
     resource = resource.text.encode("utf-8").decode("utf-8-sig")
     resource = json.loads(resource)
@@ -171,7 +169,7 @@ def get_download_url_from_recstore(share_number: str):
         ]
     }
     res = requests.post(
-        "https://recapi.ustc.edu.cn/api/v2/share/download", 
+        "https://recapi.ustc.edu.cn/api/v2/share/download",
         json=data, headers=headers)
     res = res.text.encode("utf-8").decode("utf-8-sig")
     res = json.loads(res)
@@ -184,12 +182,13 @@ def check_valid_dataset(name: str, config: Dict, default_dataset_path=DEFAULT_CA
 
     Args:
         name(str): the name of the dataset
-        config(Dict): the config of the dataset 
+        config(Dict): the config of the dataset
         default_data_set_path:(str, optional): the path of the local cache folder.
 
     Returns:
         str: download url of the dataset file or the local file path.
     """
+    logger = logging.getLogger('recstudio')
     def get_files(vs):
         res = []
         for v in vs:
@@ -197,7 +196,7 @@ def check_valid_dataset(name: str, config: Dict, default_dataset_path=DEFAULT_CA
                 res.append(v)
             else:
                 res = res + get_files(v)
-        return res 
+        return res
 
     if not os.path.exists(default_dataset_path):
         os.makedirs(default_dataset_path)
@@ -210,41 +209,41 @@ def check_valid_dataset(name: str, config: Dict, default_dataset_path=DEFAULT_CA
         # try to find original file
         download_flag = False
         default_dir = os.path.join(default_dataset_path, name)
-        for k,v in config.items():
+        for k, v in config.items():
             if k.endswith('feat_name'):
                 # if not isinstance(v, List) and v is not None:
                 #     files = [v]
-                if v is not None: 
+                if v is not None:
                     v = [v] if not isinstance(v, List) else v
                     files = get_files(v)
-                
+
                     for f in files:
                         fpath = os.path.join(default_dir, f)
                         if not os.path.exists(fpath):
                             download_flag = True
-                            break        
+                            break
             if download_flag == True:
                 break
 
         if not download_flag:
-            print_logger.info(f"dataset is read from {default_dir}.")
+            logger.info(f"dataset is read from {default_dir}.")
             return False, default_dir
         elif download_flag and (config['url'] is not None):
             if config['url'].startswith('http'):
-                print_logger.info(f"will download dataset {name} fron the url {config['url']}.")
+                logger.info(f"will download dataset {name} fron the url {config['url']}.")
                 return False, download_dataset(config['url'], name, default_dir)
             elif config['url'].startswith('recstudio:'): # use dataset privided in dataset_demo
-                dir = os.path.dirname(os.path.dirname(__file__)) # recstudio dir 
+                dir = os.path.dirname(os.path.dirname(__file__)) # recstudio dir
                 dir = os.path.join(dir, config['url'].split(':')[1])
+                logger.info(f"dataset is read from {dir}.")
                 return False, dir
             else:   # user provide original file
-                print_logger.info(f"dataset is read from {config['url']}.")
+                logger.info(f"dataset is read from {config['url']}.")
                 return False, config['url']
         elif download_flag and (config['url'] is None):
-            raise FileNotFoundError("Sorry, the original dataset file can not be found due to"\
-                "there is neither url provided or local file path provided in configuration files"\
-                "with the key `url`.")
-            
+            raise FileNotFoundError("Sorry, the original dataset file can not be found due to"
+                                    "there is neither url provided or local file path provided in configuration files"
+                                    "with the key `url`.")
 
 
 def download_dataset(url: str, name: str, save_dir: str):
@@ -261,8 +260,8 @@ def download_dataset(url: str, name: str, save_dir: str):
             response = requests.get(url, stream=True)
             content_length = int(response.headers.get('content-length', 0))
             with open(dataset_file_path, 'wb') as file, \
-                tqdm(desc='Downloading dataset', 
-                     total=content_length, unit='iB', 
+                tqdm(desc='Downloading dataset',
+                     total=content_length, unit='iB',
                      unit_scale=True, unit_divisor=1024) as bar:
                 for data in response.iter_content(chunk_size=1024):
                     size = file.write(data)
@@ -289,28 +288,29 @@ def seed_everything(seed: Optional[int] = None, workers: bool = False) -> int:
     """
     max_seed_value = np.iinfo(np.uint32).max
     min_seed_value = np.iinfo(np.uint32).min
-
+    logger = logging.getLogger('recstudio')
     if seed is None:
         env_seed = os.environ.get("PL_GLOBAL_SEED")
         if env_seed is None:
             seed = random.randint(min_seed_value, max_seed_value)
-            print_logger.warning(f"No seed found, seed set to {seed}")
+            logger.warning(f"No seed found, seed set to {seed}")
         else:
             try:
                 seed = int(env_seed)
             except ValueError:
                 seed = random.randint(min_seed_value, max_seed_value)
-                print_logger.warning(f"Invalid seed found: {repr(env_seed)}, seed set to {seed}")
+                logger.warning(f"Invalid seed found: {repr(env_seed)}, seed set to {seed}")
+
     elif not isinstance(seed, int):
         seed = int(seed)
 
     if not (min_seed_value <= seed <= max_seed_value):
-        print_logger.warning(f"{seed} is not in bounds, numpy accepts from {min_seed_value} to {max_seed_value}")
+        logger.warning(f"{seed} is not in bounds, numpy accepts from {min_seed_value} to {max_seed_value}")
         seed = random.randint(min_seed_value, max_seed_value)
 
     # using `log.info` instead of `rank_zero_info`,
     # so users can verify the seed is properly set in distributed training.
-    print_logger.info(f"Global seed set to {seed}")
+    logger.info(f"Global seed set to {seed}")
     os.environ["PL_GLOBAL_SEED"] = str(seed)
     random.seed(seed)
     np.random.seed(seed)
@@ -323,15 +323,16 @@ def seed_everything(seed: Optional[int] = None, workers: bool = False) -> int:
 
 
 def get_dataset_default_config(dataset_name: str) -> Dict:
+    logger = logging.getLogger('recstudio')
     dir = os.path.dirname(__file__)
     dataset_config_dir = os.path.join(dir, "../data/config")
     dataset_config_fname = os.path.join(dataset_config_dir, f"{dataset_name}.yaml")
     if os.path.exists(dataset_config_fname):
         config = parser_yaml(dataset_config_fname)
     else:
-        print_logger.warning(f"There is no default configuration file for dataset {dataset_name}."\
-            "Please make sure that all the configurations are setted in your provided file or the"\
-            "configuration dict you've assigned.")
+        logger.warning(f"There is no default configuration file for dataset {dataset_name}."
+                       "Please make sure that all the configurations are setted in your provided file or the"
+                       "configuration dict you've assigned.")
         config = {}
     return config
 
@@ -344,22 +345,28 @@ class RemoveColorFilter(logging.Filter):
         return True
 
 
+def add_file_handler(logger: logging.Logger, file_path: str, formatter: logging.Formatter = None):
+    file_handler = logging.FileHandler(os.path.join(LOG_DIR, file_path))
+    file_handler.setLevel(logging.INFO)
+    if formatter is None:
+        formatter = logging.Formatter('[%(asctime)s] %(levelname)s %(message)s', "%Y-%m-%d %H:%M:%S")
+    file_handler.setFormatter(formatter)
+    file_handler.addFilter(RemoveColorFilter())
+    logger.addHandler(file_handler)
+    return logger
 
-FORMAT = '[%(asctime)s] %(levelname)s %(message)s'
-# logging.basicConfig(format=FORMAT)
-print_logger = logging.getLogger('recstudio')
 
-formatter = logging.Formatter(FORMAT, "%Y-%m-%d %H:%M:%S")
-print_logger.setLevel(logging.INFO)
-stream_handler = logging.StreamHandler()
-stream_handler.setLevel(logging.INFO)
-stream_handler.setFormatter(formatter)
-print_logger.addHandler(stream_handler)
+def get_logger(file_path: str = None):
+    FORMAT = '[%(asctime)s] %(levelname)s %(message)s'
+    logger = logging.getLogger('recstudio')
 
-file_handler = logging.FileHandler(os.path.join(LOG_DIR, \
-    time.strftime("%Y-%m-%d-%H-%M-%S.log", time.localtime())))
-file_handler.setLevel(logging.INFO)
-file_handler.setFormatter(formatter)
-remove_color_filter = RemoveColorFilter()
-file_handler.addFilter(RemoveColorFilter())
-print_logger.addHandler(file_handler)
+    formatter = logging.Formatter(FORMAT, "%Y-%m-%d %H:%M:%S")
+    logger.setLevel(logging.INFO)
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(logging.INFO)
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(stream_handler)
+
+    if file_path is not None:
+        logger = add_file_handler(logger, file_path, formatter)
+    return logger
