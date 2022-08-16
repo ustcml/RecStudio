@@ -142,7 +142,7 @@ nni-experiments/
 **/log
 **/saved
 **/.recstudio
-datasets/
+datasets/*
 !datasets/ml-100k/
 
 .recstudio/

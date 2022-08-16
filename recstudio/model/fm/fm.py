@@ -1,6 +1,7 @@
 import torch
+from collections import OrderedDict
 from recstudio.model.basemodel import BaseRanker
-from recstudio.model.module import ctr, LambdaLayer
+from recstudio.model.module import ctr, LambdaLayer, HStackLayer
 from recstudio.data.dataset import MFDataset
 
 
@@ -8,21 +9,25 @@ class FM(BaseRanker):
     # def _init_model(self, train_data):
     #     super()._init_model(train_data)
 
-
-    def _get_dataset_class(self):
+    @staticmethod
+    def _get_dataset_class():
         return MFDataset
 
     def _get_scorer(self, train_data):
-        embedding = ctr.Embeddings(
-            self.fields, 
-            train_data.field2type, 
-            {f: train_data.num_values(f) for f in self.fields}, 
-            self.embed_dim, 
-            train_data.frating)
+        fm = torch.nn.Sequential(OrderedDict({
+            "embeddings": ctr.Embeddings(
+                fields=self.fields,
+                embed_dim=self.embed_dim,
+                data=train_data
+            ),
+            "fm_layer": ctr.FMLayer(reduction='sum'),
+        }))
         return torch.nn.Sequential(
-            embedding,
-            ctr.FMLayer(),
-            LambdaLayer(lambda x: x.sum(-1))
+            HStackLayer(OrderedDict({
+                "fm": fm,
+                "linear": ctr.LinearLayer(self.fields, train_data)
+            })),
+            LambdaLayer(lambda x: x[0]+x[1])
         )
 
     def _get_loss_func(self):

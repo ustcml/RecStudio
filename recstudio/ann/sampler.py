@@ -1,8 +1,9 @@
-from codecs import replace_errors
+from typing import List, Optional, Tuple, Union, Dict
 import numpy as np
 import torch
+from torch import Tensor
 import torch.nn.functional as F
-from recstudio.model import scorer
+from ..model import scorer
 
 
 def kmeans(X, K_or_center, max_iter=300, verbose=False):
@@ -36,7 +37,6 @@ def kmeans(X, K_or_center, max_iter=300, verbose=False):
 
 def construct_index(cd01, K):
     cd01, indices = torch.sort(cd01, stable=True)
-    # _, itemid2indice = torch.sort(indices, stable=True)
     cluster, count = torch.unique_consecutive(cd01, return_counts=True)
     count_all = torch.zeros(K + 1, dtype=torch.long, device=cd01.device)
     count_all[cluster + 1] = count
@@ -47,7 +47,7 @@ def construct_index(cd01, K):
 class Sampler(torch.nn.Module):
     def __init__(self, num_items, scorer_fn=None):
         super(Sampler, self).__init__()
-        self.num_items = num_items
+        self.num_items = num_items-1  # remove padding
         self.scorer = scorer_fn
 
     def update(self, item_embs, max_iter=30):
@@ -57,30 +57,28 @@ class Sampler(torch.nn.Module):
         pass
 
 
-class RetriverSampler(Sampler):
-    def __init__(self, retriever, method='brute', excluding_hist=False, t=1):
-        super().__init__(None)
+class RetrieverSampler(Sampler):    # use for IRGAN
+    def __init__(self, num_items, retriever=None, method='brute', t=1):
+        super().__init__(num_items)
+        # if not method in ("is", "dns", "brute"):
+        #     raise ValueError("the sampler method only support 'is'/'dns'/'brute'")
+        # else:
         self.retriever = retriever
-        if not method in {"ips", "dns", "brute"}:
-            raise ValueError("the sampler method start with 'retriever_' only \
-                support 'retriever_ipts' and 'retriever_dns'")
-        else:
-            self.method = method
-
-        self.excluding_hist = excluding_hist
+        self.method = method
+        # if self.retriever is not None:
+        #     self.scorer = self.retriever.score_func
         self.T = t
 
-    def _update(self):
-        if hasattr(self.retriever, '_update_item_vector'): # TODO: config frequency
-            self.retriever._update_item_vector()
+    def update(self, item_embs):
+        self.retriever._update_item_vector()
 
-    @torch.no_grad()
-    def forward(self, batch, num_neg, pos_items, user_hist=None):
-        log_pos_prob, neg_id, log_neg_prob = self.retriever.sampling(
-            batch, num_neg, pos_items, user_hist, self.method, self.excluding_hist, self.T
-        )
+    def forward(self, batch, num_neg: Union[int, List, Tuple], pos_items=None, excluding_hist=False):
+        (log_pos_prob, neg_id, log_neg_prob), query_out = self.retriever.sampling(batch=batch, num_neg=num_neg,
+                                                                                  excluding_hist=excluding_hist,
+                                                                                  method=self.method, return_query=False,
+                                                                                  t=self.T)
+
         return log_pos_prob.detach(), neg_id.detach(), log_neg_prob.detach()
-
 
 
 class UniformSampler(Sampler):
@@ -88,31 +86,45 @@ class UniformSampler(Sampler):
     For each user, sample negative items
     """
 
-    def forward(self, query, num_neg, pos_items=None):
+    def forward(
+            self, query: Union[Tensor, int],
+            num_neg: int, pos_items: Optional[Tensor] = None, device: Optional[torch.device] = None):
         # query: B x L x D, pos_items: B x L || query: B x D, pos_item: B x L || assume padding=0
         # not deal with reject sampling
-        with torch.no_grad():
+        if isinstance(query, int):
+            num_queries = query
+            device = pos_items.device if pos_items is not None else device
+            shape = (num_queries, )
+        elif isinstance(query, Tensor):
+            query = query
             num_queries = np.prod(query.shape[:-1])
+            device = query.device
+            shape = query.shape[:-1]
+
+        with torch.no_grad():
             neg_items = torch.randint(
-                1, self.num_items + 1, size=(num_queries, num_neg), device=query.device)  # padding with zero
-            neg_items = neg_items.reshape(
-                *query.shape[:-1], -1)  # B x L x Neg || B x Neg
-            neg_prob = self.compute_item_p(query, neg_items)
-            pos_prob = self.compute_item_p(query, pos_items)
-        return pos_prob, neg_items, neg_prob
+                1, self.num_items + 1, size=(num_queries, num_neg),
+                device=device)  # padding with zero
+            neg_items = neg_items.reshape(*shape, -1)  # B x L x Neg || B x Neg
+            neg_prob = self.compute_item_p(None, neg_items)
+            if pos_items is not None:
+                pos_prob = self.compute_item_p(None, pos_items)
+                return pos_prob, neg_items, neg_prob
+            else:
+                return neg_items, neg_prob
 
     def compute_item_p(self, query, pos_items):
-        return - torch.log(torch.ones_like(pos_items))
+        return torch.zeros_like(pos_items)
 
 
-def uniform_sample_masked_hist(num_items: int, num_neg: int, user_hist: torch.Tensor, num_query_per_user: int = None):
+def uniform_sample_masked_hist(num_items: int, num_neg: int, user_hist: Tensor, num_query_per_user: int = None):
     """Sampling from ``1`` to ``num_items`` uniformly with masking items in user history.
 
     Args:
-        num_items(int): number of total items. 
-        num_neg(int): number of negative samples. 
+        num_items(int): number of total items.
+        num_neg(int): number of negative samples.
         user_hist(torch.Tensor): items list in user interacted history. The shape are required to be ``[num_user(or batch_size),max_hist_seq_len]`` with padding item(with index ``0``).
-        num_query_per_user(int, optimal): number of queries if each user. It will be ``None`` when there is only one query for one user.
+        num_query_per_user(int, optimal): number of queries of each user. It will be ``None`` when there is only one query for one user.
 
     Returns:
         torch.Tensor: ``[num_user(or batch_size),num_neg]`` or ``[num_user(or batch_size),num_query_per_user,num_neg]``, negative item index. If ``num_query_per_user`` is ``None``,  the shape will be ``[num_user(or batch_size),num_neg]``.
@@ -143,23 +155,26 @@ class MaskedUniformSampler(Sampler):
     For each user, sample negative items
     """
 
-    def forward(self, query, num_neg, pos_items, user_hist):
+    def forward(self, query, num_neg, pos_items=None, user_hist=None):
         # query: B x L x D, pos_items: B x L || query: B x D, pos_item: B x L || assume padding=0
         # return BxLxN or BxN
         with torch.no_grad():
             if query.dim() == 2:
                 neg_items = uniform_sample_masked_hist(
-                    num_query_per_user=None, num_items=self.num_items, 
+                    num_query_per_user=None, num_items=self.num_items,
                     num_neg=num_neg, user_hist=user_hist)
             elif query.dim() == 3:
-                neg_items = uniform_sample_masked_hist(num_query_per_user=query.size(
-                    1), num_items=self.num_items, num_neg=num_neg, user_hist=user_hist)
+                neg_items = uniform_sample_masked_hist(num_query_per_user=query.size(1),
+                                                       num_items=self.num_items, num_neg=num_neg, user_hist=user_hist)
             else:
-                raise ValueError(
-                    "`query` need to be 2-dimensional or 3-dimensional.")
+                raise ValueError("`query` need to be 2-dimensional or 3-dimensional.")
+
             neg_prob = self.compute_item_p(query, neg_items)
-            pos_prob = self.compute_item_p(query, pos_items)
-        return pos_prob, neg_items.int(), neg_prob
+            if pos_items is not None:
+                pos_prob = self.compute_item_p(query, pos_items)
+                return pos_prob, neg_items.int(), neg_prob
+            else:
+                return neg_items.int(), neg_prob
 
     def compute_item_p(self, query, pos_items):
         return - torch.log(torch.ones_like(pos_items))
@@ -170,8 +185,6 @@ class DatasetUniformSampler(Sampler):
         for hist in user_hist:
             for i in range(num_neg):
                 neg = torch.randint()
-        
-
 
 
 class PopularSamplerModel(Sampler):
@@ -188,12 +201,10 @@ class PopularSamplerModel(Sampler):
 
             # pop_count = torch.cat([torch.zeros(1), pop_count]) ## adding a padding value
             # should include 1 not 0, to avoid the problem of log 0 !!!
-            pop_count = torch.cat([pop_count.new_ones(1), pop_count], dim=0)
-            self.pop_prob = torch.nn.Parameter(
-                pop_count / pop_count.sum(), requires_grad=False)
-            self.table = torch.nn.Parameter(torch.cumsum(
-                self.pop_prob, dim=0), requires_grad=False)
-            self.pop_count = torch.nn.Parameter(pop_count, requires_grad=False)
+            pop_count[0] = 1
+            self.register_buffer('pop_count', pop_count)
+            self.register_buffer('pop_prob', pop_count / pop_count.sum())
+            self.register_buffer('table', torch.cumsum(self.pop_prob, dim=0))
 
     def forward(self, query, num_neg, pos_items=None):
         with torch.no_grad():
@@ -204,8 +215,11 @@ class PopularSamplerModel(Sampler):
             neg_items = neg_items.reshape(
                 query.shape[:-1], -1)  # B x L x Neg || B x Neg
             neg_prob = self.compute_item_p(query, neg_items)
-            pos_prob = self.compute_item_p(query, pos_items)
-        return pos_prob, neg_items, neg_prob
+            if pos_items is not None:
+                pos_prob = self.compute_item_p(query, pos_items)
+                return pos_prob, neg_items, neg_prob
+            else:
+                return neg_items, neg_prob
 
     def compute_item_p(self, query, pos_items):
         return torch.log(self.pop_prob[pos_items])  # padding value with log(0)
@@ -279,9 +293,12 @@ class MIDXSamplerUniform(Sampler):
             k01 = k0 * self.K + k1  # num_q x neg
             p01 = p0 + p1
             neg_items, neg_prob = self.sample_item(k01, p01)
-            pos_prob = None if pos_items is None else self.compute_item_p(
-                query, pos_items)
-            return pos_prob, neg_items.view(*query.shape[:-1], -1), neg_prob.view(*query.shape[:-1], -1)
+            if pos_items is not None:
+                pos_prob = None if pos_items is None else self.compute_item_p(
+                    query, pos_items)
+                return pos_prob, neg_items.view(*query.shape[:-1], -1), neg_prob.view(*query.shape[:-1], -1)
+            else:
+                return neg_items.view(*query.shape[:-1], -1), neg_prob.view(*query.shape[:-1], -1)
 
     def sample_item(self, k01, p01, pos=None):
         # TODO: remove positive items
@@ -316,22 +333,26 @@ class MIDXSamplerUniform(Sampler):
 
     def compute_item_p(self, query, pos_items):
         # query: B x L x D, pos_items: B x L || query: B x D, pos_item: B x L1 || assume padding=0
-        k0 = self.cd0[pos_items]  # B x L || B x L1
-        k1 = self.cd1[pos_items]  # B x L || B x L1
+        if pos_items.dim() == 1:
+            pos_items_ = pos_items.unsqueeze(1)
+        else:
+            pos_items_ = pos_items
+        k0 = self.cd0[pos_items_]  # B x L || B x L1
+        k1 = self.cd1[pos_items_]  # B x L || B x L1
         c0 = self.c0_[k0, :]  # B x L x D || B x L1 x D
         c1 = self.c1_[k1, :]  # B x L x D || B x L1 x D
         q0, q1 = query.chunk(2, dim=-1)  # B x L x D || B x D
-        if query.dim() == pos_items.dim():
+        if query.dim() == pos_items_.dim():
             r = (torch.bmm(c0, q0.unsqueeze(-1)) +
                  torch.bmm(c1, q1.unsqueeze(-1))).squeeze(-1)  # B x L1
         else:
             r = torch.bmm(q0, c0.transpose(1, 2)) + \
                 torch.bmm(q1, c1.transpose(1, 2))
-            pos_items = pos_items.unsqueeze(1)
+            pos_items_ = pos_items_.unsqueeze(1)
         if not hasattr(self, 'p'):
-            return r
+            return r.view_as(pos_items)
         else:
-            return r + torch.log(self.p[pos_items])
+            return (r + torch.log(self.p[pos_items_])).view_as(pos_items)
 
 
 class MIDXSamplerPop(MIDXSamplerUniform):
@@ -357,7 +378,7 @@ class MIDXSamplerPop(MIDXSamplerUniform):
             norm = self.pop_count * \
                 torch.exp(-0.5*torch.sum(item_embs**2, dim=-1))
         self.wkk = cd0m.T @ (cd1m * norm.view(-1, 1))
-        # self.p = torch.from_numpy(np.insert(pop_count, 0, 1.0)) 
+        # self.p = torch.from_numpy(np.insert(pop_count, 0, 1.0))
         # # this is similar, to avoid log 0 !!! in case of zero padding
         # this is similar, to avoid log 0 !!! in case of zero padding
         self.p = torch.cat([norm.new_ones(1), norm], dim=0)
@@ -421,8 +442,11 @@ class ClusterSamplerUniform(MIDXSamplerUniform):
                 rs, num_neg, replacement=True)    # num_q x neg
             p = torch.gather(r, -1, k)
             neg_items, neg_prob = self.sample_item(k, p, pos_items)
-            pos_prop = self.compute_item_p(query, pos_items)
-            return pos_prop, neg_items.view(*query.shape[:-1], -1), neg_prob.view(*query.shape[:-1], -1)
+            if pos_items is not None:
+                pos_prob = self.compute_item_p(query, pos_items)
+                return pos_prob, neg_items.view(*query.shape[:-1], -1), neg_prob.view(*query.shape[:-1], -1)
+            else:
+                return neg_items.view(*query.shape[:-1], -1), neg_prob.view(*query.shape[:-1], -1)
 
     def compute_item_p(self, query, pos_items):
         # query: B x L x D, pos_items: B x L || query: B x D, pos_item: B x L1 || assume padding=0
@@ -498,11 +522,87 @@ class ClusterSamplerPop(ClusterSamplerUniform):
                 cumsum = self.cp[start:end].cumsum(0)
                 self.cp[start:end] = cumsum / cumsum[-1]
 
+# import nmslib
+# class GraphSampler(Sampler):
+#     def __init__(self, num_items, xi: float = 100, period: int = 10, num_entry=100, item_encoder=None, scorer_fn=None):
+#         super().__init__(num_items, scorer_fn)
+#         self.graph = None
+#         self.xi = xi
+#         self.period = period
+#         self.item_encoder = item_encoder
+#         self.num_entry = num_entry
 
-# TODO: avoid sampling pos items in MIDX and Cluster
-# TODO aobpr sampler
+#     def update(self, item_embs, metric: str = 'ip'):
 
-# TODO: test and plot
+#         assert metric in ['ip', 'l2_reduce'], 'graph constructing metric not supported'
+#         item_vector = item_embs.detach().cpu()
+#         # ANN Graph construction
+#         if metric == 'ip':
+#             index = nmslib.init(method='hnsw', space='negdotprod')
+#         else:
+#             index = nmslib.init(method='hnsw', space='l2')
+#             vector_norm = item_vector.norm(dim=-1).unsqueeze(0)
+#             max_norm = vector_norm.max()
+#             item_vector = torch.cat(((item_vector/max_norm), torch.sqrt(1-vector_norm/max_norm).t()), -1)
+#         index.addDataPointBatch(item_vector)
+#         index.createIndex({'post': 2, 'M': 16, 'efConstruction': 50}, print_progress=False)
+#         neighbours = index.knnQueryBatch(item_vector, k=4+1, num_threads=4)
+#         self.graph = torch.from_numpy(np.delete(neighbours[0][0], 0)).unsqueeze(0)
+#         for idx, _ in neighbours:
+#             self.graph = torch.cat((self.graph, torch.from_numpy(np.delete(idx, 0)).unsqueeze(0)), dim=0)
+#         return
+
+#     def forward(self, query, num_neg, pos_items):
+#         B = query.size(0)
+#         neg_item_idx = torch.randint(
+#             1, len(self.graph),
+#             size=[B, self.num_entry],
+#             device=query.device)  # uniform drawn pool [B, num_entry]
+#         neg_item_vec = self.item_encoder(neg_item_idx)  # [B, num_entry, emb_size]
+#         neg_score = self.scorer(query, neg_item_vec)  # neg_score of pool items [B, pool_size]
+#         # method1: uniform process for selecting entry point
+#         # top_score, top_idx = torch.topk(neg_score, k=dns_neg, dim = -1)
+#         # neg_item_idx = torch.gather(neg_item_pool, -1, top_idx) # dynamic chosen items [B,dns_neg]
+
+#         last_step_item = neg_item_idx = neg_item_idx.reshape(-1, 1)  # initial entry point [B*num_entry, 1]
+#         last_step_score = neg_score.reshape(-1, 1)  # [B*num_entry,1]
+
+#         # method2: copy pos_items as entry points
+#         # neighbors = self.graph[pos_items].long()    #[B, L, neighbor_size]; TODO: deal with padding
+#         # one_step_walk = self.
+
+#         # graph random walk process
+#         for _ in range(num_neg//self.num_entry):
+#             neighbor = (self.graph[last_step_item.squeeze(-1)]+1).long()  # [B*num_entry,neighbor_size]
+#             one_step_walk_idx = torch.randint(0, neighbor.size(1), size=(neighbor.size(0), ))  # [B*num_entry]
+#             one_step_walk = torch.gather(neighbor, dim=-1, index=one_step_walk_idx.view(-1, 1)
+#                                          ).to(query.device)  # chosen neighbor [B*dns_neg,1]
+#             one_step_neg_item_vector = self.item_encoder(one_step_walk).reshape(
+#                 B, self.num_entry, -1)  # reshape for score_func [B,dns_neg,emb_size]
+#             one_step_neg_score = self.scorer(query, one_step_neg_item_vector).reshape(-1, 1)  # [B*dns_neg,1]
+
+#             # MCMC Process
+#             acceptance = self._acceptance(last_step_score, one_step_neg_score)  # [B*dns_neg,1]
+#             uni = torch.rand_like(acceptance)
+#             one_step_walk[acceptance < uni] = last_step_item[acceptance < uni]
+#             one_step_neg_score[acceptance < uni] = last_step_score[acceptance < uni]
+
+#             last_step_item = one_step_walk
+#             last_step_score = one_step_neg_score
+#             neg_item_idx = torch.cat((neg_item_idx, one_step_walk), dim=-1).long()
+
+#         neg_item_idx = neg_item_idx.reshape(pos_items.size(0), -1)  # [B,dns_neg*walk_neg]
+#         pos_prob = torch.zeros_like(pos_items)
+#         neg_prob = torch.zeros_like(neg_item_idx)
+#         return pos_prob, neg_item_idx, neg_prob
+
+#     def _acceptance(self, last_score, present_score):
+#         return torch.exp(present_score-last_score)
+
+
+# TODO(@AngusHuang17): avoid sampling pos items in MIDX and Cluster
+# TODO(@AngusHuang17) aobpr sampler
+
 def test():
     item_emb = torch.rand(100, 64).cuda()
     query = torch.rand(2, 10, 64).cuda()
@@ -530,5 +630,3 @@ def test():
     print('end')
 
 # test()
-
-
