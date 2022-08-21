@@ -1,5 +1,5 @@
 url: https://files.grouplens.org/datasets/movielens/ml-20m.zip
-user_id_field: &u userId:token # TODO: comments for &u and *u
+user_id_field: &u userId:token
 item_id_field: &i movieId:token
 rating_field: &r rating:float
 time_field: &t timestamp:float
@@ -21,12 +21,13 @@ item_feat_field: [[*i, title:token_seq:" ", genres:token_seq:"|")]]
 item_feat_header: 0
 
 
-use_fields: ~  # TODO: 
+use_fields: ~
 field_separator: ","
-min_user_inter: 0
-min_item_inter: 0
+min_user_inter: 10
+min_item_inter: 10
 field_max_len: ~
 rating_threshold: ~
+ranker_rating_threshold: 3
 drop_low_rating: ~
 max_seq_len: 20
 

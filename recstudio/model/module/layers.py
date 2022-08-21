@@ -1,39 +1,43 @@
-from turtle import forward
-from typing import Tuple, overload
-from numpy import outer
+from typing import Tuple
+
 import torch
 from torch.nn.parameter import Parameter
 
-def get_act(activation:str, dim=None):
+
+def get_act(activation: str, dim=None):
     if activation == None or isinstance(activation, torch.nn.Module):
         return activation
     elif type(activation) == str:
-        if activation.lower()=='relu':
+        if activation.lower() == 'relu':
             return torch.nn.ReLU()
-        elif activation.lower()=='sigmoid':
+        elif activation.lower() == 'sigmoid':
             return torch.nn.Sigmoid()
-        elif activation.lower()=='tanh':
+        elif activation.lower() == 'tanh':
             return torch.nn.Tanh()
-        elif activation.lower()=='leakyrelu':
+        elif activation.lower() == 'leakyrelu':
             return torch.nn.LeakyReLU()
-        elif activation.lower()=='identity':
+        elif activation.lower() == 'identity':
             return lambda x: x
-        elif activation.lower()=='dice':
-            return Dice(dim) 
+        elif activation.lower() == 'dice':
+            return Dice(dim)
+        elif activation.lower() == 'gelu':
+            return torch.nn.GELU()
         else:
-            raise ValueError(f'activation function type "{activation}"  is not supported, check spelling or pass in a instance of torch.nn.Module.')
+            raise ValueError(
+                f'activation function type "{activation}"  is not supported, check spelling or pass in a instance of torch.nn.Module.')
     else:
-        raise ValueError('"activation_func" must be a str or a instance of torch.nn.Module. ')
+        raise ValueError(
+            '"activation_func" must be a str or a instance of torch.nn.Module. ')
 
-          
+
 class CrossCompressUnit(torch.nn.Module):
     """
     Cross & Compress unit.
     Performs feature interaction as below:
         .. math::
             C_{l}=v_{l}e_{l}^\top=\begin{bmatrix}
-            v_{l}^{(1)}e_{l}^{(1)} & ...  & v_{l}^{(1)}e_{l}^{(d)} \\ 
-            ... &  & ... \\ 
+            v_{l}^{(1)}e_{l}^{(1)} & ...  & v_{l}^{(1)}e_{l}^{(d)} \\
+            ... &  & ... \\
             v_{l}^{(d)}e_{l}^{(1)} & ... & v_{l}^{(d)}e_{l}^{(d)}
             \end{bmatrix}
             \\
@@ -43,17 +47,18 @@ class CrossCompressUnit(torch.nn.Module):
 
     Parameters:
         embed_dim(int): dimensions of embeddings.
-        weight_vv(torch.nn.Linear): transformation weights. 
+        weight_vv(torch.nn.Linear): transformation weights.
         weight_ev(torch.nn.Linear): transformation weights.
         weight_ve(torch.nn.Linear): transformation weights.
         weight_ee(torch.nn.Linear): transformation weights.
         bias_v(Parameter): bias on v.
         bias_e(Parameter): bias on e.
-    
+
     Returns:
         v_output(torch.Tensor): the first embeddings after feature interaction.
         e_output(torch.Tensor): the second embeddings after feature interaction.
     """
+
     def __init__(self, embed_dim):
         super().__init__()
         self.embed_dim = embed_dim
@@ -61,28 +66,36 @@ class CrossCompressUnit(torch.nn.Module):
         self.weight_ev = torch.nn.Linear(self.embed_dim, 1, False)
         self.weight_ve = torch.nn.Linear(self.embed_dim, 1, False)
         self.weight_ee = torch.nn.Linear(self.embed_dim, 1, False)
-        self.bias_v = Parameter(data=torch.zeros(self.embed_dim), requires_grad=True)
-        self.bias_e = Parameter(data=torch.zeros(self.embed_dim), requires_grad=True)
-    
-    def forward(self, inputs):
-        v_input = inputs[0].unsqueeze(-1) #[batch_size, dim, 1] or [batch_size, neg, dim, 1]
-        e_input = inputs[1].unsqueeze(-2) #[batch_size, 1, dim] or [batch_size, neg, 1, dim]
+        self.bias_v = Parameter(data=torch.zeros(
+            self.embed_dim), requires_grad=True)
+        self.bias_e = Parameter(data=torch.zeros(
+            self.embed_dim), requires_grad=True)
 
-        c_matrix = torch.matmul(v_input, e_input) # [batch_size, dim, dim] or [batch_size, neg, dim, dim]
+    def forward(self, inputs):
+        # [batch_size, dim, 1] or [batch_size, neg, dim, 1]
+        v_input = inputs[0].unsqueeze(-1)
+        # [batch_size, 1, dim] or [batch_size, neg, 1, dim]
+        e_input = inputs[1].unsqueeze(-2)
+
+        # [batch_size, dim, dim] or [batch_size, neg, dim, dim]
+        c_matrix = torch.matmul(v_input, e_input)
         c_matrix_transpose = c_matrix.transpose(-1, -2)
 
-        v_output = (self.weight_vv(c_matrix) + self.weight_ev(c_matrix_transpose)).squeeze(-1) # [batch_size, dim, 1] -> [batch_size, dim] 
+        # [batch_size, dim, 1] -> [batch_size, dim]
+        v_output = (self.weight_vv(c_matrix) +
+                    self.weight_ev(c_matrix_transpose)).squeeze(-1)
         v_output = v_output + self.bias_v
-        e_output = (self.weight_ve(c_matrix) + self.weight_ee(c_matrix_transpose)).squeeze(-1)
-        e_output = e_output + self.bias_e 
+        e_output = (self.weight_ve(c_matrix) +
+                    self.weight_ee(c_matrix_transpose)).squeeze(-1)
+        e_output = e_output + self.bias_e
 
         return (v_output, e_output)
 
-      
+
 class FeatInterLayers(torch.nn.Module):
     """
     Feature interaction layers with varied feature interaction units.
-    
+
     Args:
         dim(int): the dimensions of the feature.
         num_layers(int): the number of stacked units in the layers.
@@ -106,26 +119,27 @@ class FeatInterLayers(torch.nn.Module):
         )
     )
     """
+
     def __init__(self, dim, num_units, unit) -> None:
         super().__init__()
         self.model = torch.nn.Sequential()
         for id in range(num_units):
             self.model.add_module(f'unit[{id}]', unit(dim))
-    
+
     def forward(self, v_input, e_input):
         return self.model((v_input, e_input))
 
-      
+
 class MLPModule(torch.nn.Module):
     """
-    MLPModule 
+    MLPModule
     Gets a MLP easily and quickly.
 
     Args:
-        mlp_layers(list): the dimensions of every layer in the MLP. 
+        mlp_layers(list): the dimensions of every layer in the MLP.
         activation_func(torch.nn.Module,str,None): the activation function in each layer.
         dropout(float): the probability to be set in dropout module. Default: ``0.0``.
-    
+
     Examples:
     >>> MLP = MLPModule([64, 64, 64], 'ReLU', 0.2)
     >>> MLP.model
@@ -150,28 +164,35 @@ class MLPModule(torch.nn.Module):
         (7): ReLU()
     )
     """
-    def __init__(self, mlp_layers, activation_func='ReLU', dropout=0.0, bias=True):
+
+    def __init__(self, mlp_layers, activation_func='ReLU', dropout=0.0, bias=True, batch_norm=False):
         super().__init__()
-        activation_func = get_act(activation_func)
         self.mlp_layers = mlp_layers
+        self.batch_norm = batch_norm
+        self.bias = bias
+        self.dropout = dropout
+        self.activation_func = activation_func
         self.model = []
-        for idx, layer in enumerate((zip(self.mlp_layers[ : -1], self.mlp_layers[1 : ]))):
+        for idx, layer in enumerate((zip(self.mlp_layers[: -1], self.mlp_layers[1:]))):
             self.model.append(torch.nn.Dropout(dropout))
             self.model.append(torch.nn.Linear(*layer, bias=bias))
+            if batch_norm:
+                self.model.append(torch.nn.BatchNorm1d(layer[-1]))
             if activation_func is not None:
-                self.model.append(activation_func)
+                activation = get_act(activation_func, dim=layer[-1])
+                self.model.append(activation)
         self.model = torch.nn.Sequential(*self.model)
-    
+
     def add_modules(self, *args):
         """
         Adds modules into the MLP model after obtaining the instance.
 
         Args:
-            args(variadic argument): the modules to be added into MLP model. 
+            args(variadic argument): the modules to be added into MLP model.
         """
         for block in args:
             assert isinstance(block, torch.nn.Module)
-        
+
         for block in args:
             self.model.add_module(str(len(self.model._modules)), block)
 
@@ -179,17 +200,17 @@ class MLPModule(torch.nn.Module):
         return self.model(input)
 
 
-
 class GRULayer(torch.nn.Module):
-    def __init__(self, input_dim, output_dim, num_layer=1, bias=False, batch_first=True, bidirectional=False, return_hidden=False) -> None:
+    def __init__(self, input_dim, output_dim, num_layer=1, bias=False, batch_first=True,
+                 bidirectional=False, return_hidden=False) -> None:
         super().__init__()
         self.gru = torch.nn.GRU(
-            input_size = input_dim,
-            hidden_size = output_dim,
-            num_layers = num_layer,
-            bias = bias,
-            batch_first = batch_first,
-            bidirectional = bidirectional
+            input_size=input_dim,
+            hidden_size=output_dim,
+            num_layers=num_layer,
+            bias=bias,
+            batch_first=batch_first,
+            bidirectional=bidirectional
         )
         self.return_hidden = return_hidden
 
@@ -201,69 +222,89 @@ class GRULayer(torch.nn.Module):
             return out
 
 
-
 class SeqPoolingLayer(torch.nn.Module):
-    #TODO: make it a pooling function or rename it as sequence pooling
-    # mean, max, last
     def __init__(self, pooling_type='mean', keepdim=False) -> None:
         super().__init__()
         if not pooling_type in ['sum', 'mean', 'max', 'last']:
-            raise ValueError("pooling_type can only be one of ['sum', 'mean', 'max', 'last']"\
-                f"but {self.pooling_type} is given.")
+            raise ValueError("pooling_type can only be one of ['sum', 'mean', 'max', 'last']"
+                             f"but {self.pooling_type} is given.")
         self.pooling_type = pooling_type
         self.keepdim = keepdim
 
-
     def forward(self, batch_seq_embeddings, seq_len, weight=None):
-        # batch_seq_embeddings: [B, L, D]
-        # seq_len: [B], weight: [BxL]
+        # batch_seq_embeddings: [B, L, D] or [B, N, L, D]
+        # seq_len: [B] or [B,N], weight: [B,L] or [B,N,L]
+        B = batch_seq_embeddings.size(0)
+        _need_reshape = False
+        if batch_seq_embeddings.dim() == 4:
+            _need_reshape = True
+            batch_seq_embeddings = batch_seq_embeddings.view(
+                -1, *batch_seq_embeddings.shape[2:])
+            seq_len = seq_len.view(-1)
+            if weight is not None:
+                weight = weight.view(-1, weight.size(-1))
+
+        N, L, D = batch_seq_embeddings.shape
+
         if weight is not None:
-            batch_seq_embeddings = weight.unsqueeze(1) * batch_seq_embeddings
+            batch_seq_embeddings = weight.unsqueeze(-1) * batch_seq_embeddings
+
         if self.pooling_type in ['mean', 'sum', 'max']:
-            mask = torch.arange(batch_seq_embeddings.size(1)).unsqueeze(0).unsqueeze(2).to(batch_seq_embeddings.device)
-            mask = mask.expand(batch_seq_embeddings.size(0), -1,  batch_seq_embeddings.size(2))
-            seq_len = seq_len.unsqueeze(1).unsqueeze(2) + torch.finfo(torch.float32).eps
+            mask = torch.arange(L).unsqueeze(0).unsqueeze(
+                2).to(batch_seq_embeddings.device)
+            mask = mask.expand(N, -1,  D)
+            seq_len = (seq_len.unsqueeze(1).unsqueeze(
+                2) + torch.finfo(torch.float32).eps)
             seq_len_ = seq_len.expand(-1, mask.size(1), -1)
             mask = mask >= seq_len_
             if self.pooling_type == 'max':
-                batch_seq_embeddings = batch_seq_embeddings.masked_fill(mask, 0.0)
+                batch_seq_embeddings = batch_seq_embeddings.masked_fill(
+                    mask, 0.0)
                 if not self.keepdim:
-                    return batch_seq_embeddings.max(dim=1)
+                    result = batch_seq_embeddings.max(dim=1)
                 else:
-                    return batch_seq_embeddings.max(dim=1).unsqueeze(1)
+                    result = batch_seq_embeddings.max(dim=1).unsqueeze(1)
             else:
-                batch_seq_embeddings = batch_seq_embeddings.masked_fill(mask, 0.0)
-                batch_seq_embeddings_sum = batch_seq_embeddings.sum(dim=1, keepdim=self.keepdim)
+                batch_seq_embeddings = batch_seq_embeddings.masked_fill(
+                    mask, 0.0)
+                batch_seq_embeddings_sum = batch_seq_embeddings.sum(
+                    dim=1, keepdim=self.keepdim)
                 if self.pooling_type == 'sum':
-                    return batch_seq_embeddings_sum
+                    result = batch_seq_embeddings_sum
                 else:
-                    return batch_seq_embeddings_sum / (seq_len if self.keepdim else seq_len.squeeze(2))
+                    result = batch_seq_embeddings_sum / (seq_len if self.keepdim else seq_len.squeeze(2))
 
         elif self.pooling_type == 'last':
-            gather_index = (seq_len-1).view(-1, 1, 1).expand(-1, -1, batch_seq_embeddings.size(2)) # B x 1 x D
-            output = batch_seq_embeddings.gather(dim=1, index=gather_index).squeeze(1)  # B x D
-            return output if not self.keepdim else output.unsqueeze(1)
-        
+            gather_index = (seq_len-1).view(-1, 1, 1).expand(-1, -1, D)  # B x 1 x D
+            output = batch_seq_embeddings.gather(
+                dim=1, index=gather_index).squeeze(1)  # B x D
+            result = output if not self.keepdim else output.unsqueeze(1)
 
+        if _need_reshape:
+            return result.reshape(B, N//B, *result.shape[1:])
+        else:
+            return result
 
+    def extra_repr(self):
+        return f"pooling_type={self.pooling_type}, keepdim={self.keepdim}"
 
 
 class AttentionLayer(torch.nn.Module):
     def __init__(
-        self, 
-        q_dim, 
-        k_dim=None, 
-        v_dim=None,
-        mlp_layers=[],
-        activation='sigmoid',
-        n_head=1, 
-        dropout=0.0, 
-        bias=True,
-        attention_type='feedforward', 
-        batch_first=True) -> None:
+            self,
+            q_dim,
+            k_dim=None,
+            v_dim=None,
+            mlp_layers=[],
+            activation='sigmoid',
+            n_head=1,
+            dropout=0.0,
+            bias=True,
+            attention_type='feedforward',
+            batch_first=True) -> None:
 
         super().__init__()
-        assert attention_type in set(['feedforward', 'multi-head', 'scaled-dot-product']), \
+        assert attention_type in set(['feedforward', 'multi-head', 'scaled-dot-product']),\
             f"expecting attention_type to be one of [feedforeard, multi-head, scaled-dot-product]"
         self.attention_type = attention_type
         if k_dim is None:
@@ -272,52 +313,60 @@ class AttentionLayer(torch.nn.Module):
             v_dim = k_dim
 
         if attention_type == 'feedforward':
-            self.mlp = MLPModule(
-                mlp_layers = [q_dim+k_dim] + mlp_layers + [1],
-                activation_func = activation,
-                bias = bias
+            mlp_layers = [q_dim+k_dim] + mlp_layers + [1]
+            self.mlp = torch.nn.Sequential(
+                MLPModule(
+                    mlp_layers=mlp_layers[:-1],
+                    activation_func=activation,
+                    bias=bias
+                ),
+                torch.nn.Linear(mlp_layers[-2], mlp_layers[-1])
             )
             pass
         elif attention_type == 'multi-head':
             self.attn_layer = torch.nn.MultiheadAttention(
-                embed_dim=q_dim, num_heads=n_head, dropout=dropout,
-                bias=bias, kdim=k_dim, vdim=v_dim, batch_first=batch_first
-            )
+                embed_dim=q_dim, num_heads=n_head, dropout=dropout, bias=bias, kdim=k_dim, vdim=v_dim,
+                batch_first=batch_first)
             pass
         elif attention_type == 'scaled-dot-product':
             assert q_dim == k_dim, 'expecting q_dim is equal to k_dim in scaled-dot-product attention'
             pass
 
-
-    def forward(self, query, key, value, key_padding_mask=None, 
-        need_weight=False, attn_mask=None, softmax=False,
-        average_attn_weights=True):
+    def forward(self, query, key, value, key_padding_mask=None,
+                need_weight=False, attn_mask=None, softmax=False,
+                average_attn_weights=True):
         # query: BxLxD1; key: BxSxD2; value: BxSxD; key_padding_mask: BxS
         if self.attention_type in ['feedforward', 'scaled-dot-product']:
             if self.attention_type == 'feedforward':
-                query = query.unsqueeze(2).repeat(1,1,key.size(1),1)
-                key = key.unsqueeze(1).repeat(1,query.size(1),1,1)
-                attn_output_weight = self.mlp(torch.cat((query, key), dim=-1)).squeeze(-1)   # BxLxS
+                query = query.unsqueeze(2).expand(-1, -1, key.size(1), -1)
+                key = key.unsqueeze(1).expand(-1, query.size(1), -1, -1)
+                attn_output_weight = self.mlp(
+                    torch.cat((query, key), dim=-1)).squeeze(-1)   # BxLxS
             else:
-                attn_output_weight = (query @ key.transpose(1, 2)) / query.size(-1)  
+                attn_output_weight = query @ key.transpose(1, 2)
+
+            attn_output_weight = attn_output_weight / (query.size(-1) ** 0.5)
 
             if key_padding_mask is not None:
-                key_padding_mask = key_padding_mask.unsqueeze(1).repeat(1,query.size(1),1)
+                key_padding_mask = key_padding_mask.unsqueeze(
+                    1).expand(-1, query.size(1), -1)
                 filled_value = -torch.inf if softmax else 0.0
                 attn_output_weight = attn_output_weight.masked_fill(key_padding_mask, filled_value)
 
             if softmax:
-                attn_output_weight = torch.softmax(attn_output_weight, dim=1)
+                attn_output_weight = torch.softmax(attn_output_weight, dim=-1)
 
             attn_output = attn_output_weight @ value    # BxLxD
-    
+
         elif self.attention_type == 'multi-head':
             attn_output, attn_output_weight = \
-                self.attn_layer(query, key, value, key_padding_mask, True, attn_mask, average_attn_weights)
+                self.attn_layer(query, key, value, key_padding_mask,
+                                True, attn_mask, average_attn_weights)
 
         elif self.attention_type == 'scaled-dot-product':
             product = query @ key.transpose(1, 2)
-            attn_output_weight = torch.softmax(product / torch.sqrt(query.size(-1)), dim=-1)
+            attn_output_weight = torch.softmax(
+                product / torch.sqrt(query.size(-1)), dim=-1)
             attn_output = attn_output_weight @ value
 
         if need_weight:
@@ -327,50 +376,26 @@ class AttentionLayer(torch.nn.Module):
 
 
 class Dice(torch.nn.Module):
-    def __init__(self, n_dim):
+    __constants__ = ['num_parameters']
+    num_features: int
+
+    def __init__(self, num_parameters, init: float = 0.25, epsilon: float = 1e-08):
         super().__init__()
-        self.alpha = torch.nn.parameter.Parameter(torch.zeros(n_dim), requires_grad=True)
-        self.beta = torch.nn.parameter.Parameter(torch.zeros(n_dim), requires_grad=True)
-        self.norm = torch.nn.BatchNorm1d(n_dim)
+        self.num_parameters = num_parameters
+        self.weight = torch.nn.parameter.Parameter(
+            torch.empty(num_parameters).fill_(init))
+        self.epsilon = epsilon
 
     def forward(self, x):
-        x_ = x.view(-1,x.size(-1))
-        x_normed = self.norm(x_)
-        x_p = torch.sigmoid(self.beta * x_normed)
-        print(x_p.shape)
-        output = (1.0-x_p) * x_ * self.alpha + x_p * x_
-        output = output.view(*x.shape)
-        return output
+        mean_x = torch.mean(x, dim=-1, keepdim=True)
+        var_x = torch.var(x, dim=-1, keepdim=True)
+        x_std = (x - mean_x) / (torch.sqrt(var_x + self.epsilon))
+        p_x = torch.sigmoid(x_std)
+        f_x = p_x * x + (1-p_x) * x * self.weight.expand_as(x)
+        return f_x
 
-# class FeedForwardAttention(torch.nn.Module):
-#     def __init__(self, q_dim, k_dim, mlp_layers=None, activation_func='relu') -> None:
-#         super(FeedForwardAttention, self).__init__()
-#         self.in_dim = q_dim + k_dim
-#         self.mlp = MLPModule(
-#             mlp_layers = [self.in_dim] + mlp_layers + [1],
-#             activation_func = activation_func,
-#         )
-
-    
-#     def forward(self, query, key, value, key_padding_mask, need_weight=False, softmax=False):
-#         # query: BxLxD1; key: BxSxD2; value: BxSxD; key_padding_mask: BxS
-#         query = query.unsqueeze(2).repeat(1,1,key.size(1),1)
-#         key = key.unsqueeze(1).repeat(1,query.size(1),1,1)
-#         mlp_out = self.mlp(torch.cat((query, key), dim=-1)).squeeze(-1)   # BxLxS
-
-#         key_padding_mask = key_padding_mask.unsqueeze(1).repeat(1,query.size(1),1)
-#         if softmax:
-#             mlp_out = mlp_out.masked_fill(key_padding_mask, -torch.inf)
-#             mlp_out = torch.softmax(mlp_out, dim=1)
-#         else:
-#             mlp_out = mlp_out.masked_fill(key_padding_mask, 0.0)
-
-#         weighted_value = mlp_out @ value    # BxLxD
-#         if need_weight:
-#             return weighted_value, mlp_out
-#         else:
-#             return weighted_value
-        
+    def extra_repr(self) -> str:
+        return 'num_parameters={}'.format(self.num_parameters)
 
 
 class LambdaLayer(torch.nn.Module):
@@ -385,10 +410,7 @@ class LambdaLayer(torch.nn.Module):
             return self.lambda_func(args[0])
         else:
             return self.lambda_func(args)
-        
 
-        # attention: neg id -> neg item features
-        # get_neg_item_feat before lambda layer
 
 class HStackLayer(torch.nn.Sequential):
 
@@ -412,4 +434,3 @@ class VStackLayer(torch.nn.Sequential):
             else:
                 input = module(input)
         return input
-

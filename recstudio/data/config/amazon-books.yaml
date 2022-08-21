@@ -1,12 +1,12 @@
 url: http://snap.stanford.edu/data/amazon/productGraph/categoryFiles/ratings_Books.csv
-user_id_field: &u user_id:token # TODO: comments for &u and *u
+user_id_field: &u user_id:token
 item_id_field: &i item_id:token
 rating_field: &r rating:float
 time_field: &t timestamp:float
 time_format: ~
 
 encoding_method: utf-8
-inter_feat_name: rating_Books.csv
+inter_feat_name: ratings_Books.csv
 inter_feat_field: [*u, *i, *r, *t,]
 inter_feat_header: ~
 
@@ -18,14 +18,14 @@ item_feat_name: ~
 item_feat_field: ~
 item_feat_header: ~
 
-use_fields: ~  # TODO: 
+use_fields: ~  # TODO:
 field_separator: ","
-min_user_inter: 20
-min_item_inter: 20
+min_user_inter: 10
+min_item_inter: 10
 field_max_len: ~
 rating_threshold: ~
 ranker_rating_threshold: 3
-drop_low_rating: ~
+drop_low_rating: True
 max_seq_len: 20
 
 # network feature, including social network and knowledge graph, the first two fields are remapped the corresponding features

@@ -1,114 +1,291 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from recstudio.model.module import SeqPoolingLayer
 from typing import Set
 
+import torch
+import torch.nn as nn
+from recstudio.model.module import SeqPoolingLayer
 
-
-# def create_embeddings(feat_cols, feat2type, feat2vocab_size, embed_dims):
-#     token_feat_cols = list(
-#         filter(lambda x: feat2type[x]=='token', feat_cols)) if len(feat_cols) else []
-
-#     token_seq_feat_cols = list(
-#         filter(lambda x: feat2type[x]=='token_seq', feat_cols)) if len(feat_cols) else []
-
-#     assert len(embed_dims) == 1 or len(embed_dims) == len(token_feat_cols+token_seq_feat_cols), \
-#         "expecting embed_dims to be an interger or a dict with the same length as sparse features."\
-#         f"but get length {len(embed_dims)} while sparse feature length is {len(token_feat_cols+token_seq_feat_cols)}."
-#     if len(embed_dims) == 1:
-#         embed_dims = {feat: embed_dims for feat in token_feat_cols+token_seq_feat_cols}
-    
-#     embed_dict = nn.ModuleDict(
-#         {feat: nn.Embedding(feat2vocab_size(feat), embed_dims[feat], 0) for feat in token_feat_cols+token_seq_feat_cols}
-#     )
-
-#     return embed_dict
 
 class DenseEmbedding(torch.nn.Module):
-    def __init__(self, num_embeddings, embedding_dim):
-        super().__init__()
-        self.num_embeddings = num_embeddings
-        self.embedding_dim = embedding_dim
-        self.norm = torch.nn.BatchNorm1d(num_embeddings)
-        self.W = torch.nn.Embedding(1, embedding_dim)
 
+    def __init__(self, embedding_dim, bias=False, batch_norm=False):
+        super().__init__()
+        self.embedding_dim = embedding_dim
+        self.bias = bias
+        self.batch_norm = batch_norm
+        if batch_norm:
+            self.batch_norm_layer = torch.nn.BatchNorm1d(1)
+        self.weight = torch.nn.Linear(1, embedding_dim, bias=bias)
 
     def forward(self, input):
-        input = self.norm(input)
-        emb = input.unsqueeze(-1) @ self.W.weight
+        input = input.view(-1, 1)
+
+        if self.batch_norm:
+            input = self.batch_norm_layer(input)
+        emb = self.weight(input)
         return emb
 
+    def extra_repr(self):
+        return f"embedding_dim={self.embedding_dim}, bias={self.bias}, batch_norm={self.batch_norm}"
 
 
 class Embeddings(torch.nn.Module):
 
-    def __init__(self, fields: Set, field2types, field2vocab_sizes, embed_dim, rating_field, reduction='mean'):
+    def __init__(self, fields: Set, embed_dim, data, reduction='mean',
+                 share_dense_embedding=False, dense_emb_bias=False, dense_emb_norm=True):
         super(Embeddings, self).__init__()
         self.embed_dim = embed_dim
+
+        self.field2types = {f: data.field2type[f] for f in fields if f != data.frating}
         self.reduction = reduction
-        self.dense_field_list = []
+        self.share_dense_embedding = share_dense_embedding
+        self.dense_emb_bias = dense_emb_bias
+        self.dense_emb_norm = dense_emb_norm
+
         self.embeddings = torch.nn.ModuleDict()
+        self.num_features = len(self.field2types)
 
-        for f in fields:
-            t = field2types[f]
-            if f == rating_field:
-                continue
-            if (t=="token" or t=='token_seq'):
+        _num_token_seq_feat = 0
+        _num_dense_feat = 0
+        _dense_feat = []
+        for f, t in self.field2types.items():
+            if (t == "token" or t == 'token_seq'):
+                if t == 'token_seq':
+                    _num_token_seq_feat += 1
                 self.embeddings[f] = torch.nn.Embedding(
-                    field2vocab_sizes[f], self.embed_dim, 0)
-            elif (t=="float"):
-                self.dense_field_list.append(f)
-        self.num_features = len(self.embeddings)
+                    data.num_values(f), embed_dim, 0)
+            elif (t == "float"):
+                if share_dense_embedding:
+                    _num_dense_feat += 1
+                    _dense_feat.append(f)
+                else:
+                    self.embeddings[f] = DenseEmbedding(
+                        embed_dim, dense_emb_bias, dense_emb_norm)
 
-        if len(self.dense_field_list) > 0:
-            # TODO: deepctr, other dense embedding methods
-            # TODO: whether to do minmax on the whole dataset
-            self.dense_embedding= DenseEmbedding(len(self.dense_field_list), self.embed_dim)
-            self.num_features += len(self.dense_field_list)
+        if _num_dense_feat > 0:
+            dense_emb = DenseEmbedding(
+                embed_dim, dense_emb_bias, dense_emb_norm)
+            for f in _dense_feat:
+                self.embeddings[f] = dense_emb
 
-        self.seq_pooling_layer = SeqPoolingLayer(reduction, keepdim=True)
-
+        if _num_token_seq_feat > 0:
+            self.seq_pooling_layer = SeqPoolingLayer(reduction, keepdim=False)
 
     def forward(self, batch):
         embs = []
         for f in self.embeddings:
             d = batch[f]
-            if d.dim() > 1:
-                length = (d>0).float().sum(dim=-1, keepdim=False) 
-                embs.append(self.seq_pooling_layer(self.embeddings[f](d), length))
+            t = self.field2types[f]
+            if t == 'token' or t == 'float':
+                # shape: [B,] or [B,N]
+                e = self.embeddings[f](d)
             else:
-                embs.append(self.embeddings[f](d.view(-1, 1)))
-        
-        if len(self.dense_field_list) > 0:
-            dense_field = []
-            for f in self.dense_field_list:
-                dense_field.append(batch[f])
-            dense_field = torch.stack(dense_field, dim=1)   # BxN
-            dense_emb = self.dense_embedding(dense_field) # BxNxD
-            embs.append(dense_emb)
+                # shape: [B, L] or [B,N,L]
+                length = (d > 0).float().sum(dim=-1, keepdim=False)
+                seq_emb = self.embeddings[f](d)
+                e = self.seq_pooling_layer(seq_emb, length)
+            embs.append(e)
 
-        emb = torch.cat(embs, dim=1)    # BxNxnum_fieldsxD
+        # [B,num_features,D] or [B,N,num_features,D]
+        emb = torch.stack(embs, dim=-2)
         return emb
 
+    def extra_repr(self):
+        s = "num_features={num_features}, embed_dim={embed_dim}, reduction={reduction}"
+        if self.share_dense_embedding:
+            s += ", share_dense_embedding={share_dense_embedding}"
+        if self.dense_emb_bias:
+            s += ", dense_emb_bias={dense_emb_bias}"
+        if not self.dense_emb_norm:
+            s += ", dense_emb_norm={dense_emb_norm}"
+        return s.format(**self.__dict__)
 
-class LinearLayer(nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        self.bias = nn.Parameter(torch.zeros(1,), requires_grad=True)
 
-    def forward(self, inputs):
-        sum_of_embs = torch.sum(inputs, dim=1).squeeze()
+class LinearLayer(Embeddings):
+    def __init__(self, fields, data, bias=True):
+        super(LinearLayer, self).__init__(fields, 1, data)
+        if bias:
+            self.bias = torch.nn.Parameter(torch.zeros(1,))
+        else:
+            self.bias = None
+
+    def forward(self, batch):
+        # input: [B, num_fields, 1]
+        embs = super().forward(batch).squeeze(-1)
+        sum_of_embs = torch.sum(embs, dim=-1)
         return sum_of_embs + self.bias
 
+    def extra_repr(self):
+        if self.bias is None:
+            bias = False
+        else:
+            bias = True
+        return f"bias={bias}"
 
 
 class FMLayer(nn.Module):
 
+    def __init__(self, first_order=True, reduction=None):
+        super(FMLayer, self).__init__()
+        self.reduction = reduction
+
+        if reduction is not None:
+            if reduction not in ['sum', 'mean']:
+                raise ValueError(f"reduction only support `mean`|`sum`, but get {reduction}")
+
     def forward(self, inputs):
         square_of_sum = torch.sum(inputs, dim=1) ** 2
         sum_of_square = torch.sum(inputs ** 2, dim=1)
-        cross_term = 0.5 * (square_of_sum - sum_of_square)
-        return cross_term
+        output = 0.5 * (square_of_sum - sum_of_square)
+        if self.reduction is None:
+            pass
+        elif self.reduction == 'sum':
+            output = output.sum(-1)
+        else:
+            output = output.mean(-1)
+        return output
+
+    def extra_repr(self):
+        if self.reduction is None:
+            reduction_repr = 'None'
+        else:
+            reduction_repr = self.reduction
+        return f"reduction={reduction_repr}"
 
 
+class CrossNetwork(torch.nn.Module):
+    def __init__(self, embed_dim, num_layers):
+        super(CrossNetwork, self).__init__()
+        self.embed_dim = embed_dim
+        self.num_layers = num_layers
+        self.weight = torch.nn.ParameterList([
+            torch.nn.Parameter(torch.randn(self.embed_dim))
+            for _ in range(num_layers)
+        ])
+        self.bias = torch.nn.ParameterList([
+            torch.nn.Parameter(torch.zeros(self.embed_dim))
+            for _ in range(num_layers)
+        ])
+
+    def forward(self, input):
+        x = input
+        for i in range(self.num_layers):
+            x_1 = torch.tensordot(x, self.weight[i], dims=([1], [0]))
+            x_2 = (input.transpose(0, 1) * x_1).transpose(0, 1)
+            x = x_2 + x + self.bias[i]
+        return x
+
+    def extra_repr(self) -> str:
+        return f'embed_dim={self.embed_dim}, num_layers={self.num_layers}'
+
+
+class DINScorer(torch.nn.Module):
+    def __init__(self, fuid, fiid, num_users, num_items, embed_dim, attention_mlp, dense_mlp, dropout=0.0,
+                 activation='sigmoid', batch_norm=False):
+        super().__init__()
+        self.fuid = fuid
+        self.fiid = fiid
+        self.item_embedding = torch.nn.Embedding(num_items, embed_dim, 0)
+        self.item_bias = torch.nn.Embedding(num_items, 1, padding_idx=0)
+        self.activation_unit = AttentionLayer(
+            3*embed_dim, embed_dim, mlp_layers=attention_mlp, activation=activation)
+        norm = [torch.nn.BatchNorm1d(embed_dim)] if batch_norm else []
+        norm.append(torch.nn.Linear(embed_dim, embed_dim))
+        self.norm = torch.nn.Sequential(*norm)
+        self.dense_mlp = MLPModule(
+            [3*embed_dim]+dense_mlp, activation_func=activation, dropout=dropout, batch_norm=batch_norm)
+        self.fc = torch.nn.Linear(dense_mlp[-1], 1)
+
+    def forward(self, batch):
+        seq_emb = self.item_embedding(batch['in_'+self.fiid])
+        target_emb = self.item_embedding(batch[self.fiid])
+        item_bias = self.item_bias(batch[self.fiid]).squeeze(-1)
+
+        target_emb_ = target_emb.unsqueeze(1).repeat(
+            1, seq_emb.size(1), 1)   # BxLxD
+        attn_seq = self.activation_unit(
+            query=target_emb.unsqueeze(1),
+            key=torch.cat((target_emb_, target_emb_*seq_emb,
+                          target_emb_-seq_emb), dim=-1),
+            value=seq_emb,
+            key_padding_mask=(batch['in_'+self.fiid] == 0),
+            softmax=False
+        ).squeeze(1)
+        attn_seq = self.norm(attn_seq)
+        cat_emb = torch.cat(
+            (attn_seq, target_emb, target_emb*attn_seq), dim=-1)
+        score = self.fc(self.dense_mlp(cat_emb)).squeeze(-1)
+        return score + item_bias
+
+
+class BehaviorSequenceTransformer(nn.Module):
+    def __init__(self, fuid, fiid, num_users, num_items, max_len, embed_dim, hidden_size, n_layer, n_head, dropout,
+                 mlp_layers=[1024, 512, 256], activation='relu', batch_first=True, norm_first=False):
+        super().__init__()
+        self.fuid = fuid
+        self.fiid = fiid
+        self.max_len = max_len
+        self.item_embedding = torch.nn.Embedding(num_items, embed_dim, 0)
+        self.position_embedding = torch.nn.Embedding(max_len+2, embed_dim, 0)
+        tfm_encoder = torch.nn.TransformerEncoderLayer(
+            d_model=embed_dim, nhead=n_head, dim_feedforward=hidden_size, dropout=dropout, activation=activation,
+            batch_first=batch_first, norm_first=norm_first)
+        self.transformer = torch.nn.TransformerEncoder(
+            encoder_layer=tfm_encoder, num_layers=n_layer)
+        self.mlp = MLPModule([(max_len+1)*embed_dim, ] +
+                             mlp_layers, activation_func=activation)
+        self.predict = torch.nn.Linear(mlp_layers[-1], 1)
+
+    def forward(self, batch):
+        hist = batch['in_'+self.fiid]
+        target = batch[self.fiid]
+        seq_len = batch['seqlen']
+        hist = torch.cat((hist, target.view(-1, 1)), dim=1)
+        B, L = hist.shape
+        seq_emb = self.item_embedding(hist)
+        positions = torch.arange(1, L+1, device=seq_emb.device)
+        positions = torch.tile(positions, (B,)).view(B, -1)
+        padding_mask = hist == 0
+        positions[padding_mask] = 0
+        positions[:, -1] = seq_len + 1
+        position_emb = self.position_embedding(positions)
+        attention_mask = torch.triu(torch.ones(
+            (L, L), dtype=torch.bool, device=hist.device), 1)
+
+        tfm_out = self.transformer(
+            src=seq_emb+position_emb, mask=attention_mask, src_key_padding_mask=padding_mask)
+
+        padding_emb = tfm_out.new_zeros(
+            (B, self.max_len+1-L, tfm_out.size(-1)))
+        tfm_out = torch.cat((tfm_out, padding_emb), dim=1)
+        flatten_tfm_out = tfm_out.view(B, -1)
+        logits = self.predict(self.mlp(flatten_tfm_out))
+        return logits.squeeze(-1)
+
+
+class DIENScorer(torch.nn.Module):
+    def __init__(self, fuid, fiid, num_users, num_items, embed_dim, attention_mlp, fc_mlp,
+                 activation='sigmoid', batch_norm=False) -> None:
+        super().__init__()
+        self.fuid = fuid
+        self.fiid = fiid
+        self.user_embedding = torch.nn.Embedding(num_users, embed_dim, 0)
+        self.item_embedding = torch.nn.Embedding(num_items, embed_dim, 0)
+        self.item_bias = torch.nn.Embedding(num_items, 1, padding_idx=0)
+        self.activation_unit = AttentionLayer(3*embed_dim, embed_dim, mlp_layers=attention_mlp, activation=activation)
+        self.norm = torch.nn.Sequential(
+            torch.nn.BatchNorm1d(embed_dim),
+            torch.nn.Linear(embed_dim, embed_dim),
+        ) if batch_norm else torch.nn.Linear(embed_dim, embed_dim)
+
+        self.fc = torch.nn.Sequential(
+            torch.nn.BatchNorm1d(3 * embed_dim),
+            MLPModule([3*embed_dim]+fc_mlp, activation_func=activation),
+            torch.nn.Linear(fc_mlp[-1], 1),
+        ) if batch_norm else \
+            torch.nn.Sequential(
+                MLPModule([3*embed_dim]+fc_mlp, activation_func=activation),
+                torch.nn.Linear(fc_mlp[-1], 1),
+        )
+
+    def forward(self, batch):
+        pass

@@ -3,7 +3,14 @@ from recstudio.ann import sampler
 from recstudio.data import dataset
 from recstudio.model import basemodel, loss_func, scorer
 
+
 class BPR(basemodel.BaseRetriever):
+
+    def add_model_specific_args(parent_parser):
+        parent_parser = basemodel.Recommender.add_model_specific_args(parent_parser)
+        parent_parser.add_argument_group('BPR')
+        parent_parser.add_argument("--negative_count", type=int, default=1, help='negative sampling numbers')
+        return parent_parser
 
     def _get_dataset_class():
         return dataset.MFDataset

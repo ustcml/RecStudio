@@ -22,12 +22,13 @@ item_feat_field: [[*i, Title:token_seq:" ", Genres:token_seq:"|")]]
 item_feat_header: ~
 
 
-use_fields: ~  # TODO: 
+use_fields: ~
 field_separator: "::"
 min_user_inter: 0
 min_item_inter: 0
 field_max_len: ~
 rating_threshold: ~
+ranker_rating_threshold: 3
 drop_low_rating: ~
 max_seq_len: 20
 

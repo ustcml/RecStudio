@@ -1,9 +1,8 @@
-import imp
-from re import M
-import torch
 from typing import List
-from recstudio.model import basemodel, loss_func, scorer, module
+
+import torch
 from recstudio.data import dataset
+from recstudio.model import basemodel, loss_func, module, scorer
 
 r"""
 Paper Reference:
@@ -13,9 +12,8 @@ Paper Reference:
 """
 
 
-
 class NARMQueryEncoder(torch.nn.Module):
-    
+
     def __init__(self, fiid, embed_dim, hidden_size, layer_num, dropout_rate: List, item_encoder=None) -> None:
         super().__init__()
         self.fiid = fiid
@@ -24,9 +22,9 @@ class NARMQueryEncoder(torch.nn.Module):
             self.item_encoder,
             torch.nn.Dropout(dropout_rate[0]),
             module.GRULayer(
-                input_dim = embed_dim,
-                output_dim = hidden_size,
-                num_layer = layer_num,
+                input_dim=embed_dim,
+                output_dim=hidden_size,
+                num_layer=layer_num,
             )
         )
         self.gather_layer = module.SeqPoolingLayer(pooling_type='last')
@@ -37,18 +35,16 @@ class NARMQueryEncoder(torch.nn.Module):
             torch.nn.Linear(hidden_size*2, embed_dim, bias=False)
         )
 
-    
     def forward(self, batch):
-        gru_vec =  self.gru_layer(batch['in_'+ self.fiid])
-        c_global = h_t = self.gather_layer(gru_vec, batch['seqlen']) # B x H
+        gru_vec = self.gru_layer(batch['in_' + self.fiid])
+        c_global = h_t = self.gather_layer(gru_vec, batch['seqlen'])  # B x H
 
-        c_local = self.attn_layer(query=h_t.unsqueeze(1), key=gru_vec, value=gru_vec, \
-            key_padding_mask=batch['in_'+ self.fiid]==0, need_weight=False).squeeze(1)  # B x H
+        c_local = self.attn_layer(query=h_t.unsqueeze(1), key=gru_vec, value=gru_vec,
+                                  key_padding_mask=batch['in_' + self.fiid] == 0, need_weight=False).squeeze(1)  # B x H
 
         c = torch.cat((c_global, c_local), dim=1)   # B x 2H
         query = self.fc(c)   # B x D
         return query
-
 
 
 class NARM(basemodel.BaseRetriever):
@@ -65,10 +61,9 @@ class NARM(basemodel.BaseRetriever):
         - ``layer_num(int)``: The number of layers for the GRU. Default: ``1``.
     """
 
-    def _get_dataset_class(self):
+    def _get_dataset_class():
         r"""SeqDataset is used for NARM."""
         return dataset.SeqDataset
-
 
     def _get_query_encoder(self, train_data):
         return NARMQueryEncoder(
@@ -80,16 +75,13 @@ class NARM(basemodel.BaseRetriever):
             item_encoder=self.item_encoder
         )
 
-
     def _get_score_func(self):
         r"""InnerProduct is used as the score function."""
         return scorer.InnerProductScorer()
 
-
     def _get_loss_func(self):
         r"""SoftmaxLoss is used as the loss function."""
         return loss_func.SoftmaxLoss()
-
 
     def _get_sampler(self, train_data):
         return None
