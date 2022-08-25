@@ -137,7 +137,7 @@ class BaseRetriever(Recommender):
         if self.use_index:
             self.ann_index = self.build_ann_index()
 
-    def forward(self, batch, full_score, return_query=False, return_item=False, return_neg_item=False):
+    def forward(self, batch, full_score, return_query=False, return_item=False, return_neg_item=False, return_neg_id=False):
         # query_vec, pos_item_vec, neg_item_vec,
         output = {}
         pos_items = self._get_item_feat(batch)
@@ -162,6 +162,8 @@ class BaseRetriever(Recommender):
 
             if return_neg_item:
                 output['neg_item'] = neg_item_vec
+            if return_neg_id:
+                output['neg_id'] = neg_item_idx
 
             # data_augmentation
             if self.training and hasattr(self, 'data_augmentation'):
@@ -210,14 +212,13 @@ class BaseRetriever(Recommender):
         query = self.query_encoder(self._get_query_feat(batch))
         pos_items = batch.get(self.fiid, None)
         if excluding_hist:
-            if user_hist is None:
+            # TODO(@AngusHuang17): user hist v.s. pos item, if user_hist, user_hist should be passed
+                # in train_loaders
+            user_hist = batch.get('user_hist', None) 
+            if batch.get('user_hist', None) is None:
                 self.logger.warning("user_hist is None, so the \
                     target item will be used as user_hist.")
                 user_hist = batch.get(self.fiid, None)
-            else:
-                user_hist = batch.get('user_hist', None)
-                # TODO(@AngusHuang17): user hist v.s. pos item, if user_hist, user_hist should be passed
-                # in train_loaders
         else:
             user_hist = None
 
@@ -226,6 +227,8 @@ class BaseRetriever(Recommender):
                 'num_neg': neg,
                 'pos_items': pos_items,
             }
+            if 'user_hist' in inspect.signature(self.sampler.forward).parameters:
+                kwargs['user_hist'] = user_hist
             if isinstance(self.sampler, RetrieverSampler):
                 # assert not _is_query, "RetreiverSampler expected a batch of data instead of queries."
                 kwargs.update({

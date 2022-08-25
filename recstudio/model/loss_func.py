@@ -176,3 +176,10 @@ class CCLLoss(PairwiseLoss):
         loss = (1 - pos_score) + self.neg_weight * neg_score_mean
         loss = torch.nan_to_num(loss, posinf=0.0)
         return loss.sum() / notpadnum
+
+
+def l2_reg_loss_fn(*args):
+    loss = 0.
+    for emb in args:
+        loss = loss + torch.mean(torch.sum(emb * emb, dim=-1)) # [B, D] -> [B] -> []
+    return loss 

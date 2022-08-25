@@ -6,7 +6,7 @@ time_field: &t timestamp:float
 time_format: ~
 
 encoding_method: utf-8
-inter_feat_name: rating_Books.csv
+inter_feat_name: ratings_Books.csv
 inter_feat_field: [*u, *i, *r, *t,]
 inter_feat_header: ~
 
@@ -20,8 +20,8 @@ item_feat_header: ~
 
 use_fields: ~  # TODO: 
 field_separator: ","
-min_user_inter: 20
-min_item_inter: 20
+min_user_inter: 15
+min_item_inter: 15
 field_max_len: ~
 rating_threshold: ~
 ranker_rating_threshold: 3

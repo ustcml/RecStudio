@@ -21,8 +21,8 @@ item_feat_header: ~
 use_fields: ~  # TODO: 
 field_separator: "\t"
 seq_separator: " " 
-min_user_inter: 20
-min_item_inter: 20
+min_user_inter: 10
+min_item_inter: 10
 field_max_len: ~
 rating_threshold: ~
 drop_low_rating: ~

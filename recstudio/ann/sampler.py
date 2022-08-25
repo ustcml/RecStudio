@@ -129,20 +129,20 @@ def uniform_sample_masked_hist(num_items: int, num_neg: int, user_hist: Tensor, 
     Returns:
         torch.Tensor: ``[num_user(or batch_size),num_neg]`` or ``[num_user(or batch_size),num_query_per_user,num_neg]``, negative item index. If ``num_query_per_user`` is ``None``,  the shape will be ``[num_user(or batch_size),num_neg]``.
     """
+    # N: num_users, M: num_neg, Q: n_q, L: hist_len
     n_q = 1 if num_query_per_user is None else num_query_per_user
     num_user, hist_len = user_hist.shape
     device = user_hist.device
-    neg_float = torch.rand(num_user, n_q*num_neg, device=device)
-    non_zero_count = torch.count_nonzero(user_hist, dim=-1)
-    neg_items = torch.floor(
-        neg_float * (num_items - non_zero_count).view(-1, 1)) + 1   # BxNeg ~ U[1,2,...]
-    sorted_hist, _ = user_hist.sort(dim=-1)    # BxL
-    offset = torch.arange(hist_len, device=device).repeat(num_user, 1)  # BxL
+    neg_float = torch.rand(num_user, n_q*num_neg, device=device) # O(NMQ)
+    non_zero_count = torch.count_nonzero(user_hist, dim=-1) # O(NQ)
+    # BxNeg ~ U[1,2,...]
+    neg_items = (torch.floor(neg_float * (num_items - non_zero_count).view(-1, 1))).long() + 1 
+    sorted_hist, _ = user_hist.sort(dim=-1) # BxL
+    offset = torch.arange(hist_len, device=device).repeat(num_user, 1) # BxL
     offset = offset - (hist_len - non_zero_count).view(-1, 1)
     offset[offset < 0] = 0
     sorted_hist = sorted_hist - offset
-    masked_offset = torch.searchsorted(
-        sorted_hist, neg_items, right=True)  # BxNeg
+    masked_offset = torch.searchsorted(sorted_hist, neg_items, right=True) # BxNeg O(NMQlogL)
     padding_nums = hist_len - non_zero_count
     neg_items += (masked_offset - padding_nums.view(-1, 1))
     if num_query_per_user is not None:
@@ -172,9 +172,9 @@ class MaskedUniformSampler(Sampler):
             neg_prob = self.compute_item_p(query, neg_items)
             if pos_items is not None:
                 pos_prob = self.compute_item_p(query, pos_items)
-                return pos_prob, neg_items.int(), neg_prob
+                return pos_prob, neg_items, neg_prob
             else:
-                return neg_items.int(), neg_prob
+                return neg_items, neg_prob
 
     def compute_item_p(self, query, pos_items):
         return - torch.log(torch.ones_like(pos_items))

@@ -1,4 +1,5 @@
 import os
+import torch
 import time
 import argparse
 from recstudio.utils import get_model, color_dict_normal, set_color, get_logger
@@ -36,5 +37,6 @@ if __name__ == '__main__':
     logger.info(f"{datasets[0]}")
 
     logger.info(f"\n{set_color('Model Config', 'green')}: \n\n" + color_dict_normal(model_conf, args.mode == 'tune'))
+    torch.set_num_threads(model_conf['num_threads'])
     model.fit(*datasets[:2], run_mode=args.mode)
     model.evaluate(datasets[-1])
