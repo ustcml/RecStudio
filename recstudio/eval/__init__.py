@@ -87,8 +87,8 @@ def ndcg(pred, target, k):
         torch.FloatTensor: a 0-dimensional tensor.
     """
     pred_dcg = _dcg(pred.float(), k)
-    ideal_dcg = _dcg(torch.sort((target > 0).float(), descending=True)[
-                     0], k)  # to do replace target>0 with target
+    #TODO replace target>0 with target
+    ideal_dcg = _dcg(torch.sort((target > 0).float(), descending=True)[0], k) 
     all_irrelevant = torch.all(target <= sys.float_info.epsilon, dim=-1)
     pred_dcg[all_irrelevant] = 0
     pred_dcg[~all_irrelevant] /= ideal_dcg[~all_irrelevant]

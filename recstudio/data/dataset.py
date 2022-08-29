@@ -410,6 +410,10 @@ class MFDataset(Dataset):
             self.inter_feat.sort_values(
                 by=[self.fuid, self.ftime], inplace=True)
             self.inter_feat.reset_index(drop=True, inplace=True)
+        else:
+            self.inter_feat.sort_values(
+                by=self.fuid, inplace=True)
+            self.inter_feat.reset_index(drop=True, inplace=True)
         self._prepare_user_item_feat()
 
     def _recover_unmapped_feature(self, feat):
@@ -439,7 +443,7 @@ class MFDataset(Dataset):
             (np.ones_like(user_idx_list), (user_idx_list, item_idx_list)))
         cols = np.arange(items.size)
         rows = np.arange(users.size)
-        while(True):
+        while(True): # TODO: only delete users/items in inter_feat, users/items in user/item_feat should also be deleted.
             m, n = user_item_mat.shape
             col_sum = np.squeeze(user_item_mat.sum(axis=0).A)
             col_ind = col_sum >= min_item_inter
@@ -932,6 +936,7 @@ class MFDataset(Dataset):
                 num_workers=num_workers, persistent_workers=False)
             return output
         else:
+            self.eval_mode = True
             return self.loader(batch_size, shuffle=False, num_workers=num_workers, ddp=ddp)
 
     def drop_feat(self, keep_fields):

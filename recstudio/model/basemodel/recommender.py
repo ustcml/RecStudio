@@ -196,6 +196,7 @@ class Recommender(torch.nn.Module, abc.ABC):
                                             num_workers=self.config['num_workers'])
         output = {}
         self.load_checkpoint(os.path.join(self.config['save_path'], self.ckpt_path)) # bug to fix 应该支持使用保存的模型进行评测
+        self.eval()
         output_list = self.test_epoch(test_loader)
         output.update(self.test_epoch_end(output_list))
         if self.run_mode == 'tune':
@@ -272,12 +273,12 @@ class Recommender(torch.nn.Module, abc.ABC):
             self.logger.info('\n'+color_dict(self.logged_metrics, self.run_mode == 'tune'))
 
     def validation_epoch_end(self, outputs):
-        val_metric = self.config['val_metrics'] if isinstance(self.config['val_metrics'], list) else [
-            self.config['val_metrics']]
-        cutoffs = self.config['cutoff'] if isinstance(self.config['cutoff'], list) else [
-            self.config.setdefault('cutoff', None)]
-        val_metric = [f'{m}@{cutoff}' if len(eval.get_rank_metrics(m)) >
-                      0 else m for cutoff in cutoffs[:1] for m in val_metric]
+        val_metric = self.config['val_metrics'] if isinstance(self.config['val_metrics'], list) \
+            else [self.config['val_metrics']]
+        cutoffs = self.config['cutoff'] if isinstance(self.config['cutoff'], list) \
+            else [self.config.setdefault('cutoff', None)]
+        val_metric = [f'{m}@{cutoff}' if len(eval.get_rank_metrics(m)) > 0 \
+            else m for cutoff in cutoffs[:1] for m in val_metric]
         if isinstance(outputs[0][0], List):
             out = self._test_epoch_end(outputs)
             out = dict(zip(val_metric, out))
@@ -287,12 +288,12 @@ class Recommender(torch.nn.Module, abc.ABC):
         return out
 
     def test_epoch_end(self, outputs):
-        test_metric = self.config['test_metrics'] if isinstance(self.config['test_metrics'], list) else [
-            self.config['test_metrics']]
-        cutoffs = self.config['cutoff'] if isinstance(self.config['cutoff'], list) else [
-            self.config.setdefault('cutoff', None)]
-        test_metric = [f'{m}@{cutoff}' if len(eval.get_rank_metrics(m)) >
-                       0 else m for cutoff in cutoffs for m in test_metric]
+        test_metric = self.config['test_metrics'] if isinstance(self.config['test_metrics'], list) \
+            else [self.config['test_metrics']]
+        cutoffs = self.config['cutoff'] if isinstance(self.config['cutoff'], list) \
+            else [self.config.setdefault('cutoff', None)]
+        test_metric = [f'{m}@{cutoff}' if len(eval.get_rank_metrics(m)) > 0 \
+            else m for cutoff in cutoffs for m in test_metric]
         if isinstance(outputs[0][0], List):
             out = self._test_epoch_end(outputs)
             out = dict(zip(test_metric, out))
@@ -491,7 +492,7 @@ class Recommender(torch.nn.Module, abc.ABC):
                 tik_valid = time.time()
                 if self.val_check:
                     self.eval()
-                    validation_output_list = self.validation_epoch(val_dataloader)
+                    validation_output_list = self.validation_epoch(nepoch, val_dataloader)
                     self.validation_epoch_end(validation_output_list)
                 tok_valid = time.time()
 
@@ -559,6 +560,8 @@ class Recommender(torch.nn.Module, abc.ABC):
                     training_step_args = {'batch': batch}
                     if 'nepoch' in inspect.getargspec(self.training_step).args:
                         training_step_args['nepoch'] = nepoch
+                    if 'loader_idx' in inspect.getargspec(self.training_step).args:
+                        training_step_args['loader_idx'] = loader_idx 
                     if 'batch_idx' in inspect.getargspec(self.training_step).args:
                         training_step_args['batch_idx'] = batch_idx
 
@@ -587,7 +590,7 @@ class Recommender(torch.nn.Module, abc.ABC):
                     output_list.append(outputs)
         return output_list
 
-    def validation_epoch(self, dataloader):
+    def validation_epoch(self, nepoch, dataloader):
         if hasattr(self, '_update_item_vector'):  # TODO: config frequency
             self._update_item_vector()
         output_list = []
@@ -604,7 +607,6 @@ class Recommender(torch.nn.Module, abc.ABC):
         return output_list
 
     def test_epoch(self, dataloader):
-        self.eval()
         if hasattr(self, '_update_item_vector'):
             self._update_item_vector()
 
@@ -671,6 +673,7 @@ class Recommender(torch.nn.Module, abc.ABC):
                                  f"while get {self.config['accelerator']} instead.")
         else:
             self.device = torch.device("cpu")
+            self = self._to_device(self, self.device)
 
     @property
     def _parameter_device(self):
