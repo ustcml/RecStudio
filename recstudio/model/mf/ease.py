@@ -1,19 +1,37 @@
+from typing import OrderedDict
+
+import numpy as np
+import torch
 from recstudio.data.dataset import MFDataset
 from recstudio.model import basemodel
-import torch
-import numpy as np
+
+
+class QueryEncoder(object):
+    def __init__(self, user) -> None:
+        self.user = user
+
+    def __call__(self, batch):
+        return self.user[batch, :]
+
+
 class EASE(basemodel.BaseRetriever):
 
-    def _get_dataset_class(self):
-        return MFDataset
+    def add_model_specific_args(parent_parser):
+        parent_parser = basemodel.Recommender.add_model_specific_args(parent_parser)
+        parent_parser.add_argument_group('EASE')
+        parent_parser.add_argument("--lambda", type=int, default=250, help='lambda coef for the regularization')
+        return parent_parser
 
+    def _get_dataset_class():
+        return MFDataset
 
     def _get_train_loaders(self, train_data):
         return {'user_item_matrix': train_data.get_graph(0, 'csr')[0]}
 
-
     def training_epoch(self, nepoch):
-        assert self.config['gpu'] is None, "expecting EASE run on cpu while get gpu setting."
+        if self.config['gpu'] is not None:
+            self.logger.warning("expecting EASE run on cpu while get gpu setting, automatically set gpu as None.")
+            self.config['gpu'] = None
         data, iscombine = self.current_epoch_trainloaders(nepoch)
         R = data['user_item_matrix']
         G = R.T @ R
@@ -25,37 +43,33 @@ class EASE(basemodel.BaseRetriever):
         self.item_vector = B[:, 1:]
         self.query_encoder.user = R
         return torch.tensor(np.linalg.norm(R-R*B, 'fro'))
-    
 
     def _get_query_encoder(self, train_data):
-        class QueryEncoder(object):
-            def __init__(self, user) -> None:
-                self.user = user
-            def __call__(self, batch):
-                return self.user[batch, :]
         return QueryEncoder(None)
-
 
     def _get_score_func(self):
         def scorer(query, items):
             return torch.from_numpy((query @ items).A)
         return scorer
 
-
     def _get_loss_func(self):
         return None
-
 
     def _get_item_encoder(self, train_data):
         return None
 
-
     def _get_optimizers(self):
         return None
 
-    
     def _get_item_vector(self):
         return self.item_vector
 
+    def state_dict(self):
+        return OrderedDict({
+            'item_vector': getattr(self, 'item_vector', None),
+            'query_encoder': getattr(self, 'query_encoder', None)
+        })
 
-
+    def load_state_dict(self, state_dict: OrderedDict):
+        for k, v in state_dict.items():
+            setattr(self, k, v)

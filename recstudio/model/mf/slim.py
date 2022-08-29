@@ -1,11 +1,23 @@
 from recstudio.model.mf.ease import EASE
+from recstudio.model.basemodel import Recommender
 from sklearn.linear_model import ElasticNet
 from sklearn.exceptions import ConvergenceWarning
 import scipy.sparse as sp
-import numpy as np
 import torch
 import warnings
+
+
 class SLIM(EASE):
+
+    def add_model_specific_args(parent_parser):
+        parent_parser = Recommender.add_model_specific_args(parent_parser)
+        parent_parser.add_argument_group('SLIM')
+        parent_parser.add_argument("--knn", type=int, default=100, help='k for K-nearest neighbor')
+        parent_parser.add_argument("--alpha", type=float, default=1.0, help='alpha coef')
+        parent_parser.add_argument("--l1_ratio", type=float, default=0.1, help='coef for L1 regularization')
+        parent_parser.add_argument("--positive_only", action='store_true', default=True, help='positive only flag')
+        return parent_parser
+
     def training_epoch(self, nepoch):
         data, iscombine = self.current_epoch_trainloaders(nepoch)
         X = data['user_item_matrix'].tolil()

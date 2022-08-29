@@ -1,13 +1,13 @@
 url: https://rec.ustc.edu.cn/share/62299ea0-e083-11ec-8586-b7917c2cff26
-user_id_field: &u User_id:token # TODO: comments for &u and *u
-item_id_field: &i Item_id:token
-rating_field: &r Online_Action_id:float
-time_field: &t Time_Stamp:str
-time_format: "%Y%m%d"
+user_id_field: &u user_id:token
+item_id_field: &i item_id:token
+rating_field: &r interactions:float
+time_field: &t time_stamp:float
+time_format: ~
 
 encoding_method: utf-8
-inter_feat_name: ijcai2016_taobao.csv
-inter_feat_field: [*u, Seller_id:token, *i, Category_id:token, *r, *t]
+inter_feat_name: tmall-click.inter
+inter_feat_field: [*u, seller_id:token, *i, category_id:token, *t, *r]
 inter_feat_header: ~
 
 
@@ -21,15 +21,15 @@ item_feat_field: ~
 item_feat_header: ~
 
 
-use_fields: ~  # TODO: 
+use_fields: ~
 field_separator: "::"
-min_user_inter: 0
-min_item_inter: 0
+min_user_inter: 10
+min_item_inter: 10
 field_max_len: ~
 rating_threshold: ~
 ranker_rating_threshold: ~
 drop_low_rating: ~
-max_seq_len: 20
+max_seq_len: 50
 
 # network feature, including social network and knowledge graph, the first two fields are remapped the corresponding features
 network_feat_name: ~ #[[social.txt], [ml-100k.kg, ml-100k.link]]

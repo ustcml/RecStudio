@@ -20,7 +20,7 @@ class CosineScorer(InnerProductScorer):
     def forward(self, query, items):
         output = super().forward(query, items)
         output /= torch.norm(items, dim=-1)
-        output /= torch.norm(query, dim=-1, 
+        output /= torch.norm(query, dim=-1,
             keepdim=(query.dim()!=items.dim() or query.size(0)!=items.size(0)))
         return output
 
@@ -29,10 +29,10 @@ class EuclideanScorer(InnerProductScorer):
     def forward(self, query, items):
         output = -2 * super().forward(query, items)
         output += torch.sum(torch.square(items), dim=-1)
-        output += torch.sum(torch.square(query), dim=-1, 
+        output += torch.sum(torch.square(query), dim=-1,
             keepdim=(query.dim()!=items.dim() or query.size(0)!=items.size(0)))
         return -output
-        
+
 
 class MLPScorer(InnerProductScorer):
     def __init__(self, transform):
@@ -44,7 +44,7 @@ class MLPScorer(InnerProductScorer):
         # ([B, L, D], [B, L, D]), ([B, L, D], [B, L, neg, D])
         if query.size(0) == items.size(0):
             if query.dim() < items.dim():
-                # [B, L, D] -> [B, L, neg, D] 
+                # [B, L, D] -> [B, L, neg, D]
                 input = torch.cat(
                     (query.unsqueeze(-2).expand_as(items), items), dim=-1)
             else:
@@ -54,6 +54,7 @@ class MLPScorer(InnerProductScorer):
             items = items.expand(query.size(0), -1, -1)
             input = torch.cat((query, items), dim=-1)
         return self.trans(input).squeeze(-1)
+
 
 class NormScorer(InnerProductScorer):
     def __init__(self, p=2):
@@ -91,10 +92,9 @@ class GMFScorer(InnerProductScorer):
 class FusionMFMLPScorer(InnerProductScorer):
     def __init__(self, emb_dim, hidden_size, mlp, bias=False, activation='relu') -> None:
         super().__init__()
-        self.emb_dim=emb_dim
+        self.emb_dim = emb_dim
         self.hidden_size = hidden_size
         self.bias = bias
-        self.activation = activation
         self.W = torch.nn.Linear(self.emb_dim+self.hidden_size, 1, bias=False)
         self.activation = module.get_act(activation)
         self.mlp = mlp
@@ -107,7 +107,7 @@ class FusionMFMLPScorer(InnerProductScorer):
             if query.size(0) != key.size(0):
                 query = query.unsqueeze(1).repeat(1, key.size(0), 1)
                 key = key.unsqueeze(0).repeat(query.size(0), 1, 1)
-        h_mf = query * key 
-        h_mlp = self.mlp(torch.cat([query, key], dim=-1))
-        h = self.W(torch.cat([h_mf, h_mlp], dim=-1))
-        return self.activation(h).squeeze(-1)
+        h_mf = query * key
+        h_mlp = (self.mlp(torch.cat([query, key], dim=-1)))
+        h = self.W(torch.cat([h_mf, h_mlp], dim=-1)).squeeze(-1)
+        return h

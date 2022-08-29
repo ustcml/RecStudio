@@ -1,5 +1,5 @@
 embed_dim: 200
-dropout_rate: 0.5
+dropout: 0.5
 encoder_dims: [64]
 decoder_dims: [64]
 activation: relu

@@ -10,7 +10,7 @@ inter_feat_name: ml-100k.inter
 inter_feat_field: [*u, *i, *r, *t]
 inter_feat_header: 0
 
-user_feat_name: ~ # [ml-100k.user]
+user_feat_name: [ml-100k.user]
 user_feat_field: [[*u, age:token, gender:token, occupation:token, zip_code:token]]
 user_feat_header: 0
 

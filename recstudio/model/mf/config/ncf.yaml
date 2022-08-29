@@ -1,7 +1,7 @@
 activation: relu
-mlp_hidden_size: [32, 16, 8] 
-dropout_rate: 0.1
-mode: fusion
+mlp_hidden_size: [128, 64]
+dropout: 0.1
+score_mode: fusion
 
 negative_count: 1
 excluding_hist: False

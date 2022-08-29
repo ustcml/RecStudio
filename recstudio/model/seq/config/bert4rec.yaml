@@ -1,0 +1,10 @@
+embed_dim: 64
+hidden_size: 128
+layer_num: 2
+head_num: 2
+dropout: 0.2
+activation: 'gelu'
+negative_count: 1
+
+mask_ratio: 0.2
+weight_decay: 1e-5
