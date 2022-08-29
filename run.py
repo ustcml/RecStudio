@@ -1,8 +1,13 @@
 import os
 import time
+import torch
 import argparse
+import recstudio
+# recstudio.LOG_DIR = './benchmark/log/'
+
 from recstudio.utils import get_model, color_dict_normal, set_color, get_logger
 if __name__ == '__main__':
+    torch.set_num_threads(10)
     parser = argparse.ArgumentParser(prog='RecStudio')
     parser.add_argument('--model', '-m', type=str, default='WRMF', help='model name')
     parser.add_argument('--data_config_path', type=str, help='path of datasets config file')

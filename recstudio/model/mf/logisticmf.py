@@ -5,7 +5,16 @@ from recstudio.model import basemodel, scorer, loss_func
 
 class LogisticMF(basemodel.BaseRetriever):
 
-    def _get_dataset_class(self):
+    def add_model_specific_args(parent_parser):
+        parent_parser = basemodel.Recommender.add_model_specific_args(parent_parser)
+        parent_parser.add_argument_group('LogisticMF')
+        parent_parser.add_argument("--negativate_count", type=int, default=10, help='negative sampling numbers')
+        parent_parser.add_argument("--lambda", type=float, default=0.01, help='lambda for logit loss')
+        parent_parser.add_argument("--alpha", type=float, default=0.5, help='alpha for logit loss')
+        return parent_parser
+
+
+    def _get_dataset_class():
         return dataset.MFDataset
 
     def _get_item_encoder(self, train_data):
@@ -27,10 +36,10 @@ class LogisticMF(basemodel.BaseRetriever):
                 l1 = self.alpha * pos_score - (1+self.alpha) * torch.nn.functional.softplus(pos_score)
                 l2 = torch.nn.functional.softplus(neg_score).mean(dim=-1)
                 loss = (l1 - l2).mean()
-                return - loss
+                return -loss
 
         return LogitLoss(self.config['alpha'])
 
 
     def _get_sampler(self, train_data):
-        return sampler.UniformSampler(train_data.num_items-1)
+        return sampler.UniformSampler(train_data.num_items)

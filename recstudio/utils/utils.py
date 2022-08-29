@@ -14,9 +14,10 @@ import torch
 import yaml
 from recstudio.utils.compress_file import extract_compressed_file
 from tqdm import tqdm
+from recstudio import LOG_DIR, DEFAULT_CACHE_DIR
 
-LOG_DIR = r"./log/"
-DEFAULT_CACHE_DIR = r"./.recstudio/"
+# LOG_DIR = r"./log/"
+# DEFAULT_CACHE_DIR = r"./.recstudio/"
 
 
 if not os.path.exists(LOG_DIR):
