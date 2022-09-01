@@ -8,4 +8,4 @@ from .npe import NPE
 from .sasrec import SASRec
 from .stamp import STAMP
 from .transrec import TransRec
-from .corr import CoRR
+# from .corr import CoRR

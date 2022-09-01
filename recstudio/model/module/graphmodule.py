@@ -98,6 +98,23 @@ class LightGCNCombiner(Combiner):
         return side_embeddings
 
 
+class GraphItemEncoder(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.item_embeddings = None
+    
+    def forward(self, batch_data):
+        return self.item_embeddings[batch_data]
+
+class GraphUserEncoder(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.user_embeddings = None
+    
+    def forward(self, batch_data):
+        return self.user_embeddings[batch_data]
+
+
 class LightGCNNet(torch.nn.Module):
     """
     Parameters:
@@ -131,14 +148,14 @@ class LightGCNNet(torch.nn.Module):
         return fn.sum('msg', 'neigh')
 
     def conv_layer(self, layer_index: int, graph: dgl.DGLGraph, feat: torch.tensor):
-        graph.ndata['h'] = (feat * self.l_norm) if self.mess_norm in ['left', 'both'] else feat
-        graph.update_all(self._get_message_func(), self._get_reduce_func())
-        output = (graph.ndata['neigh'] * self.r_norm) if self.mess_norm in ['right', 'both'] \
-            else graph.ndata['neigh']            
+        with graph.local_scope():
+            graph.ndata['h'] = (feat * self.l_norm) if self.mess_norm in ['left', 'both'] else feat
+            graph.update_all(self._get_message_func(), self._get_reduce_func())
+            output = (graph.ndata['neigh'] * self.r_norm) if self.mess_norm in ['right', 'both'] \
+                else graph.ndata['neigh']            
         return output
 
     def forward(self, graph:dgl.DGLGraph, feat:torch.Tensor):
-        all_embeddings = [feat]
         if self.mess_norm in ['left', 'both']:
             if self.mess_norm == 'both':
                 self.l_norm = torch.pow(graph.out_degrees(), -0.5).unsqueeze(-1) # [num_nodes, 1]
@@ -151,7 +168,8 @@ class LightGCNNet(torch.nn.Module):
             else:
                 self.r_norm = torch.pow(graph.in_degrees(), -1.0).unsqueeze(-1) # [num_nodes, 1]
             self.r_norm[torch.isinf(self.r_norm)] = 0.
-
+        
+        all_embeddings = [feat]
         for i in range(self.n_layers):
             neigh_feat = self.conv_layer(i, graph, feat)
             feat = self.combiners[i](feat, neigh_feat)
@@ -173,9 +191,21 @@ class LightGCNNet_dglnn(LightGCNNet):
     def conv_layer(self, layer_index: int, graph: dgl.DGLGraph, feat: torch.tensor):
         return self.convs[layer_index](graph, feat)
 
+    def forward(self, graph: dgl.DGLGraph, feat: torch.Tensor):
+        all_embeddings = [feat]
+        for i in range(self.n_layers):
+            neigh_feat = self.conv_layer(i, graph, feat)
+            feat = self.combiners[i](feat, neigh_feat)
+            if self.normalize != None:
+                all_embeddings.append(F.normalize(feat, p=self.normalize))
+            else:
+                all_embeddings.append(feat)
+        return all_embeddings
+
 
 class EdgeDropout(torch.nn.Module):
     """
+    Out-place operation. 
     Dropout some edges in the graph in sparse COO or dgl format. It is used in GNN-based models.
     Parameters:
         dropout_prob(float): probability of a node to be zeroed.

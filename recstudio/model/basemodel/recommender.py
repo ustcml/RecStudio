@@ -106,6 +106,7 @@ class Recommender(torch.nn.Module, abc.ABC):
         Fit the model with train data.
         """
         # self.set_device(self.config['gpu'])
+        torch.set_num_threads(self.config['num_threads'])
 
         if config is not None:
             self.config.update(config)
