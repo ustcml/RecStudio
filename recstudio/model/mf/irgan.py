@@ -101,8 +101,8 @@ class IRGAN(basemodel.BaseRetriever):
     def test_epoch(self, batch):
         return self.generator.test_epoch(batch)
 
-    def validation_epoch(self, batch):
-        return self.generator.validation_epoch(batch)
+    def validation_epoch(self, nepoch, batch):
+        return self.generator.validation_epoch(nepoch, batch)
 
 
 class Generator(basemodel.BaseRetriever):

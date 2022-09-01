@@ -1,3 +1,4 @@
+from operator import mod
 import torch
 from recstudio.ann import sampler
 from recstudio.data import dataset
@@ -25,7 +26,7 @@ class GRU4Rec(basemodel.BaseRetriever):
 
     def _get_query_encoder(self, train_data):
         return (
-            torch.nn.Sequential(
+            module.VStackLayer(
                 module.HStackLayer(
                     torch.nn.Sequential(
                         module.LambdaLayer(lambda x: x['in_'+self.fiid]),

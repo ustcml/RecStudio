@@ -14,10 +14,9 @@ class DCN(BaseRanker):
     def _get_scorer(self, train_data):
         embedding = ctr.Embeddings(
             self.fields,
-            train_data.field2type,
-            {f: train_data.num_values(f) for f in self.fields},
             self.embed_dim,
-            train_data.frating)
+            train_data,
+        )
         return torch.nn.Sequential(OrderedDict({
             'embedding': embedding,
             'flatten': LambdaLayer(lambda x: x.view(*x.shape[:-2], -1)),
