@@ -14,20 +14,10 @@ class NFM(BaseRanker):
     def _get_scorer(self, train_data):
         embeddings = ctr.Embeddings(
             self.fields,
-            train_data.field2type,
-            {f: train_data.num_values(f) for f in self.fields},
-            embed_dim=self.embed_dim,
-            rating_field=train_data.frating)
+            self.embed_dim,
+            train_data)
 
-        linear = torch.nn.Sequential(OrderedDict({
-            "embeddings": ctr.Embeddings(
-                self.fields,
-                train_data.field2type,
-                {f: train_data.num_values(f) for f in self.fields},
-                1,
-                train_data.frating),
-            "linear_layer": ctr.LinearLayer()
-        }))
+        linear = ctr.LinearLayer(self.fields, train_data)
         return torch.nn.Sequential(
             HStackLayer(OrderedDict({
                 "nfm": torch.nn.Sequential(
