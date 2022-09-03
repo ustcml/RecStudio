@@ -1,0 +1,28 @@
+embed_dim: 64
+n_layers: 3
+hyper_layers: 1
+num_m_epoch: 1
+warm_up_epoch: 20
+batch_size: 2048
+val_metrics: [recall, ndcg]
+
+# gowalla
+learning_rate: 2e-3
+l2_reg_weight: 1e-4
+temperature: 0.05
+# Contrastive loss is not divided by the batch_size in the original paper 
+# which will cause that lambda should be changed with batch size. 
+# The Lambda here has multiplied batch size and contrastive loss is the average of that of the batch, 
+# so Lambda won't change with batch size. 
+ssl_reg: 0.005 # 1e-6 * 4096. 
+alpha: 0.5
+proto_reg: 0.0002 # 5e-8 * 4096 
+num_clusters: 10
+
+# ml-1m
+# l2_reg_weight: 1e-4
+# temperature: 0.1
+# ssl_reg: 5e4  # 1e-7
+# alpha: 1
+# proto_reg: 3e4 # 8e-8
+# num_clusters: 1000

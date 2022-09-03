@@ -12,12 +12,12 @@ inter_feat_field: [*u, *i, *r, *t]
 inter_feat_header: ~
 
 
-user_feat_name: [users.dat]
+user_feat_name: ~ # [users.dat]
 user_feat_field: [[*u, Gender:token, Age:token, Occupation:token, Zip-code:token]]
 user_feat_header: ~
 
 
-item_feat_name: [movies.dat]
+item_feat_name: ~ # [movies.dat]
 item_feat_field: [[*i, Title:token_seq:" ", Genres:token_seq:"|")]]
 item_feat_header: ~
 
@@ -27,9 +27,9 @@ field_separator: "::"
 min_user_inter: 0
 min_item_inter: 0
 field_max_len: ~
-rating_threshold: ~
+rating_threshold: 3
 ranker_rating_threshold: 3
-drop_low_rating: ~
+drop_low_rating: True
 max_seq_len: 20
 
 # network feature, including social network and knowledge graph, the first two fields are remapped the corresponding features

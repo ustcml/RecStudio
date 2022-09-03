@@ -1,11 +1,17 @@
 embed_dim: 64
 learning_rate: 0.001
+batch_size: 2048
 eval_batch_size: 128
+epochs: 1000
 early_stop_patience: 100
-split_ratio: [0.8, 0.1, 0.1]
 cutoff: [20, 10, 5]
+split_ratio: [0.8, 0.1, 0.1]
+
 
 n_layers: 3
-weight_decay: 0
 negative_count: 1
 l2_reg_weight: 1e-4
+aug_type: 'ED'
+temperature: 0.2
+ssl_ratio: 0.1
+ssl_reg: 0.1

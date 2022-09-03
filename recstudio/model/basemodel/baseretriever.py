@@ -164,14 +164,6 @@ class BaseRetriever(Recommender):
                 output['neg_item'] = neg_item_vec
             if return_neg_id:
                 output['neg_id'] = neg_item_idx
-
-            # data_augmentation
-            if self.training and hasattr(self, 'data_augmentation'):
-                data_augmentation_args = {"batch": batch}
-                if 'query' in inspect.getargspec(self.data_augmentation).args:
-                        data_augmentation_args['query'] = query
-                output.update(self.data_augmentation(**data_augmentation_args))
-
         else:
             query = self.query_encoder(self._get_query_feat(batch))
             pos_score = self.score_func(query, pos_item_vec)

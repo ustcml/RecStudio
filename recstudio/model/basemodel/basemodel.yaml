@@ -4,7 +4,7 @@ weight_decay: 0
 learner: adam
 scheduler: ~
 epochs: 100
-batch_size: 256
+batch_size: 2048
 num_workers: 0 # please do not use this parameter, slowing down the training process
 gpu: [0,] # TODO: gpu=int: number of gpus, use free gpus;  gpu=list: gpu ids
 num_threads: 10

@@ -152,10 +152,10 @@ class MFDataset(Dataset):
         if self.config['rating_threshold'] is not None:
             if not self.config['drop_low_rating']:
                 self.inter_feat[self.frating] = (
-                    self.inter_feat[self.frating] > self.config['rating_threshold']).astype(float)
+                    self.inter_feat[self.frating] >= self.config['rating_threshold']).astype(float)
             else:
                 self.inter_feat = self.inter_feat[self.inter_feat[self.frating]
-                                                  > self.config['rating_threshold']]
+                                                  >= self.config['rating_threshold']]
                 self.inter_feat[self.frating] = 1.0
 
     def _load_all_data(self, data_dir, field_sep):
@@ -507,6 +507,9 @@ class MFDataset(Dataset):
         if type(col_offset) == int or col_offset == None:
             col_offset = [col_offset] * len(idx)
         assert len(idx) == len(value_fields) and len(idx) == len(bidirectional)
+        if shape is not None:
+            assert type(shape) == list or type(shape) == tuple, 'the type of shape should be list or tuple'
+        
         rows, cols, vals = [], [], []
         n, m, val_off = 0, 0, 0
         for id, value_field, bidirectional, row_off, col_off in zip(
@@ -518,7 +521,7 @@ class MFDataset(Dataset):
             vals.append(tmp_vals)
             n += tmp_n
             m += tmp_m
-        if shape == None or type(shape) != tuple:
+        if shape == None or (type(shape) != tuple and type(shape) != list):
             if len(idx) > 1:
                 raise ValueError(
                     f'If the length of idx is larger than 1, user should specify the shape of the combined graph.')
@@ -535,7 +538,9 @@ class MFDataset(Dataset):
             return csr_matrix((vals, (rows, cols)), shape), val_off
         elif form == 'dgl':
             import dgl
-            graph = dgl.graph((rows, cols))
+            assert shape[0] == shape[1], \
+                'only support homogeneous graph in form of dgl, shape[0] must epuals to shape[1].'
+            graph = dgl.graph((rows, cols), num_nodes=shape[0])
             graph.edata['value'] = vals
             return graph, val_off
 
