@@ -232,21 +232,25 @@ class MFDataset(Dataset):
 
         For token type, `[PAD]` token is used.
         For float type, the mean value is used.
-        For token_seq type, the empty numpy array is used.
+        For token_seq type and float_seq, the empty numpy array is used.
         """
         for field in feat:
             ftype = self.field2type[field]
             if ftype == 'float':
                 feat[field].fillna(value=feat[field].mean(), inplace=True)
             elif ftype == 'token':
-                feat[field].fillna(
-                    value=0 if mapped else '[PAD]', inplace=True)
+                feat[field].fillna(value=0 if mapped else '[PAD]', inplace=True)
+            elif ftype == 'token_seq':
+                dtype = np.int64 if mapped else str
+                feat[field] = \
+                    feat[field].map(lambda x: np.array([], dtype=dtype) if isinstance(x, float) else x)
+            elif ftype == 'float_seq':
+                feat[field] = \
+                    feat[field].map(lambda x: np.array([], dtype=np.float64) if isinstance(x, float) else x)
             else:
-                dtype = (
-                    np.int64 if mapped else str) if ftype == 'token_seq' else np.float64
-                feat[field] = feat[field].map(lambda x: np.array(
-                    [], dtype=dtype) if isinstance(x, float) else x)
-
+                raise ValueError(f'field type {ftype} is not supported. \
+                    Only supports float, token, token_seq, float_seq.')
+                
     def _load_feat(self, feat_path, header, sep, feat_cols, update_dict=True):
         r"""Load the feature from a given a feature file."""
         # fields, types_of_fields = zip(*( _.split(':') for _ in feat_cols))
@@ -280,8 +284,9 @@ class MFDataset(Dataset):
                 continue
             feat[col].fillna(value='', inplace=True)
             cast = float if 'float' in t else str
-            feat[col] = feat[col].map(lambda _: np.array(
-                list(map(cast, filter(None, _.split(seq_seperators[col])))), dtype=cast))
+            feat[col] = feat[col].map(
+                lambda _: np.array(list(map(cast, filter(None, _.split(seq_seperators[col])))), dtype=cast)
+            )
             if update_dict and (col not in self.field2maxlen):
                 self.field2maxlen[col] = feat[col].map(len).max()
         return feat
@@ -469,12 +474,12 @@ class MFDataset(Dataset):
         keep &= item_list.isin(keep_items)
         self.inter_feat = self.inter_feat[keep]
         self.inter_feat.reset_index(drop=True, inplace=True)
-        # if self.user_feat is not None:
-        #    self.user_feat = self.user_feat[self.user_feat[self.fuid].isin(keep_users)]
-        #    self.user_feat.reset_index(drop=True, inplace=True)
-        # if self.item_feat is not None:
-        #    self.item_feat = self.item_feat[self.item_feat[self.fiid].isin(keep_items)]
-        #    self.item_feat.reset_index(drop=True, inplace=True)
+        if self.user_feat is not None:
+           self.user_feat = self.user_feat[self.user_feat[self.fuid].isin(keep_users)]
+           self.user_feat.reset_index(drop=True, inplace=True)
+        if self.item_feat is not None:
+           self.item_feat = self.item_feat[self.item_feat[self.fiid].isin(keep_items)]
+           self.item_feat.reset_index(drop=True, inplace=True)
 
     def get_graph(self, idx, form='coo', value_fields=None, row_offset=0, col_offset=0, bidirectional=False, shape=None):
         """
@@ -1149,8 +1154,7 @@ class SeqDataset(MFDataset):
 
     def _get_data_idx(self, splits):
         splits, uids = splits
-        maxlen = self.config['max_seq_len'] or (
-            splits[:, -1] - splits[:, 0]).max()
+        maxlen = self.config['max_seq_len'] or (splits[:, -1] - splits[:, 0]).max()
 
         def keep_first_item(dix, part):
             if ((dix == 0) and self.train_rep) or ((dix > 0) and self.test_rep):
@@ -1201,8 +1205,7 @@ class SeqDataset(MFDataset):
 class FullSeqDataset(SeqDataset):
     def _get_data_idx(self, splits):
         splits, uids = splits
-        maxlen = self.config['max_seq_len'] or (
-            splits[:, -1] - splits[:, 0]).max()
+        maxlen = self.config['max_seq_len'] or (splits[:, -1] - splits[:, 0]).max()
 
         def get_slice(sp, u):
             # length_ = math.ceil((sp[1]-sp[0]) / maxlen)
@@ -1225,8 +1228,7 @@ class SeqToSeqDataset(SeqDataset):
         # bug to fix : "user" split mode
         # split: [start, train_end, valid_end, test_end]
         splits, uids = splits
-        maxlen = self.config['max_seq_len'] or (
-            splits[:, -1] - splits[:, 0]).max()
+        maxlen = self.config['max_seq_len'] or (splits[:, -1] - splits[:, 0]).max()
 
         def keep_first_item(dix, part):
             # self.drop_dup is set to False in SeqDataset
@@ -1237,7 +1239,8 @@ class SeqToSeqDataset(SeqDataset):
 
         def get_slice(sp, u):
             # the length of the train slice should be maxlen + 1 to get train data with length maxlen
-            data = [np.array([[u, max(sp[0], i - 1 - maxlen), i - 1]]) for i in sp[1:]]
+            data = [np.array([[u, max(sp[0], i - 1 - maxlen), i - 1]]) if (i - 1) > (max(sp[0], i - 1 - maxlen)) \
+                else np.array([], dtype=np.int64).reshape((0, 3)) for i in sp[1:]]
             return tuple(data)
 
         output = [get_slice(sp, u) for sp, u in zip(splits, uids)]
@@ -1295,6 +1298,23 @@ class SeqToSeqDataset(SeqDataset):
         start = self.data_index[:, 1]
         end = self.data_index[:, 2]
         return torch.cat([torch.arange(s, e + 1, dtype=s.dtype) for s, e in zip(start, end)], dim=0)
+
+    def loader(self, batch_size, shuffle=True, num_workers=1, drop_last=False, ddp=False):
+        # if not ddp:
+        # Don't use SortedSampler here, it may hurt the performence of the model.
+        sampler = DataSampler(self, batch_size, shuffle, drop_last)
+        if ddp:
+            sampler = DistributedSamplerWrapper(sampler, shuffle=False)
+
+        output = DataLoader(self, sampler=sampler, batch_size=None,
+                            shuffle=False, num_workers=num_workers,
+                            persistent_workers=False)
+
+        # if ddp:
+        #     sampler = torch.utils.data.distributed.DistributedSampler(self, shuffle=shuffle, drop_last=drop_last)
+        #     output = DataLoader(self, sampler=sampler, batch_size=batch_size, num_workers=num_workers)
+        return output
+
 
 class TensorFrame(Dataset):
     r"""The main data structure used to save interaction data in RecStudio dataset.

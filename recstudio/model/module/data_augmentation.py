@@ -3,11 +3,11 @@ import torch
 import random
 import faiss
 import copy
-from typing import List, Tuple, overload, Optional, Union
+from typing import Optional
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
-from torch.nn.parameter import Parameter
 from recstudio.model.basemodel.recommender import Recommender
+from recstudio.model.module import functional as recfn
 from recstudio.model.module import layers
 
 
@@ -301,21 +301,21 @@ class NodeDropout(torch.nn.Module):
 class InfoNCELoss(torch.nn.Module):
     '''
     Parameters: 
-    neg_type(str):
+    neg_type(str): 'batch_both', 'batch_single', 'all'
     '''
 
-    def __init__(self, temperature:float=1.0, sim_method:str='inner_product', neg_type:str='batch') -> None:
+    def __init__(self, temperature:float=1.0, sim_method:str='inner_product', neg_type:str='batch_both') -> None:
         super().__init__()
         self.temperature = temperature
         self.sim_method = sim_method
         self.neg_type = neg_type
     
     def forward(self, augmented_rep_i: torch.Tensor, augmented_rep_j: torch.Tensor, \
-        sample_labels=None, all_reps: Optional[torch.Tensor]=None):
+        instance_labels=None, all_reps: Optional[torch.Tensor]=None):
         # augmented_rep_i, augmented_rep_j : [B, D], all_reps : [N, D]
         # labels: [B]
         # negative items: 2*N - 1
-        if self.neg_type == 'batch':
+        if self.neg_type == 'batch_both':
             assert all_reps == None, "all_reps is used when the negative strategy is 'all'."
             batch_size = augmented_rep_i.size(0)
             if self.sim_method == 'inner_product':
@@ -327,12 +327,13 @@ class InfoNCELoss(torch.nn.Module):
                 sim_ii = torch.matmul(augmented_rep_i, augmented_rep_i.T) / self.temperature
                 sim_ij = torch.matmul(augmented_rep_i, augmented_rep_j.T) / self.temperature
 
-            if sample_labels is not None:
+            if instance_labels is not None:
                 '''
                 do de-noise as ICLRec, if data_1 and data_2 have the same label, 
                 then (data_1_i, data_2_i) and (data_1_i, data_2_j) won't be treated as negative samples.
                 '''
-                mask = torch.eq(sample_labels.unsqueeze(-1), sample_labels) # [B, B]
+                # instance_labels: [batch_size]
+                mask = torch.eq(instance_labels.unsqueeze(-1), instance_labels) # [B, B]
                 sim_ii[mask == 1] = float('-inf')
                 mask = mask.fill_diagonal_(False)
                 sim_ij[mask == 1] = float('-inf')
@@ -342,17 +343,38 @@ class InfoNCELoss(torch.nn.Module):
 
             logits = torch.cat([sim_ij, sim_ii], dim=-1) # [B, 2 * B]
             labels = torch.arange(batch_size, dtype=torch.long, device=augmented_rep_i.device) # [B]
-
             loss = F.cross_entropy(logits, labels)
-
             return loss 
-        
+
+        elif self.neg_type == 'batch_single':
+            assert all_reps == None, "all_reps is used when the negative strategy is 'all'."
+            batch_size = augmented_rep_i.size(0)
+            if self.sim_method == 'inner_product':
+                sim_ij = torch.matmul(augmented_rep_i, augmented_rep_j.T) / self.temperature # [B, B]
+            elif self.sim_method == 'cosine':
+                augmented_rep_i = F.normalize(augmented_rep_i, p=2, dim=-1)
+                augmented_rep_j = F.normalize(augmented_rep_j, p=2, dim=-1)
+                sim_ij = torch.matmul(augmented_rep_i, augmented_rep_j.T) / self.temperature # [B, B]
+            if instance_labels is not None:
+                '''
+                do de-noise as ICLRec, if data_1 and data_2 have the same label, 
+                then (data_1_i, data_2_i) and (data_1_i, data_2_j) won't be treated as negative samples.
+                '''
+                # instance_labels: [batch_size]
+                mask = torch.eq(instance_labels.unsqueeze(-1), instance_labels) # [B, B]
+                mask = mask.fill_diagonal_(False)
+                sim_ij[mask == 1] = float('-inf')
+
+            labels = torch.arange(batch_size, dtype=torch.long, device=augmented_rep_i.device) # [B] 
+            loss = F.cross_entropy(sim_ij, labels)
+            return loss
+
         elif self.neg_type == 'all':
             # In graph models, the negative items usually are all items in the dataset.
             # augmented_rep_i : [B, D], augmented_rep_j : [B, D], all_reps: [N, D]
             # negative items : N 
             assert all_reps != None, "all_reps shouldn't be None."
-            assert sample_labels == None, "sample_labels is used when the negative strategy is 'batch'."
+            assert instance_labels == None, "instance_labels is used when the negative strategy is 'batch'."
 
             batch_size = augmented_rep_i.size(0)
             if self.sim_method == 'inner_product':
@@ -502,7 +524,7 @@ class SimGCLAugmentation(torch.nn.Module):
         self.fiid = train_data.fiid
         self.num_users = train_data.num_users
         self.num_items = train_data.num_items
-        self.InfoNCELoss_fn = InfoNCELoss(temperature=self.config['temperature'], sim_method='cosine', neg_type='all') 
+        self.InfoNCELoss_fn = InfoNCELoss(temperature=self.config['temperature'], sim_method='cosine', neg_type=self.config['cl_neg_type']) 
         
     def get_gnn_embeddings(self, user_emb, item_emb, adj_mat, gnn_net):
         adj_mat = adj_mat.to(user_emb.weight.device)
@@ -524,10 +546,18 @@ class SimGCLAugmentation(torch.nn.Module):
         user_all_vec1, item_all_vec1 = self.get_gnn_embeddings(user_emb, item_emb, adj_mat, gnn_net)
         user_all_vec2, item_all_vec2 = self.get_gnn_embeddings(user_emb, item_emb, adj_mat, gnn_net)
 
-        user_cl_loss = \
-            self.InfoNCELoss_fn(user_all_vec1[u_idx], user_all_vec2[u_idx], all_reps=user_all_vec2[1:])
-        item_cl_loss = \
-            self.InfoNCELoss_fn(item_all_vec1[i_idx], item_all_vec2[i_idx], all_reps=item_all_vec2[1:])
+        if self.config['cl_neg_type'] == 'all':
+            user_cl_loss = \
+                self.InfoNCELoss_fn(user_all_vec1[u_idx], user_all_vec2[u_idx], all_reps=user_all_vec2[1:])
+        else:
+            user_cl_loss = \
+                self.InfoNCELoss_fn(user_all_vec1[u_idx], user_all_vec2[u_idx])
+        if self.config['cl_neg_type'] == 'all':
+            item_cl_loss = \
+                self.InfoNCELoss_fn(item_all_vec1[i_idx], item_all_vec2[i_idx], all_reps=item_all_vec2[1:])
+        else:
+            item_cl_loss = \
+                self.InfoNCELoss_fn(item_all_vec1[i_idx], item_all_vec2[i_idx])
 
         output_dict['cl_loss'] = user_cl_loss + item_cl_loss
 
@@ -543,25 +573,30 @@ class CL4SRecAugmentation(torch.nn.Module):
         if self.config['augment_type'] == 'item_crop':
             self.augmentation = Item_Crop(self.config['tao'])
         elif self.config['augment_type'] == 'item_mask':
-            self.augmentation = Item_Mask(train_data.num_items)
+            self.augmentation = Item_Mask(mask_id=train_data.num_items)
         elif self.config['augment_type'] == 'item_reorder':
             self.augmentation = Item_Reorder()
         elif self.config['augment_type'] == 'item_random':
-            self.augmentation = Item_Random(train_data.num_items)
+            self.augmentation = Item_Random(mask_id=train_data.num_items)
         else:
             raise ValueError(f"augmentation type: '{self.config['augment_type']}' is invalided")
-        self.InfoNCE_score_func = InfoNCE(temperature=self.config['temperature'], sim_method='inner_product')
+        self.InfoNCE_loss_fn = InfoNCELoss(temperature=self.config['temperature'], sim_method='inner_product', neg_type='batch_both')
 
     def forward(self, batch, query_encoder:torch.nn.Module):
         output_dict = {}
         seq_augmented_i, seq_augmented_i_len = self.augmentation(batch['in_' + self.fiid], batch['seqlen']) # seq: [B, L] seq_len : [B]
         seq_augmented_j, seq_augmented_j_len = self.augmentation(batch['in_' + self.fiid], batch['seqlen'])
-        seq_augmented_i_out = query_encoder({"in_" + self.fiid: seq_augmented_i, "seqlen" : seq_augmented_i_len},\
-            pooling_type='mean') # [B, D]
+
+        seq_augmented_i_out = query_encoder({"in_" + self.fiid: seq_augmented_i, "seqlen": seq_augmented_i_len},\
+            need_pooling=False) # [B, L, D]
+        seq_augmented_i_out = recfn.seq_pooling_function(seq_augmented_i_out, seq_augmented_i_len, pooling_type='mean') # [B, D]
+        
         seq_augmented_j_out = query_encoder({"in_" + self.fiid: seq_augmented_j, "seqlen" : seq_augmented_j_len},\
-            pooling_type='mean') # [B, D]
-        logits, labels = self.InfoNCE_score_func(seq_augmented_i_out, seq_augmented_j_out) 
-        output_dict['cl_score'] = (logits, labels)
+            need_pooling=False) # [B, L, D]
+        seq_augmented_j_out = recfn.seq_pooling_function(seq_augmented_j_out, seq_augmented_j_len, pooling_type='mean') # [B, D]
+        
+        cl_loss = self.InfoNCE_loss_fn(seq_augmented_i_out, seq_augmented_j_out) 
+        output_dict['cl_loss'] = cl_loss
         return output_dict
 
 class ICLRecAugmentation(torch.nn.Module):
@@ -573,16 +608,15 @@ class ICLRecAugmentation(torch.nn.Module):
         if self.config['augment_type'] == 'item_crop':
             self.augmentation = Item_Crop()
         elif self.config['augment_type'] == 'item_mask':
-            self.augmentation = Item_Mask(train_data.num_items)
+            self.augmentation = Item_Mask(mask_id=train_data.num_items)
         elif self.config['augment_type'] == 'item_reorder':
             self.augmentation = Item_Reorder()
         elif self.config['augment_type'] == 'item_random':
-            self.augmentation = Item_Random(train_data.num_items)
+            self.augmentation = Item_Random(mask_id=train_data.num_items)
         else:
             raise ValueError(f"augmentation type: '{self.config['augment_type']}' is invalided")
 
-        self.InfoNCE_score_func = InfoNCE()
-        self.InfoNCE_loss_fn = torch.nn.CrossEntropyLoss()
+        self.InfoNCE_loss_fn = InfoNCELoss(temperature=self.config['temperature'], sim_method='inner_product', neg_type='batch_both')
 
         if self.config['intent_seq_representation_type'] == 'concat':
             self.cluster = faiss.Kmeans(d=self.config['embed_dim'] * self.config['max_seq_len'], k=self.config['num_intent_clusters'], gpu=False)
@@ -596,7 +630,8 @@ class ICLRecAugmentation(torch.nn.Module):
         kmeans_training_data = []
         for batch_idx, batch in enumerate(trainloader):
             batch = Recommender._to_device(batch, device)
-            seq_out = query_encoder(batch, pooling_type=self.config['intent_seq_representation_type'])
+            seq_out = query_encoder(batch, need_pooling=False)
+            seq_out = recfn.seq_pooling_function(seq_out, batch['seqlen'], pooling_type=self.config['intent_seq_representation_type'])
             kmeans_training_data.append(seq_out) # [B, D]
         
         kmeans_training_data = torch.cat(kmeans_training_data, dim=0)
@@ -610,35 +645,31 @@ class ICLRecAugmentation(torch.nn.Module):
         seq_augmented_i, seq_augmented_i_len = self.augmentation(batch['in_'+self.fiid], batch['seqlen']) # seq: [B, L] seq_len : [B]
         seq_augmented_j, seq_augmented_j_len = self.augmentation(batch['in_'+self.fiid], batch['seqlen'])
         seq_augmented_i_out = query_encoder({"in_"+self.fiid : seq_augmented_i, "seqlen" : seq_augmented_i_len}, \
-            pooling_type='origin') # [B, L, D]
+            need_pooling=False) # [B, L, D]
         seq_augmented_j_out = query_encoder({"in_"+self.fiid : seq_augmented_j, "seqlen" : seq_augmented_j_len}, \
-            pooling_type='origin') # [B, L, D]
+            need_pooling=False) # [B, L, D]
 
         # Instance CL
-        instance_seq_i_out = layers.SeqPoolingFunction(seq_augmented_i_out, seq_augmented_i_len, \
+        instance_seq_i_out = recfn.seq_pooling_function(seq_augmented_i_out, seq_augmented_i_len, \
             pooling_type=self.config['instance_seq_representation_type']) # [B, L * D] or [B, D] 
-        instance_seq_j_out = layers.SeqPoolingFunction(seq_augmented_j_out, seq_augmented_j_len, \
+        instance_seq_j_out = recfn.seq_pooling_function(seq_augmented_j_out, seq_augmented_j_len, \
             pooling_type=self.config['instance_seq_representation_type']) # [B, L * D]
-        instance_logits, instance_labels = self.InfoNCE_score_func(instance_seq_i_out, instance_seq_j_out) # [B, 2B]
-        instance_logits_rev, instance_labels_rev = self.InfoNCE_score_func(instance_seq_j_out, instance_seq_i_out)
-        instance_logits = torch.cat([instance_logits, instance_logits_rev], dim=0)
-        instance_labels = torch.cat([instance_labels, instance_labels_rev], dim=0)
-
+        instance_loss = self.InfoNCE_loss_fn(instance_seq_i_out, instance_seq_j_out) # [B, 2B]
+        instance_loss_rev = self.InfoNCE_loss_fn(instance_seq_j_out, instance_seq_i_out)
+        
         # Intent CL
-        seq_out = layers.SeqPoolingFunction(seq_out, batch['seqlen'], pooling_type=self.config['intent_seq_representation_type'])
+        seq_out = recfn.seq_pooling_function(seq_out, batch['seqlen'], pooling_type=self.config['intent_seq_representation_type'])
         _, intent_ids = self.cluster.index.search(seq_out.cpu().detach().numpy(), 1)
         seq2intents = self.centroids[intent_ids.squeeze(-1)]
-        intent_seq_i_out = layers.SeqPoolingFunction(seq_augmented_i_out, seq_augmented_i_len, \
+        intent_seq_i_out = recfn.seq_pooling_function(seq_augmented_i_out, seq_augmented_i_len, \
             pooling_type=self.config['intent_seq_representation_type']) # [B, D] 
-        intent_seq_j_out = layers.SeqPoolingFunction(seq_augmented_j_out, seq_augmented_j_len, \
+        intent_seq_j_out = recfn.seq_pooling_function(seq_augmented_j_out, seq_augmented_j_len, \
             pooling_type=self.config['intent_seq_representation_type']) # [B, D]
         intent_ids = torch.from_numpy(intent_ids.squeeze(-1)).to(seq_out.device)
-        intent_logits_i, intent_labels_i = self.InfoNCE_score_func(intent_seq_i_out, seq2intents, labels=intent_ids)
-        intent_logits_j, intent_labels_j = self.InfoNCE_score_func(intent_seq_j_out, seq2intents, labels=intent_ids)
-        intent_logits = torch.cat([intent_logits_i, intent_logits_j])
-        intent_labels = torch.cat([intent_labels_i, intent_labels_j])
-
-        output_dict['instance_score'] = (instance_logits, instance_labels)
-        output_dict['intent_score'] = (intent_logits, intent_labels)
+        intent_loss_i = self.InfoNCE_loss_fn(intent_seq_i_out, seq2intents, instance_labels=intent_ids)
+        intent_loss_j = self.InfoNCE_loss_fn(intent_seq_j_out, seq2intents, instance_labels=intent_ids)
+        
+        output_dict['instance_cl_loss'] = 0.5 * (instance_loss + instance_loss_rev)
+        output_dict['intent_cl_loss'] = 0.5 * (intent_loss_i + intent_loss_j)
         
         return output_dict
