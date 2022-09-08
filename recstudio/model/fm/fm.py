@@ -6,10 +6,7 @@ from recstudio.data.dataset import MFDataset
 
 
 class FM(BaseRanker):
-    # def _init_model(self, train_data):
-    #     super()._init_model(train_data)
 
-    @staticmethod
     def _get_dataset_class():
         return MFDataset
 
