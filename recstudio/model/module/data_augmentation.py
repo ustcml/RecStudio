@@ -1,18 +1,24 @@
-import numpy as np
+import math
+import os
 import torch
 import random
 import faiss
 import copy
-from typing import Optional
+import pickle
+import scipy.sparse as sp 
+import numpy as np
+from typing import Optional, Union
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 from recstudio.model.basemodel.recommender import Recommender
 from recstudio.model.module import functional as recfn
 from recstudio.model.module import layers
+from recstudio.data import dataset
+from tqdm import tqdm 
+from recstudio.utils import DEFAULT_CACHE_DIR, md5
 
 
 # sequence augmentation 
-
 class Item_Crop(torch.nn.Module):
     
     def __init__(self, tao=0.2):
@@ -673,3 +679,264 @@ class ICLRecAugmentation(torch.nn.Module):
         output_dict['intent_cl_loss'] = 0.5 * (intent_loss_i + intent_loss_j)
         
         return output_dict
+
+
+class OnlineItemSimilarity(torch.nn.Module):    
+    def __init__(self):
+        super().__init__()
+        self.item_embeddings = None
+    
+    def update_embeddings(self, item_embeddings):
+        self.item_embeddings = item_embeddings.weight[1:].detach().clone()
+        self.max_score, self.min_score = self.get_maximum_minimum_sim_scores()
+        
+    def get_maximum_minimum_sim_scores(self):
+        max_score, min_score = -100.0, 100.0
+        for item_idx in range(self.item_embeddings.size(0)):
+            item_vector = self.item_embeddings[torch.tensor(item_idx).to(self.item_embeddings.device)].view(-1, 1)
+            item_similarity = torch.mm(self.item_embeddings, item_vector).view(-1)
+            max_score = max(torch.max(item_similarity), max_score)
+            min_score = min(torch.min(item_similarity), min_score)
+        return max_score, min_score
+
+    def forward(self, item_idx:Union[torch.Tensor, int], top_k=1, with_score=False):
+        '''
+        Args: 
+        item_idx (torch.Tensor or int)
+        top_k (int)
+        with_score (bool)
+        Return:
+        indices (torch.Tensor or int): [batch_size] or int 
+        values (torch.Tensor or float): [batch_size] or float 
+        '''
+        # item_idx : [batch_size] or int 
+        item_idx = item_idx - 1
+        assert top_k == 1, 'only support top 1' 
+        if type(item_idx) == int:
+            item_vector = self.item_embeddings[item_idx] # [dim]
+            item_similarity = torch.mv(self.item_embeddings, item_vector) # [num_items]
+            # normalize
+            # Different from the min-max normalization in source code.
+            item_similarity = (item_similarity - self.min_score) / (self.max_score - self.min_score)
+            item_similarity[item_idx] = -float('inf') # assume that item_idx is not 0. 
+
+            scores, indices = item_similarity.topk(top_k)
+            indices = indices + 1
+            if with_score:
+                return indices[0].item(), scores[0].item()
+            else:
+                return indices[0].item()
+        else:
+            item_vector = self.item_embeddings[item_idx] # [batch_size, dim]
+            item_similarity = torch.mm(item_vector, self.item_embeddings.T) # [batch_size, num_items]
+            # normalize
+            item_similarity = (item_similarity - self.min_score) / (self.max_score - self.min_score)
+            item_similarity[torch.arange(item_idx.size(0), device=item_idx.device), item_idx] = -float('inf') # assume that item_idx is not 0. 
+
+            scores, indices = item_similarity.topk(top_k) # [B, 1]
+            indices = indices + 1
+            if with_score:
+                return indices.squeeze(-1).to(item_idx.device), scores.squeeze(-1).to(item_idx.device)
+            else:
+                return indices.squeeze(-1).to(item_idx.device)
+
+
+class OfflineItemSimilarity(torch.nn.Module):
+
+    def __init__(self, train_data:dataset.SeqToSeqDataset) -> None:
+        super().__init__()
+        self.fuid = train_data.fuid
+        self.fiid = train_data.fiid
+        self.num_items = train_data.num_items
+        self.max_score = -1.
+        self.min_score = 100.
+        if os.path.exists(os.path.join(DEFAULT_CACHE_DIR, 'coserec', md5(train_data.config))):
+            matrix_path = os.path.join(DEFAULT_CACHE_DIR, 'coserec', md5(train_data.config))
+            print(f"load co-rate matrix from {matrix_path}")
+            with open(matrix_path, 'rb') as f:
+                self.co_rate_matrix = pickle.load(f)
+        else:
+            self.co_rate_matrix = self._generate_item_similarity(train_data.inter_feat[train_data.inter_feat_subset])
+            self._save_matrix(self.co_rate_matrix, md5(train_data.config))
+        self.max_score, self.min_score = self.co_rate_matrix.max(), self.co_rate_matrix.min()
+        self.top_1_score = self.co_rate_matrix.max(axis=-1).A.squeeze()
+        # normlize 
+        # Different from the min-max normalization in source code.
+        self.top_1_score = (self.top_1_score - self.min_score) / (self.max_score - self.min_score)
+        self.top_1_index = self.co_rate_matrix.argmax(axis=-1).A.squeeze()
+
+    def _generate_item_similarity(self, inter_feat):
+        user_ids, item_ids = inter_feat[self.fuid], inter_feat[self.fiid]
+        train_data_dict = dict()
+        for i in range(len(user_ids)):
+            user = user_ids[i].item() - 1
+            item = item_ids[i].item() - 1
+            train_data_dict.setdefault(user, {})
+            train_data_dict[user][item] = 1 
+
+        C = dict()
+        N = dict()
+        print("Step 1: Compute Statistics")
+        data_iter = tqdm(enumerate(train_data_dict.items()), total=len(train_data_dict.items()))
+        for idx, (u, items) in data_iter:
+            for i in items.keys():
+                N.setdefault(i, 0)
+                N[i] += 1
+                for j in items.keys():
+                    if i == j:
+                        continue 
+                    C.setdefault(i, {})
+                    C[i].setdefault(j, 0)
+                    C[i][j] += 1 / math.log(1 + len(items) * 1.0)
+        print("Step 2: Compute co-rate matrix")
+        rows, cols, vals = [], [], []
+        c_iter = tqdm(enumerate(C.items()), total=len(C.items()))
+        for idx, (cur_item, related_items) in c_iter:
+            for related_item, score in related_items.items():
+                score = score / math.sqrt(N[cur_item] * N[related_item])
+                rows.append(cur_item)
+                cols.append(related_item)
+                vals.append(score)
+
+        # co_rate_matrix should be a sparse matrix 
+        co_rate_matrix = sp.coo_matrix((vals, (rows, cols)), shape=(self.num_items - 1, self.num_items - 1))
+        return co_rate_matrix
+
+    def _save_matrix(self, co_rate_matrix, md:str):
+        cache_dir = os.path.join(DEFAULT_CACHE_DIR, "coserec")
+        if not os.path.exists(cache_dir):
+            os.makedirs(cache_dir)
+        with open(os.path.join(cache_dir, md), 'wb') as f:
+            pickle.dump(co_rate_matrix, f)
+
+    def forward(self, item_idx:Union[torch.Tensor, int], top_k=1, with_score=False):
+        '''
+        Returns:
+        index(torch.tensor or int)
+        score(torch.tensor or float)
+        '''
+        # only support top 1
+        item_idx = item_idx - 1
+        assert top_k == 1, 'only support top 1' 
+        if with_score:
+            if type(item_idx) == int:
+                return self.top_1_index[item_idx] + 1, self.top_1_score[item_idx]
+            else:
+                index = self.top_1_index[item_idx.cpu()] + 1 
+                score = self.top_1_score[item_idx.cpu()]
+                if type(index) != np.ndarray: # if item_idx only has one item, the index will be numpy.int, not ndarray
+                    index = np.array([index])
+                    score = np.array([score])
+                return torch.from_numpy(index).to(item_idx.device), torch.from_numpy(score).to(item_idx.device)
+        else:
+            if type(item_idx) == int:
+                return self.top_1_index[item_idx] + 1
+            else:
+                index = self.top_1_index[item_idx.cpu()] + 1 
+                if type(index) != np.ndarray: 
+                    index = np.array([index])
+                return torch.from_numpy(index).to(item_idx.device)
+
+
+class CoSeRecAugmentation(torch.nn.Module):
+
+    def __init__(self, config, train_data:dataset.SeqToSeqDataset) -> None:
+        super().__init__()
+        self.config = config
+        self.fiid = train_data.fiid
+        self.num_items = train_data.num_items 
+        self.augmentation_warm_up_epochs = self.config['augmentation_warm_up_epochs']
+
+        self.offline_similarity_model = OfflineItemSimilarity(train_data)
+        augmentation_dict = {
+            'S' : Item_Substitute(self.offline_similarity_model, self.config['substitute_rate']),
+            'I' : Item_Insert(self.offline_similarity_model, self.config['insert_rate']),
+            'M' : Item_Mask(train_data.num_items),
+            'C' : Item_Crop(), 
+            'R' : Item_Reorder()
+        }
+        short_augmentation_list = []
+        for x in self.config['augment_type_for_short']:
+            short_augmentation_list.append(augmentation_dict[x])
+        long_augmentation_list = list(augmentation_dict.values())
+        self.augmentation = Random_Augmentation(self.config['augment_threshold'], short_augmentation_list, long_augmentation_list)
+        self.InfoNCE_loss_fn = InfoNCELoss(temperature=self.config['temperature'], sim_method='inner_product', neg_type='batch_both')
+
+    def forward(self, batch, query_encoder):
+        output_dict = {}
+        batch_size = len(batch[self.fiid])
+
+        seq_augmented_i, seq_augmented_i_len = self.augmentation(batch['in_' + self.fiid], batch['seqlen']) # seq: [B, L] seq_len : [B]
+        seq_augmented_i_cut = []
+        seq_augmented_i_len_cut = torch.zeros_like(seq_augmented_i_len, device=seq_augmented_i_len.device)
+        for i in range(batch_size):
+            seq = seq_augmented_i[i]
+            seq_len = seq_augmented_i_len[i]
+            if seq_len > self.config['max_seq_len']:
+                seq_augmented_i_cut.append(seq[seq_len-self.config['max_seq_len'] : seq_len])
+                seq_augmented_i_len_cut[i] = self.config['max_seq_len']
+            else:
+                seq_augmented_i_cut.append(seq[ : seq_len])
+                seq_augmented_i_len_cut[i] = seq_len
+        seq_augmented_i, seq_augmented_i_len = pad_sequence(seq_augmented_i_cut, batch_first=True), seq_augmented_i_len_cut
+        if seq_augmented_i.size(1) < self.config['max_seq_len']:
+            seq_augmented_i = torch.cat(
+                [seq_augmented_i, 
+                torch.zeros((batch_size, self.config['max_seq_len'] - seq_augmented_i.size(1)),
+                dtype=torch.int64, device=seq_augmented_i.device)],
+                dim=-1
+                )
+
+        seq_augmented_j, seq_augmented_j_len = self.augmentation(batch['in_' + self.fiid], batch['seqlen'])
+        seq_augmented_j_cut = []
+        seq_augmented_j_len_cut = torch.zeros_like(seq_augmented_j_len, device=seq_augmented_j_len.device)
+        for i in range(batch_size):
+            seq = seq_augmented_j[i]
+            seq_len = seq_augmented_j_len[i]
+            if seq_len > self.config['max_seq_len']:
+                seq_augmented_j_cut.append(seq[seq_len-self.config['max_seq_len'] : seq_len])
+                seq_augmented_j_len_cut[i] = self.config['max_seq_len']
+            else:
+                seq_augmented_j_cut.append(seq[ : seq_len])
+                seq_augmented_j_len_cut[i] = seq_len
+        seq_augmented_j, seq_augmented_j_len = pad_sequence(seq_augmented_j_cut, batch_first=True), seq_augmented_j_len_cut
+        if seq_augmented_j.size(1) < self.config['max_seq_len']:
+            seq_augmented_j = torch.cat(
+                [seq_augmented_j, 
+                torch.zeros((batch_size, self.config['max_seq_len'] - seq_augmented_j.size(1)),
+                dtype=torch.int64, device=seq_augmented_j.device)],
+                dim=-1
+                )
+
+        seq_augmented_i_out = query_encoder({"in_" + self.fiid: seq_augmented_i, "seqlen": seq_augmented_i_len},\
+            need_pooling=False) # [B, L, D]
+        seq_augmented_i_out = seq_augmented_i_out.reshape(batch_size, -1) # [B, D * len]
+        
+        seq_augmented_j_out = query_encoder({"in_" + self.fiid: seq_augmented_j, "seqlen" : seq_augmented_j_len},\
+            need_pooling=False) # [B, L, D]
+        seq_augmented_j_out = seq_augmented_j_out.reshape(batch_size, -1) # [B, D * len]
+        
+        cl_loss = self.InfoNCE_loss_fn(seq_augmented_i_out, seq_augmented_j_out) 
+        cl_loss_inv = self.InfoNCE_loss_fn(seq_augmented_j_out, seq_augmented_i_out)
+        output_dict['cl_loss'] = 0.5 * (cl_loss + cl_loss_inv)
+        return output_dict
+
+    def update_online_model(self, nepoch:int, item_encoder:Optional[torch.nn.Module]=None):
+        if nepoch + 1 == self.augmentation_warm_up_epochs + 1:
+            self.similarity_model = [self.offline_similarity_model, OnlineItemSimilarity()]
+            augmentation_dict = {
+                'S' : Item_Substitute(self.similarity_model, self.config['substitute_rate']),
+                'I' : Item_Insert(self.similarity_model, self.config['insert_rate']),
+                'M' : Item_Mask(self.num_items),
+                'C' : Item_Crop(), 
+                'R' : Item_Reorder()
+            }
+            short_augmentation_list = []
+            for x in self.config['augment_type_for_short']:
+                short_augmentation_list.append(augmentation_dict[x])
+            long_augmentation_list = list(augmentation_dict.values())
+            self.augmentation = Random_Augmentation(self.config['augment_threshold'], short_augmentation_list, long_augmentation_list)
+
+        if nepoch + 1 > self.augmentation_warm_up_epochs:
+            self.similarity_model[1].update_embeddings(item_encoder)
+

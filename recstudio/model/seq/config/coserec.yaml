@@ -23,9 +23,12 @@ dropout_rate: 0.5
 activation: 'gelu'
 layer_norm_eps: 1e-12
 
-# contrastive 
+# contrastive
 temperature: 1.0
-augment_type: item_crop  # item_crop, item_mask, item_reorder
-tao: 0.2
+insert_rate: 0.5
+substitute_rate: 0.05
 cl_weight: 0.1
+augment_threshold: 12
+augmentation_warm_up_epochs: 5
+augment_type_for_short: 'SIMRC'
 
