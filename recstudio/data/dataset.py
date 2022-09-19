@@ -697,8 +697,7 @@ class MFDataset(Dataset):
                     for i in range(1, splits.shape[1])]
         if not getattr(self, 'fmeval', False):
             if uids is not None:
-                d = [torch.from_numpy(np.hstack([np.arange(*e)
-                                      for e in data_idx[0]]))]
+                d = [torch.from_numpy(np.hstack([np.arange(*e) for e in data_idx[0]]))]
                 for _ in data_idx[1:]:
                     d.append(torch.tensor([[u, *e] for u, e in zip(uids, _) if e[1] > e[0]])) # skip users who don't have interactions in valid or test dataset.
                 return d
@@ -826,8 +825,7 @@ class MFDataset(Dataset):
                 cumsum = np.hstack([[0], user_count.cumsum()[:-1]])
                 idx = np.concatenate([np.random.permutation(
                     c) + start for start, c in zip(cumsum, user_count)])
-                self.inter_feat = self.inter_feat.iloc[idx].reset_index(
-                    drop=True)
+                self.inter_feat = self.inter_feat.iloc[idx].reset_index(drop=True)
         elif split_mode == 'entry':
             if shuffle:
                 self.inter_feat = self.inter_feat.sample(
@@ -1090,6 +1088,11 @@ class AEDataset(MFDataset):
 
     def _get_data_idx(self, splits):
         splits, uids = splits
+        # filter out users whose behaviors are not in valid and test data, 
+        # otherwise it will cause nan in metric calculation such as recall.
+        # usually the reason is that the number of behavior is too small due to the sparsity.
+        mask = splits[:, 1] < splits[:, 2]
+        splits, uids = splits[mask], uids[mask]
         data_idx = [list(zip(splits[:, i-1], splits[:, i]))
                     for i in range(1, splits.shape[1])]
         data_idx = [torch.tensor([[u, *e] for e, u in zip(_, uids)])
