@@ -26,12 +26,17 @@ class CML(basemodel.BaseRetriever):
     def _get_score_func(self):
         return scorer.EuclideanScorer()
 
+    def _init_model(self, train_data):
+        super()._init_model(train_data)
+        self.loss_fn.n_items = train_data.num_items
+
     def _get_loss_func(self):
         class CMLoss(loss_func.PairwiseLoss):
             def __init__(self, margin=2, use_rank_weight=False):
                 super().__init__()
                 self.margin = margin
                 self.use_rank_weight = use_rank_weight
+                self.n_items = None
 
             def forward(self, label, pos_score, log_pos_prob, neg_score, log_neg_prob):
                 pos_score[pos_score == -float("inf")] = float("inf")
@@ -44,6 +49,7 @@ class CML(basemodel.BaseRetriever):
                 else:
                     return torch.mean(loss)
         return CMLoss(self.config['margin'], self.config['use_rank_weight'])
+
 
 
     def _get_sampler(self, train_data):
