@@ -6,7 +6,7 @@ import os
 import random
 import re
 from collections import OrderedDict
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 import numpy as np
 import requests
@@ -18,7 +18,6 @@ from recstudio import LOG_DIR, DEFAULT_CACHE_DIR
 
 # LOG_DIR = r"./log/"
 # DEFAULT_CACHE_DIR = r"./.recstudio/"
-
 
 if not os.path.exists(LOG_DIR):
     os.makedirs(LOG_DIR)
@@ -112,7 +111,7 @@ def get_model(model_name: str):
     Returns:
         Recommender: model class
     """
-    model_submodule = ['ae', 'mf', 'seq', 'fm', 'graph', 'kg']
+    model_submodule = ['ae', 'mf', 'seq', 'fm', 'graph', 'kg', 'debias']
 
     model_file_name = model_name.lower()
     model_module = None
@@ -371,3 +370,31 @@ def get_logger(file_path: str = None):
     if file_path is not None:
         logger = add_file_handler(logger, file_path, formatter)
     return logger
+
+def get_gpus(gpu_config: Union[int, list]):
+    if gpu_config is None:
+        return None
+    if isinstance(gpu_config, int):
+        # select k most free gpus
+        try:
+            import nvidia_smi
+        except ModuleNotFoundError:
+            raise ModuleNotFoundError("Package 'nvidia-ml-py3' not found, please "
+                "refer to https://pypi.org/project/nvidia-ml-py3 to install.")
+        nvidia_smi.nvmlInit()
+        total_gpu_nums = nvidia_smi.nvmlDeviceGetCount()
+        all_gpu_info = np.zeros((2, total_gpu_nums))
+        for i in range(total_gpu_nums):
+            handle = nvidia_smi.nvmlDeviceGetHandleByIndex(i)
+            info = nvidia_smi.nvmlDeviceGetMemoryInfo(handle)
+            all_gpu_info[0, i] = info.free/(1024**3)
+            all_gpu_info[1, i] = info.total/(1024**3)
+        nvidia_smi.nvmlShutdown()
+        sorted_free_gpus = np.argsort(all_gpu_info[0])[::-1]
+        return list(sorted_free_gpus[:gpu_config])
+
+    elif isinstance(gpu_config, list):
+        return gpu_config
+
+    else:
+        raise TypeError(f'expected `gpu_config` to be int or list, but got {type(gpu_config)}.')

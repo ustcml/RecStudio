@@ -2,7 +2,7 @@ from typing import Set
 
 import torch
 import torch.nn as nn
-from recstudio.model.module import SeqPoolingLayer
+from .layers import MLPModule, AttentionLayer, SeqPoolingLayer
 
 
 class DenseEmbedding(torch.nn.Module):
@@ -218,8 +218,10 @@ class DINScorer(torch.nn.Module):
 
 
 class BehaviorSequenceTransformer(nn.Module):
-    def __init__(self, fuid, fiid, num_users, num_items, max_len, embed_dim, hidden_size, n_layer, n_head, dropout,
-                 mlp_layers=[1024, 512, 256], activation='relu', batch_first=True, norm_first=False):
+    def __init__(self, fuid, fiid, num_users, num_items, max_len,
+                 embed_dim, hidden_size, n_layer, n_head, dropout,
+                 mlp_layers=[1024, 512, 256], activation='leakyrelu',
+                 batch_first=True, norm_first=False):
         super().__init__()
         self.fuid = fuid
         self.fiid = fiid
@@ -227,26 +229,29 @@ class BehaviorSequenceTransformer(nn.Module):
         self.item_embedding = torch.nn.Embedding(num_items, embed_dim, 0)
         self.position_embedding = torch.nn.Embedding(max_len+2, embed_dim, 0)
         tfm_encoder = torch.nn.TransformerEncoderLayer(
-            d_model=embed_dim, nhead=n_head, dim_feedforward=hidden_size, dropout=dropout, activation=activation,
-            batch_first=batch_first, norm_first=norm_first)
+            d_model=embed_dim, nhead=n_head, dim_feedforward=hidden_size,
+            dropout=dropout, activation='relu', batch_first=batch_first,
+            norm_first=norm_first)
         self.transformer = torch.nn.TransformerEncoder(
             encoder_layer=tfm_encoder, num_layers=n_layer)
-        self.mlp = MLPModule([(max_len+1)*embed_dim, ] +
-                             mlp_layers, activation_func=activation)
+        self.mlp = MLPModule([(max_len+1)*embed_dim, ] + mlp_layers,
+                             activation_func = activation,
+                             dropout = dropout)
         self.predict = torch.nn.Linear(mlp_layers[-1], 1)
 
     def forward(self, batch):
         hist = batch['in_'+self.fiid]
         target = batch[self.fiid]
         seq_len = batch['seqlen']
-        hist = torch.cat((hist, target.view(-1, 1)), dim=1)
+        hist = torch.cat((hist, torch.zeros_like(target.view(-1, 1))), dim=1)
         B, L = hist.shape
+        idx_ = torch.arange(0, B, dtype=torch.long)
+        hist[idx_, seq_len] = target.long()
         seq_emb = self.item_embedding(hist)
         positions = torch.arange(1, L+1, device=seq_emb.device)
         positions = torch.tile(positions, (B,)).view(B, -1)
         padding_mask = hist == 0
         positions[padding_mask] = 0
-        positions[:, -1] = seq_len + 1
         position_emb = self.position_embedding(positions)
         attention_mask = torch.triu(torch.ones(
             (L, L), dtype=torch.bool, device=hist.device), 1)

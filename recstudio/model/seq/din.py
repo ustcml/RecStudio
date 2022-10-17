@@ -32,7 +32,7 @@ class DIN(basemodel.BaseRanker):
         parent_parser.add_argument("--activation", type=str, default='dice', help='activation for MLP')
         parent_parser.add_argument("--attention_mlp", type=int, nargs='+', default=[128, 64], help='MLP layer size for attention calculation')
         parent_parser.add_argument("--fc_mlp", type=int, nargs='+', default=[128, 64, 64], help='MLP layer size for the MLP before prediction')
-        parent_parser.add_argument("--negativate_count", type=int, default=1, help='negative sampling numbers')
+        parent_parser.add_argument("--negative_count", type=int, default=1, help='negative sampling numbers')
         parent_parser.add_argument("--dropout", type=float, default=0.3, help='dropout rate for MLP')
         return parent_parser
 
@@ -56,7 +56,7 @@ class DIN(basemodel.BaseRanker):
 
 
     def _get_scorer(self, train_data):
-        return module.DINScorer(
+        return module.ctr.DINScorer(
             train_data.fuid, train_data.fiid, train_data.num_users, train_data.num_items,
             self.embed_dim, self.config['attention_mlp'], self.config['fc_mlp'], dropout=self.config['dropout'],
             activation=self.config['activation'], batch_norm=False
@@ -65,8 +65,7 @@ class DIN(basemodel.BaseRanker):
 
     def _get_loss_func(self):
         r"""BinaryCrossEntropy is used as the loss function."""
-        # return loss_func.BinaryCrossEntropyLoss()
-        return loss_func.SampledSoftmaxLoss()
+        return loss_func.BinaryCrossEntropyLoss()
 
     @torch.no_grad()
     def topk(self, batch, k, user_h):

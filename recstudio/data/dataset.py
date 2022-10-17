@@ -9,7 +9,7 @@ import pandas as pd
 import scipy.sparse as ssp
 import torch
 from recstudio.ann.sampler import (MaskedUniformSampler, PopularSamplerModel,
-                                   UniformSampler)
+                                   UniformSampler, uniform_sampling)
 from recstudio.utils import (DEFAULT_CACHE_DIR, check_valid_dataset, set_color,
                              download_dataset, md5, parser_yaml, get_dataset_default_config)
 from torch.nn.utils.rnn import pad_sequence
@@ -393,10 +393,6 @@ class MFDataset(Dataset):
 
     def _post_preprocess(self):
         if self.ftime in self.inter_feat:
-            # if self.field2type[self.ftime] == 'float':
-            #     self.inter_feat.sort_values(
-            #         by=[self.fuid, self.ftime], inplace=True)
-            #     self.inter_feat.reset_index(drop=True, inplace=True)
             if self.field2type[self.ftime] == 'str':
                 assert 'time_format' in self.config, "time_format is required when timestamp is string."
                 time_format = self.config['time_format']
@@ -404,16 +400,7 @@ class MFDataset(Dataset):
             elif self.field2type[self.ftime] == 'float':
                 pass
             else:
-                raise ValueError(
-                    f'The field [{self.ftime}] should be float or str type')
-
-            self.inter_feat.sort_values(
-                by=[self.fuid, self.ftime], inplace=True)
-            self.inter_feat.reset_index(drop=True, inplace=True)
-        else:
-            self.inter_feat.sort_values(
-                by=self.fuid, inplace=True)
-            self.inter_feat.reset_index(drop=True, inplace=True)
+                raise ValueError(f'The field [{self.ftime}] should be float or str type')
         self._prepare_user_item_feat()
 
     def _recover_unmapped_feature(self, feat):
@@ -469,12 +456,12 @@ class MFDataset(Dataset):
         keep &= item_list.isin(keep_items)
         self.inter_feat = self.inter_feat[keep]
         self.inter_feat.reset_index(drop=True, inplace=True)
-        # if self.user_feat is not None:
-        #    self.user_feat = self.user_feat[self.user_feat[self.fuid].isin(keep_users)]
-        #    self.user_feat.reset_index(drop=True, inplace=True)
-        # if self.item_feat is not None:
-        #    self.item_feat = self.item_feat[self.item_feat[self.fiid].isin(keep_items)]
-        #    self.item_feat.reset_index(drop=True, inplace=True)
+        if self.user_feat is not None:
+           self.user_feat = self.user_feat[self.user_feat[self.fuid].isin(keep_users)]
+           self.user_feat.reset_index(drop=True, inplace=True)
+        if self.item_feat is not None:
+           self.item_feat = self.item_feat[self.item_feat[self.fiid].isin(keep_items)]
+           self.item_feat.reset_index(drop=True, inplace=True)
 
     def get_graph(self, idx, form='coo', value_fields=None, row_offset=0, col_offset=0, bidirectional=False, shape=None):
         """
@@ -738,6 +725,10 @@ class MFDataset(Dataset):
             data.update(self.user_feat[uid])
             data.update(self.item_feat[iid])
 
+        if 'user_hist' in data:
+            user_count = self.user_count[data[self.fuid]].max()
+            data['user_hist'] = data['user_hist'][:, 0:user_count]
+
         return data
 
     def __getitem__(self, index):
@@ -756,8 +747,10 @@ class MFDataset(Dataset):
             if getattr(self, 'neg_sampling_count', None) is not None:
                 user_count = self.user_count[data[self.fuid]].max()
                 user_hist = self.user_hist[data[self.fuid]][:, 0:user_count]
-                _, neg_id, _ = self.negative_sampler(
-                    data[self.fuid].view(-1, 1), self.neg_sampling_count, user_hist)
+                neg_id = uniform_sampling(index.size(0), self.num_items,
+                                          self.neg_sampling_count, user_hist)
+                # _, neg_id, _ = self.negative_sampler(
+                # data[self.fuid].view(-1, 1), self.neg_sampling_count, user_hist)
                 neg_item_feat = self.item_feat[neg_id.long()]
                 for k in neg_item_feat:
                     data['neg_'+k] = neg_item_feat[k]
@@ -814,13 +807,21 @@ class MFDataset(Dataset):
         if drop_dup:
             self.inter_feat = self.inter_feat[self.first_item_idx]
 
+        if (split_mode == 'user_entry') or (split_mode == 'user'):
+            if self.ftime in self.inter_feat:
+                self.inter_feat.sort_values(by=[self.fuid, self.ftime], inplace=True)
+                self.inter_feat.reset_index(drop=True, inplace=True)
+            else:
+                self.inter_feat.sort_values(by=self.fuid, inplace=True)
+                self.inter_feat.reset_index(drop=True, inplace=True)
+
         if split_mode == 'user_entry':
             user_count = self.inter_feat[self.fuid].groupby(
                 self.inter_feat[self.fuid], sort=False).count()
             if shuffle:
                 cumsum = np.hstack([[0], user_count.cumsum()[:-1]])
-                idx = np.concatenate([np.random.permutation(
-                    c) + start for start, c in zip(cumsum, user_count)])
+                idx = np.concatenate([np.random.permutation(c)
+                        + start for start, c in zip(cumsum, user_count)])
                 self.inter_feat = self.inter_feat.iloc[idx].reset_index(
                     drop=True)
         elif split_mode == 'entry':
@@ -921,8 +922,8 @@ class MFDataset(Dataset):
             raise ValueError('can not compute sample length for this dataset')
 
     def eval_loader(self, batch_size, num_workers=1, ddp=False):
+        self.eval_mode = True
         if not getattr(self, 'fmeval', False):
-            self.eval_mode = True
             # if ddp:
             #     sampler = torch.utils.data.distributed.DistributedSampler(self, shuffle=False)
             #     output = DataLoader(

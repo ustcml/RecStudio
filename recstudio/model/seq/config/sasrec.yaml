@@ -6,3 +6,6 @@ dropout_rate: 0.5
 activation: 'gelu'
 
 negative_count: 1
+
+init_method: normal
+init_range: 0.01
