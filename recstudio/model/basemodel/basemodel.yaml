@@ -35,6 +35,11 @@ excluding_hist: False
 embed_dim: 64
 item_bias: False
 
+# `split_num` is set when the number of items are enormous, which will cause out-of-memory
+# problem. The `split_num` represents that the item vectors should be cut into several parts
+# to calculate scores step by step.
+split_num: ~
+
 # used for evaluating tower-based model
 eval_batch_size: 128
 val_n_epoch: 1

@@ -7,6 +7,7 @@ import random
 import re
 from collections import OrderedDict
 from typing import Dict, List, Optional, Union
+from torch import TensorType
 
 import numpy as np
 import requests
@@ -398,3 +399,32 @@ def get_gpus(gpu_config: Union[int, list]):
 
     else:
         raise TypeError(f'expected `gpu_config` to be int or list, but got {type(gpu_config)}.')
+
+
+def mask_with_hist(dist: TensorType, hist: TensorType, fill_value: float=0, inplace: bool=False):
+    r""" Mask probablities or scores in the dist with index in hist.
+
+    Args:
+        dist(TensorType): distribution or scores of all or some items. shape: [B,N]
+        hist(TensorType): index in hist should be masked. shape: [B, L], type: torch.long
+        fill_value(Union[float, str]): the value to be filled into mask positions. Optional: [0, 'inf', '-inf']
+        inplace(bool): whether to do inplace operation. Default: False
+
+    Returns:
+        TensorType: masked distribution or scores. shape: [B, N]
+    """
+    filled_values = dist.new_zeros(*hist.shape)
+    ops = {
+        0: lambda x: x,
+        'inf': lambda x: x+torch.inf,
+        '-inf': lambda x: x-torch.inf
+    }
+    if fill_value in ops:
+        filled_values = ops[fill_value](filled_values)
+    else:
+        raise ValueError("`fill_value` only support [0, 'inf', '-inf']")
+    if not inplace:
+        dist = torch.scatter(dist, dim=-1, index=hist, src=filled_values)
+    else:
+        dist.scatter_(dim=-1, index=hist, src=filled_values)
+    return dist
