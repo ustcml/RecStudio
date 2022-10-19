@@ -24,6 +24,20 @@ class CosineScorer(InnerProductScorer):
             keepdim=(query.dim()!=items.dim() or query.size(0)!=items.size(0)))
         return output
 
+class MacridVAEScorer(CosineScorer):
+    def forward(self, query, items):#query:(batch, k, dim)
+        if isinstance(items, torch.Tensor):#no pos_item
+            output = (super().forward(query.z, items))/query.tau
+            cates = query.cates[:,1:].unsqueeze(0)
+        else:
+            output = (super().forward(query.z, items.item_vector.weight))/query.tau #(batch, k, dim)
+            cates = query.cates.unsqueeze(0)
+        probs = (cates * torch.exp(output)).sum(1) #(batch,num_items)
+        scores = torch.log(probs)
+        if isinstance(items, torch.Tensor):
+            return scores
+        else:
+            return scores.gather(1, items.items_idx)
 
 class EuclideanScorer(InnerProductScorer):
     def forward(self, query, items):

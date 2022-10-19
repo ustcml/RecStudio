@@ -77,7 +77,7 @@ class MultiVAE(BaseRetriever):
         return AEDataset
 
     def _get_item_encoder(self, train_data):
-        return torch.nn.Embedding(train_data.num_items, self.embed_dim, 0)
+        return torch.nn.Embedding(train_data.num_items, self.embed_dim, 0)#pad for 0
 
     def _get_query_encoder(self, train_data):
         return MultiVAEQueryEncoder(train_data.fiid, train_data.num_items,

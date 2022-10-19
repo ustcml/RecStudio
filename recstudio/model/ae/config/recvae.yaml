@@ -1,11 +1,14 @@
-embed_dim: 200
-dropout_rate: 0.5
-encoder_dims: [64]
-decoder_dims: [64]
+dropout: 0.5
+hidden_dim: 200
+latent_dim: 200
 activation: relu
 
-anneal_max: 0.2
-anneal_total_step: 2000000
+gamma: 0.005
+beta: 0.005
+
+alternating: True
+enc_epoch: 3
+dec_epoch: 1
 
 learning_rate: 0.001
 weight_decay: 1e-5

@@ -171,7 +171,7 @@ class BaseRetriever(Recommender):
                 pos_score[batch[self.fiid] == 0] = -float('inf')  # padding
             output['score'] = {'pos_score': pos_score}
             if full_score:
-                item_vectors = self._get_item_vector()
+                item_vectors = self._get_item_vector()#这里不会把padding的那个item embedding取出来
                 all_item_scores = self.score_func(query, item_vectors)
                 output['score']['all_score'] = all_item_scores
 
@@ -360,7 +360,7 @@ class BaseRetriever(Recommender):
 
     def topk(self, batch, k, user_h=None, return_query=False):
         # TODO: complete topk with retriever
-        query = self.query_encoder(self._get_query_feat(batch))
+        query = self.query_encoder(self._get_query_feat(batch))#默认dropout_rate=0, 并且
         more = user_h.size(1) if user_h is not None else 0
         if self.use_index:
             if isinstance(self.score_func, CosineScorer):
@@ -409,9 +409,9 @@ class BaseRetriever(Recommender):
         score, topk_items = self.topk(batch, topk, batch['user_hist'])
         if batch[self.fiid].dim() > 1:
             target, _ = batch[self.fiid].sort()
-            idx_ = torch.searchsorted(target, topk_items)
+            idx_ = torch.searchsorted(target, topk_items)#idx_每一个元素i指target[i]>=topk_items对应位置元素，本质上就是分段，target=[3,14]时，那么topk_items里在(3,14]之间的数id就是1
             idx_[idx_ == target.size(1)] = target.size(1) - 1
-            label = torch.gather(target, 1, idx_) == topk_items
+            label = torch.gather(target, 1, idx_) == topk_items#为True的位置代表一个正例
             pos_rating = batch[self.frating]
         else:
             label = batch[self.fiid].view(-1, 1) == topk_items

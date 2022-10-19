@@ -41,10 +41,10 @@ class SoftmaxLoss(FullScoreLoss):
         if all_score.dim() > pos_score.dim():
             return torch.mean(torch.logsumexp(all_score, dim=-1) - pos_score)
         else:
-            output = torch.logsumexp(all_score, dim=-1, keepdim=True) - pos_score
-            notpadnum = torch.logical_not(torch.isinf(pos_score)).float().sum(-1)
+            output = torch.logsumexp(all_score, dim=-1, keepdim=True) - pos_score#得到的是每个pos item得分的softmax分值的log的负数
+            notpadnum = torch.logical_not(torch.isinf(pos_score)).float().sum(-1)#即每个user到底有多少的pos item （因为batch内有填充）
             output = torch.nan_to_num(output, posinf=0).sum(-1) / notpadnum
-            return torch.mean(output)
+            return torch.mean(output)#batch内loss均值
 
 
 class BPRLoss(PairwiseLoss):
