@@ -21,7 +21,7 @@ class MacridVAEDecoder(torch.nn.Module):
 
 class MacridVAEQueryEncoder(torch.nn.Module):
     def __init__(self, fiid, num_items, embed_dim, dropout_rate,
-                 encoder_dims, activation, kfac, tau, nogb, std, item_encoder):
+                 encoder_dims, activation, kfac, tau, nogb, std, item_encoder, reg_weights):
         super().__init__()
 
         self.fiid = fiid
@@ -29,6 +29,7 @@ class MacridVAEQueryEncoder(torch.nn.Module):
         self.tau = tau
         self.nogb = nogb
         self.std = std
+        self.regs = reg_weights
         self.item_encoder = item_encoder
         self.k_embedding = torch.nn.Embedding(kfac, embed_dim)
         self.item_embedding = torch.nn.Embedding(num_items, embed_dim, 0)
@@ -52,14 +53,11 @@ class MacridVAEQueryEncoder(torch.nn.Module):
         Returns:
             loss(torch.FloatTensor): The L2 Loss tensor. shape of [1,]
         """
-        reg_1, reg_2 = self.regs[:2]
-        loss_1 = reg_1 * self.item_encoder.weight.norm(2)
-        loss_2 = reg_1 * self.k_embedding.weight.norm(2)
-        loss_3 = 0
-        for name, parm in self.query_encoder.named_parameters():
+        loss = 0
+        for name, parm in self.named_parameters():
             if name.endswith('weight'):
-                loss_3 = loss_3 + reg_2 * parm.norm(2)
-        return loss_1 + loss_2 + loss_3
+                loss = loss + self.regs * parm.norm(2)
+        return loss
 
     def forward(self, batch):
         #对ci进行预测
@@ -80,7 +78,7 @@ class MacridVAEQueryEncoder(torch.nn.Module):
         for k in range(self.kfac):#为user生成每个z_k
             cates_k = self.cates[k,:].reshape(1,-1)#(1, num_items),每个item属于k类别的概率，c_i,k
             # encode,具体就是得到所有pos item embedding以及pos item的c_i,k值，然后加权和后过神经网络
-            cates_batch = cates_k.repeat(batch["in_"+self.fiid].shape[0],1)#(batch, num_items)
+            cates_batch = cates_k.expand(batch["in_"+self.fiid].shape[0],cates_k.shape[1])#(batch, num_items)
             cates_pos = cates_batch.gather(1,batch["in_"+self.fiid])#(batch, pos_items)
             
             seq_emb = self.item_embedding(batch["in_"+self.fiid])#(batch, pos_items, dim)
@@ -108,8 +106,8 @@ class MacridVAEQueryEncoder(torch.nn.Module):
             self.kl_loss = (kl_ if (self.kl_loss is None) else (self.kl_loss + kl_))
 
         self.regloss = None
-        # if self.regs[0]!=0 or self.regs[1]!=0:
-        #     self.regloss = self.reg_loss()
+        if self.regs!=0:
+            self.regloss = self.reg_loss()
 
         return self #(batch, k, dim), #(k,num_items)
 
@@ -134,7 +132,6 @@ class MacridVAE(BaseRetriever):
 
     def _init_model(self, train_data):
         super()._init_model(train_data)
-        self.regs = self.config["reg_weights"]
 
     def _get_dataset_class():
         return AEDataset
@@ -149,8 +146,8 @@ class MacridVAE(BaseRetriever):
 
     def _get_query_encoder(self, train_data):
         return MacridVAEQueryEncoder(train_data.fiid, train_data.num_items,
-                                    self.embed_dim, self.config['dropout_rate'], self.config['encoder_dims'],
-                                    self.config['activation'],self.config['kfac'],self.config['tau'],self.config['nogb'],self.config['std'], self.item_encoder.item_vector)
+                                    self.embed_dim, self.config['dropout_rate'], self.config['encoder_dims'],self.config['activation'],self.config['kfac'],
+                                    self.config['tau'],self.config['nogb'],self.config['std'], self.item_encoder.item_vector,self.config["reg_weights"])
 
     def _get_score_func(self):
         return MacridVAEScorer()
@@ -169,6 +166,6 @@ class MacridVAE(BaseRetriever):
         self.anneal = min(self.config['anneal_max'],
                           self.anneal + (1.0 / self.config['anneal_total_step']))
         if self.query_encoder.regloss:
-            return loss + anneal * self.kl_loss + self.query_encoder.regloss
+            return loss + anneal * self.query_encoder.kl_loss + self.query_encoder.regloss
         else:
             return loss + anneal * self.query_encoder.kl_loss

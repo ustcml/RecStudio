@@ -19,9 +19,9 @@ class InnerProductScorer(torch.nn.Module):
 class CosineScorer(InnerProductScorer):
     def forward(self, query, items):
         output = super().forward(query, items)
-        output /= torch.norm(items, dim=-1)
-        output /= torch.norm(query, dim=-1,
-            keepdim=(query.dim()!=items.dim() or query.size(0)!=items.size(0)))
+        output /= (torch.norm(items, dim=-1)+1e-12)
+        output /= (torch.norm(query, dim=-1,
+            keepdim=(query.dim()!=items.dim() or query.size(0)!=items.size(0)))+1e-12)
         return output
 
 class MacridVAEScorer(CosineScorer):
@@ -30,10 +30,10 @@ class MacridVAEScorer(CosineScorer):
             output = (super().forward(query.z, items))/query.tau
             cates = query.cates[:,1:].unsqueeze(0)
         else:
-            output = (super().forward(query.z, items.item_vector.weight))/query.tau #(batch, k, dim)
+            output = (super().forward(query.z, items.item_vector.weight))/query.tau
             cates = query.cates.unsqueeze(0)
         probs = (cates * torch.exp(output)).sum(1) #(batch,num_items)
-        scores = torch.log(probs)
+        scores = torch.log(probs+1e-12)
         if isinstance(items, torch.Tensor):
             return scores
         else:
