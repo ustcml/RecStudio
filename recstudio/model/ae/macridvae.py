@@ -5,7 +5,6 @@ from recstudio.model.loss_func import SoftmaxLoss
 from recstudio.model.module import MLPModule
 from recstudio.model.scorer import MacridVAEScorer
 import torch.nn.functional as F
-from ..loss_func import FullScoreLoss
 
 class MacridVAEDecoder(torch.nn.Module):
     def __init__(self, num_items, embed_dim) -> None:
@@ -106,7 +105,7 @@ class MacridVAEQueryEncoder(torch.nn.Module):
             self.kl_loss = (kl_ if (self.kl_loss is None) else (self.kl_loss + kl_))
 
         self.regloss = None
-        if self.regs!=0:
+        if self.regs>0.0:
             self.regloss = self.reg_loss()
 
         return self #(batch, k, dim), #(k,num_items)
@@ -126,8 +125,8 @@ class MacridVAE(BaseRetriever):
         parent_parser.add_argument("--kfac", type=int, default=7, help='Number of facets (macro concepts).')
         parent_parser.add_argument("--tau", type=float, default=0.1, help='Temperature of sigmoid/softmax, in (0,oo).')
         parent_parser.add_argument("--std", type=float, default=0.075, help='Standard deviation of the Gaussian prior.')
-        parent_parser.add_argument("--nogb", action='store_true', default=False, help='Disable Gumbel-Softmax sampling.')
-        parent_parser.add_argument("--reg_weights", type=float, nargs='+', default=0.0, help='L2 regularization.')
+        parent_parser.add_argument("--nogb", type=bool, default=False, help='Disable Gumbel-Softmax sampling.')
+        parent_parser.add_argument("--reg_weights", type=float, default=0.0, help='L2 regularization.')
         return parent_parser
 
     def _init_model(self, train_data):
@@ -162,10 +161,10 @@ class MacridVAE(BaseRetriever):
 
     def training_step(self, batch):
         loss = super().training_step(batch)
-        anneal = min(self.config['anneal_max'], self.anneal)
-        self.anneal = min(self.config['anneal_max'],
-                          self.anneal + (1.0 / self.config['anneal_total_step']))
+        # anneal = min(self.config['anneal_max'], self.anneal)
+        # self.anneal = min(self.config['anneal_max'],
+        #                   self.anneal + (1.0 / self.config['anneal_total_step']))
         if self.query_encoder.regloss:
-            return loss + anneal * self.query_encoder.kl_loss + self.query_encoder.regloss
+            return loss + self.config['anneal_max'] * self.query_encoder.kl_loss + self.query_encoder.regloss
         else:
-            return loss + anneal * self.query_encoder.kl_loss
+            return loss + self.config['anneal_max'] * self.query_encoder.kl_loss
