@@ -1,0 +1,27 @@
+experimentName: macridvae-ml1m # 实验名，用以跟踪实验
+useAnnotation: false
+searchSpaceFile: search_space_macridvae.json # 搜索空间文件的路径，配置文件的位置为当前目录
+
+trialCommand: python run.py --mode=tune --model=MacridVAE --dataset=ml-1m
+trialCodeDirectory: . # trial代码的目录位置，我这里写的是当前文件夹
+trialGpuNumber: 1 # **单个**trial需要用的gpu数量，没有写多卡并行此处填1
+
+trialConcurrency: 4 # 一次实验同时跑多少个trial
+maxTrialNumber: 2000 # 最大的尝试数量，一般随便设就行
+maxExperimentDuration: 100d
+
+
+experimentWorkingDirectory: ./nni-experiments
+
+
+tuner: # 采用的调试器，此处为默认调试器，有论文支撑的。 如果搜索空间不是纯粹的随机的话，用这个搜索器可以稍微增加效率, 例如考虑模型的层数，相较于1层，100层与99层的模型表现会更加接近
+  name: TPE
+  classArgs:
+    optimize_mode: maximize # 调试器优化方向，与final result有关
+
+
+trainingService: # 训练平台，以在服务器使用NNI为例
+  platform: local # 和本地跑NNI一致
+  useActiveGpu: True # 控制是否使用已被使用的GPU，如果在公共服务器或个人电脑上，请选择true，
+                     # 因为这两种情况下少有空闲gpu，如果false，那么nni会一直等到gpu空闲
+  gpuIndices: 0,1,4,7 # 使用GPU序号，从0开始

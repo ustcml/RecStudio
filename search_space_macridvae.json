@@ -1,0 +1,30 @@
+{
+    "batch_size":{
+        "_type": "choice",
+        "_value":[256, 512]
+    },
+    "std":{
+        "_type": "choice",
+        "_value":[0.1, 0.3]
+    },
+    "anneal_max":{
+        "_type": "choice",
+        "_value": [0.4, 1.0, 2.0]
+    },
+    "kfac":{
+        "_type": "choice",
+        "_value": [5, 7, 12]
+    },
+    "learning_rate": {
+        "_type": "choice",
+        "_value": [5e-5, 1e-4, 5e-4, 1e-3]
+    },
+    "reg_weights":{
+        "_type": "choice",
+        "_value": [1e-4, 1e-3]
+    },
+    "encoder_dims": {
+        "_type": "choice",
+        "_value": [[200,100], [400,100], [200,200,100],[400,400,100],[200,200,200,100]]
+    }
+}

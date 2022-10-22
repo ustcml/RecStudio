@@ -3,7 +3,7 @@ dropout_rate: 0.5
 encoder_dims: [200,100]
 activation: tanh
 
-anneal_max: 50
+anneal_max: 2
 anneal_total_step: 2000
 kfac: 7
 tau: 0.1
@@ -15,7 +15,7 @@ reg_weights: 1e-4
 learning_rate: 0.001
 weight_decay: 0
 learner: adam
-epochs: 200
+epochs: 1000
 batch_size: 256
 eval_batch_size: 256
 negative_count: 1000
