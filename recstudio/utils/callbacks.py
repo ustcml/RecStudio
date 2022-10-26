@@ -11,6 +11,7 @@ class EarlyStopping(object):
         self,
         model: torch.nn.Module,
         monitor: str,
+        dataset_name: str,
         save_dir: Optional[str] = None,
         filename: Optional[str] = None,
         patience: Optional[int] = 10,
@@ -71,7 +72,12 @@ class EarlyStopping(object):
             'parameters': copy.deepcopy(model._get_ckpt_param()),
             'metric': torch.inf if self.mode == 'min' else -torch.inf
         }
-        self._best_ckpt_path = f"{os.path.basename(self.logger.handlers[1].baseFilename).split('.')[0]}.ckpt"
+        if len(self.logger.handlers) > 1:
+            _file_name = os.path.basename(self.logger.handlers[1].baseFilename).split('.')[0]
+        else:
+            import time
+            _file_name = time.strftime(f"{self.model_name}-{dataset_name}-%Y-%m-%d-%H-%M-%S.log", time.localtime())
+        self._best_ckpt_path = f"{_file_name}.ckpt"
 
     def __check_save_dir(self):
         if self.save_dir is not None:
@@ -99,7 +105,6 @@ class EarlyStopping(object):
         if self._counter >= self.patience:
             self.logger.info(f"Early stopped. Since the metric {self.monitor} haven't been improved for {self._counter} epochs.")
             self.logger.info(f"The best score of {self.monitor} is {self.best_ckpt['metric']:.4f} on epoch {self.best_ckpt['epoch']}")
-            self.save_checkpoint(epoch)
             return True
         else:
             return False
@@ -124,7 +129,13 @@ class EarlyStopping(object):
 
 class SaveLastCallback(object):
 
-    def __init__(self, model:torch.nn.Module, save_dir: Optional[str] = None, filename: Optional[str] = None):
+    def __init__(
+        self,
+        model:torch.nn.Module,
+        dataset_name: str,
+        save_dir: Optional[str] = None,
+        filename: Optional[str] = None
+        ):
         self.model_name = model.__class__.__name__
         self.logger = logging.getLogger('recstudio')
         self.last_ckpt = {
@@ -139,7 +150,13 @@ class SaveLastCallback(object):
         if filename != None:
             self._last_ckpt_path = filename
         else:
-            self._last_ckpt_path = f"{os.path.basename(self.logger.handlers[1].baseFilename).split('.')[0]}.ckpt"
+            if len(self.logger.handlers) > 1:
+                _file_name = os.path.basename(self.logger.handlers[1].baseFilename).split('.')[0]
+            else:
+                import time
+                _file_name = time.strftime(f"{self.model_name}-{dataset_name}-%Y-%m-%d-%H-%M-%S.log",
+                                           time.localtime())
+            self._last_ckpt_path = f"{_file_name}.ckpt"
 
     def __check_save_dir(self):
         if self.save_dir is not None:
@@ -163,7 +180,13 @@ class SaveLastCallback(object):
 
 class IntervalCallback(object):
 
-    def __init__(self, model:torch.nn.Module, print_logger, save_dir: Optional[str] = None, interval_epochs:int = 20) -> None:
+    def __init__(self,
+        model:torch.nn.Module,
+        print_logger,
+        dataset_name: str,
+        save_dir: Optional[str] = None,
+        interval_epochs:int = 20
+        ) -> None:
         self.interval_epochs = interval_epochs
         self.model_name = model.__class__.__name__
         self.logger = print_logger
@@ -176,7 +199,12 @@ class IntervalCallback(object):
         }
         self.save_dir = save_dir
         self.__check_save_dir()
-        self.start_ckpt_path = os.path.basename(self.logger.handlers[1].baseFilename).split('.')[0]
+        if len(self.logger.handlers) > 1:
+            self.start_ckpt_path = os.path.basename(self.logger.handlers[1].baseFilename).split('.')[0]
+        else:
+            import time
+            self.start_ckpt_path = time.strftime(f"{self.model_name}-{dataset_name}-%Y-%m-%d-%H-%M-%S.log",
+                                                 time.localtime())
         self.current_epoch = 0
 
     def __check_save_dir(self):
