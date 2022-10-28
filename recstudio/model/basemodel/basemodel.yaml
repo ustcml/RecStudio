@@ -42,6 +42,6 @@ val_metrics: [ndcg, recall]
 topk: 100
 cutoff: [10, 20, 5]
 early_stop_mode: max
-early_stop_patience: 10
+early_stop_patience: 50
 
 save_path: './saved/'

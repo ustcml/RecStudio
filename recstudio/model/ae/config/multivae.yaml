@@ -1,18 +1,19 @@
-embed_dim: 200
+embed_dim: 100
 dropout_rate: 0.5
-encoder_dims: [64]
+encoder_dims: [600,200]
 decoder_dims: [64]
 activation: relu
+share_item_encoder: 1
 
 anneal_max: 0.2
-anneal_total_step: 2000000
+anneal_total_step: 200000
 
 learning_rate: 0.001
 weight_decay: 1e-5
 learner: adam
-epochs: 200
+epochs: 1000
 batch_size: 256
-eval_batch_size: 200
+eval_batch_size: 256
 negative_count: 1000
 # negative_count: [2000, 1000]  # DNS, SIR
 # negative_count: [1000, 500]  # DNS

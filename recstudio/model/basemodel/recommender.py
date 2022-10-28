@@ -264,9 +264,6 @@ class Recommender(torch.nn.Module, abc.ABC):
                 loss_metric = {'train_'+k : v for k, v in outputs}
             self.log_dict(loss_metric)
 
-        if self.val_check and self.run_mode == 'tune':
-            metric = self.logged_metrics[self.val_metric]
-            nni.report_intermediate_result(metric.item())
         # TODO: only print when rank=0
         if self.run_mode in ['light', 'tune'] or self.val_check:
             self.logger.info(color_dict(self.logged_metrics, self.run_mode == 'tune'))
@@ -495,6 +492,9 @@ class Recommender(torch.nn.Module, abc.ABC):
                     self.eval()
                     validation_output_list = self.validation_epoch(nepoch, val_dataloader)
                     self.validation_epoch_end(validation_output_list)
+                    if self.run_mode == 'tune' and nepoch % 20 == 0:
+                        metric = self.logged_metrics[self.val_metric]
+                        nni.report_intermediate_result(metric.item())
                 tok_valid = time.time()
 
                 self.training_epoch_end(training_output_list)

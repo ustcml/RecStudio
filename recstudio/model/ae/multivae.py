@@ -8,24 +8,28 @@ from recstudio.model.scorer import InnerProductScorer
 
 class MultiVAEQueryEncoder(torch.nn.Module):
     def __init__(self, fiid, num_items, embed_dim, dropout_rate,
-                 encoder_dims, decoder_dims, activation='relu'):
+                 encoder_dims, decoder_dims, item_encoder, share_item_encoder, activation):
         super().__init__()
-        assert encoder_dims[-1] == decoder_dims[0], 'expecting the output size of'\
-            'encoder is equal to the input size of decoder.'
-        assert encoder_dims[0] == decoder_dims[-1], 'expecting the output size of'\
-            'decoder is equal to the input size of encoder.'
+        # assert encoder_dims[-1] == decoder_dims[0], 'expecting the output size of'\
+        #     'encoder is equal to the input size of decoder.'
+        # assert encoder_dims[0] == decoder_dims[-1], 'expecting the output size of'\
+        #     'decoder is equal to the input size of encoder.'
 
         self.fiid = fiid
-        self.item_embedding = torch.nn.Embedding(num_items, embed_dim, 0)
+        self.item_embedding = item_encoder if share_item_encoder==1 else torch.nn.Embedding(num_items, embed_dim, 0)
         self.dropout = torch.nn.Dropout(p=dropout_rate)
         self.encoders = torch.nn.Sequential(
             MLPModule([embed_dim]+encoder_dims[:-1], activation),
             torch.nn.Linear(([embed_dim]+encoder_dims[:-1])[-1], encoder_dims[-1]*2)
         )
-        self.decoders = torch.nn.Sequential(
-            MLPModule(decoder_dims, activation),
-            torch.nn.Linear(decoder_dims[-1], embed_dim)
-        )
+        if decoder_dims[0]!=-1:
+            self.decoders = torch.nn.Sequential(
+                MLPModule(decoder_dims, activation),
+                torch.nn.Linear(decoder_dims[-1], embed_dim)
+            )
+        else:
+            self.decoders = torch.nn.Sequential()
+
         self.kl_loss = 0.0
 
     def forward(self, batch):
@@ -71,6 +75,7 @@ class MultiVAE(BaseRetriever):
         parent_parser.add_argument("--activation", type=str, default='relu', help='activation function for MLP layers')
         parent_parser.add_argument("--anneal_max", type=float, default=1.0, help="max anneal coef for KL loss")
         parent_parser.add_argument("--anneal_total_step", type=int, default=2000, help="total anneal steps")
+        parent_parser.add_argument("--share_item_encoder", type=int, default=0, help="")
         return parent_parser
 
     def _get_dataset_class():
@@ -82,7 +87,7 @@ class MultiVAE(BaseRetriever):
     def _get_query_encoder(self, train_data):
         return MultiVAEQueryEncoder(train_data.fiid, train_data.num_items,
                                     self.embed_dim, self.config['dropout_rate'], self.config['encoder_dims'],
-                                    self.config['decoder_dims'], self.config['activation'])
+                                    self.config['decoder_dims'], self.item_encoder, self.config['share_item_encoder'], self.config['activation'])
 
     def _get_score_func(self):
         return InnerProductScorer()
