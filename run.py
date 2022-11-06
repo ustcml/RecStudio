@@ -1,7 +1,5 @@
 import os
-import torch
 import time
-import torch
 import argparse
 from recstudio.utils import get_model, color_dict_normal, set_color, get_logger
 

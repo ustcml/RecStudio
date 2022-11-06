@@ -1,0 +1,34 @@
+# seq 
+test_repetitive: True # user # entry
+train_repetitive: True
+eval_batch_size: 128
+split_ratio: 2
+cutoff: [20, 50, 10, 5]
+epochs: 1000
+early_stop_patience: 40
+
+# model
+batch_size: 256
+init_method: normal
+init_range: 0.02
+embed_dim: 64
+negative_count: 1
+
+# transformer 
+hidden_size: 64
+layer_num: 1
+head_num: 2
+dropout_rate: 0.5
+activation: 'gelu'
+layer_norm_eps: 1e-5
+
+# augmentation 
+# amazon-beauty 
+temperature: 1.0
+augment_type: item_random # item_crop, item_mask, item_reorder, item_random
+cl_weight: 0.1
+intent_cl_weight: 0.1
+warm_up_epoches: 0 # number of epochs to start IntentCL.
+num_intent_clusters: 256
+intent_seq_representation_type: 'mean'
+instance_seq_representation_type: 'mean'

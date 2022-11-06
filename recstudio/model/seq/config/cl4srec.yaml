@@ -1,0 +1,31 @@
+# seq 
+test_repetitive: True # user # entry
+train_repetitive: True
+eval_batch_size: 128
+split_ratio: 2
+cutoff: [20, 50, 10, 5]
+epochs: 1000
+early_stop_patience: 40
+
+
+# model
+batch_size: 256
+init_method: normal
+init_range: 0.02
+negative_count: 1
+embed_dim: 64
+
+# transformer
+hidden_size: 64
+layer_num: 1
+head_num: 2
+dropout_rate: 0.5
+activation: 'gelu'
+layer_norm_eps: 1e-12
+
+# contrastive 
+temperature: 1.0
+augment_type: item_crop  # item_crop, item_mask, item_reorder
+tao: 0.2
+cl_weight: 0.1
+
