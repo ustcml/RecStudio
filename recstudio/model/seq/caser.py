@@ -15,40 +15,35 @@ Paper Reference:
 
 class CaserQueryEncoder(torch.nn.Module):
 
-    def __init__(self, fiid, fuid, num_users, num_items, embed_dim, max_seq_len, n_v, n_h, dropout_rate, ) -> None:
+    def __init__(self, fiid, fuid, num_users, num_items, embed_dim, max_seq_len, n_v, n_h, dropout=0.2) -> None:
         super().__init__()
         self.fiid = fiid
         self.fuid = fuid
         self.max_seq_len = max_seq_len
         self.user_embedding = torch.nn.Embedding(num_users, embed_dim, 0)
         self.item_embedding = torch.nn.Embedding(num_items, embed_dim, 0)
-        self.vertical_filter = torch.nn.parameter.Parameter(
-            torch.zeros(size=(max_seq_len, n_v), dtype=torch.float32),
-            requires_grad=True
+        self.dropout = torch.nn.Dropout(p=dropout)
+        self.vertical_filter = torch.nn.Conv2d(
+            in_channels=1, out_channels=n_v, kernel_size=(self.max_seq_len, 1)
         )
         height = range(1, max_seq_len + 1)
         self.horizontal_filter = torch.nn.ModuleList([
             torch.nn.Conv2d(in_channels=1, out_channels=n_h, kernel_size=(h, embed_dim))
             for h in height
         ])
-        self.fc_w = torch.nn.parameter.Parameter(
-            torch.zeros((n_v*embed_dim+n_h*max_seq_len, embed_dim), dtype=torch.float32),
-            requires_grad=True
-        )
-        self.fc_b = torch.nn.parameter.Parameter(
-            torch.zeros(embed_dim, dtype=torch.float32),
-            requires_grad=True
-        )
+        self.fc = torch.nn.Linear(n_v*embed_dim+n_h*max_seq_len, embed_dim, bias=True)
 
     def forward(self, batch):
         P_u = self.user_embedding(batch[self.fuid])
-        E_ut = self.item_embedding(batch['in_' + self.fiid])
+        item_seq = batch['in_'+self.fiid]
+        item_seq = torch.nn.functional.pad(item_seq, (0, self.max_seq_len-item_seq.size(1)))
+        E_ut = self.item_embedding(item_seq)
+        E_ut_ = E_ut.view(-1, 1, *E_ut.shape[1:])
 
-        o_v = (E_ut.transpose(1, 2) @ self.vertical_filter[: E_ut.size(1), :]).transpose(1, 2)
+        o_v = self.vertical_filter(E_ut_)
         o_v = o_v.reshape(o_v.size(0), -1)
 
         o_h = []
-        E_ut_ = E_ut.view(-1, 1, *E_ut.shape[1:])
         for i in range(E_ut.size(1)):
             conv_out = torch.relu(self.horizontal_filter[i](E_ut_).squeeze(3))
             pool_out = torch.nn.functional.max_pool1d(conv_out, conv_out.size(2))
@@ -56,7 +51,8 @@ class CaserQueryEncoder(torch.nn.Module):
         o_h = torch.cat(o_h, dim=1)
 
         o = torch.cat((o_v, o_h), dim=1)
-        z = torch.relu(o @ self.fc_w[: o.size(1), :] + self.fc_b)
+        o = self.dropout(o)
+        z = torch.relu(self.fc(o))
         return torch.cat((z, P_u), dim=1)
 
 

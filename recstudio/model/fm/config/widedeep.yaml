@@ -1,6 +1,4 @@
 embed_dim: 10
 mlp_layer: [256, 256, 256]
 activation: 'relu'
-num_layers: 6
-dropout: 0.5
-batch_norm: True
+dropout: 0.3

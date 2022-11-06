@@ -22,6 +22,8 @@ def get_act(activation: str, dim=None):
             return Dice(dim)
         elif activation.lower() == 'gelu':
             return torch.nn.GELU()
+        elif activation.lower() == 'leakyrelu':
+            return torch.nn.LeakyReLU()
         else:
             raise ValueError(
                 f'activation function type "{activation}"  is not supported, check spelling or pass in a instance of torch.nn.Module.')
@@ -139,6 +141,9 @@ class MLPModule(torch.nn.Module):
         mlp_layers(list): the dimensions of every layer in the MLP.
         activation_func(torch.nn.Module,str,None): the activation function in each layer.
         dropout(float): the probability to be set in dropout module. Default: ``0.0``.
+        bias(bool): whether to add batch normalization between layers. Default: ``False``.
+        last_activation(bool): whether to add activation in the last layer. Default: ``True``.
+        last_bn(bool): whether to add batch normalization in the last layer. Default: ``True``.
 
     Examples:
     >>> MLP = MLPModule([64, 64, 64], 'ReLU', 0.2)
@@ -165,7 +170,7 @@ class MLPModule(torch.nn.Module):
     )
     """
 
-    def __init__(self, mlp_layers, activation_func='ReLU', dropout=0.0, bias=True, batch_norm=False):
+    def __init__(self, mlp_layers, activation_func='ReLU', dropout=0.0, bias=True, batch_norm=False, last_activation=True, last_bn=True):
         super().__init__()
         self.mlp_layers = mlp_layers
         self.batch_norm = batch_norm
@@ -173,12 +178,14 @@ class MLPModule(torch.nn.Module):
         self.dropout = dropout
         self.activation_func = activation_func
         self.model = []
+        last_bn = self.batch_norm and last_bn
         for idx, layer in enumerate((zip(self.mlp_layers[: -1], self.mlp_layers[1:]))):
             self.model.append(torch.nn.Dropout(dropout))
             self.model.append(torch.nn.Linear(*layer, bias=bias))
-            if batch_norm:
+            if (idx == len(mlp_layers)-2 and last_bn) or (idx < len(mlp_layers)-2 and batch_norm):
                 self.model.append(torch.nn.BatchNorm1d(layer[-1]))
-            if activation_func is not None:
+            if ( (idx == len(mlp_layers)-2 and last_activation and activation_func is not None)
+                or (idx < len(mlp_layers)-2 and activation_func is not None) ):
                 activation = get_act(activation_func, dim=layer[-1])
                 self.model.append(activation)
         self.model = torch.nn.Sequential(*self.model)

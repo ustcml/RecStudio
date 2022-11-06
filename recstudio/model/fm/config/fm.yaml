@@ -1,6 +1,4 @@
-split_mode: user_entry
-
-embed_dim: 64
+embed_dim: 10
 
 test_metrics: [auc, logloss]
 val_metrics: [auc, logloss]

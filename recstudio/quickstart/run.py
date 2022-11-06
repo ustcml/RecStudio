@@ -19,7 +19,7 @@ def run(model: str, dataset: str, model_config: Union[Dict, str]=None, data_conf
     log_path = time.strftime(f"{model_class.__name__}-{dataset}-%Y-%m-%d-%H-%M-%S.log", time.localtime())
     logger = get_logger(log_path)
     model = model_class(model_conf)
-    dataset_class = model._get_dataset_class()
+    dataset_class = model_class._get_dataset_class()
     datasets = dataset_class(name=dataset, config=data_config).build(**model_conf)
     logger.info(f"{datasets[0]}")
     logger.info(f"\n{set_color('Model Config', 'green')}: \n\n" + color_dict_normal(model_conf, False))
