@@ -164,6 +164,7 @@ class Recommender(torch.nn.Module, abc.ABC):
                 val_loader = None
             self.optimizers = self._get_optimizers()
             self.fit_loop(val_loader)
+        return self.callback.best_ckpt['metric']
 
     def parallel_training(self, rank, world_size, train_data, val_data):
         dist.init_process_group("nccl", rank=rank, world_size=world_size)

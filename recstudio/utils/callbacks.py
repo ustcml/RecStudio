@@ -70,7 +70,7 @@ class EarlyStopping(object):
             'model': self.model_name,
             'epoch': 0,
             'parameters': copy.deepcopy(model._get_ckpt_param()),
-            'metric': torch.inf if self.mode == 'min' else -torch.inf
+            'metric': {self.monitor: np.inf if self.mode=='min' else -np.inf}
         }
         if len(self.logger.handlers) > 1:
             _file_name = os.path.basename(self.logger.handlers[1].baseFilename).split('.')[0]
@@ -88,14 +88,14 @@ class EarlyStopping(object):
         if self.monitor not in metrics:
             raise ValueError(f"monitor {self.monitor} not in given `metrics`.")
         if self.mode == 'max':
-            if metrics[self.monitor] >= self.best_ckpt['metric']+self.delta:
-                self._reset_counter(model, epoch, metrics[self.monitor])
+            if metrics[self.monitor] >= self.best_value+self.delta:
+                self._reset_counter(model, epoch, metrics)
                 self.logger.info("{} improved. Best value: {:.4f}".format(
                                 self.monitor, metrics[self.monitor]))
             else:
                 self._counter += 1
         else:
-            if metrics[self.monitor] <= self.best_ckpt['metric']-self.delta:
+            if metrics[self.monitor] <= self.best_value-self.delta:
                 self._reset_counter(model, epoch, metrics[self.monitor])
                 self.logger.info("{} improved. Best value: {:.4f}".format(
                                 self.monitor, metrics[self.monitor]))
@@ -103,14 +103,17 @@ class EarlyStopping(object):
                 self._counter += 1
 
         if self._counter >= self.patience:
-            self.logger.info(f"Early stopped. Since the metric {self.monitor} haven't been improved for {self._counter} epochs.")
-            self.logger.info(f"The best score of {self.monitor} is {self.best_ckpt['metric']:.4f} on epoch {self.best_ckpt['epoch']}")
+            self.logger.info(f"Early stopped. Since the metric {self.monitor} "
+                             f"haven't been improved for {self._counter} epochs.")
+            self.logger.info(f"The best score of {self.monitor} is "
+                             f"{self.best_value:.4f} on epoch {self.best_ckpt['epoch']}")
             return True
         else:
             return False
 
     def _reset_counter(self, model: torch.nn.Module, epoch, value):
         self._counter = 0
+        self.best_value = value[self.monitor]
         self.best_ckpt['parameters'] = copy.deepcopy(model._get_ckpt_param())
         self.best_ckpt['metric'] = value
         self.best_ckpt['epoch'] = epoch
