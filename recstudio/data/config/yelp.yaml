@@ -1,0 +1,42 @@
+url: https://rec.ustc.edu.cn/share/cdc6de70-2f87-11ed-b5db-4d1a26914a90
+user_id_field: &u user_id:token # TODO: comments for &u and *u
+item_id_field: &i business_id:token
+rating_field: &r stars:float
+time_field: &t date:float
+time_format: ~
+
+
+encoding_method: utf-8
+inter_feat_name: yelp_inter.csv
+inter_feat_field: [review_id:token, *u, *i, *r, *t]
+inter_feat_header: 0
+
+
+user_feat_name: ~ #[yelp_user.csv]
+user_feat_field: [[*u, user_name:token, yelping_since:float, fans:float, average_stars:float]]
+user_feat_header: 0
+
+
+item_feat_name: ~ #[yelp_item.csv]
+item_feat_field: [[business_id:token, business_name:token, city:token, state:token, postal_code:token, latitude:float, longitude:float, business_stars:float, 'categories:token_seq:", "']]
+item_feat_header: 0
+
+
+use_fields: ~  # TODO: 
+field_separator: ","
+min_user_inter: 10
+min_item_inter: 10
+field_max_len: ~
+rating_threshold: 3
+ranker_rating_threshold: 3
+drop_low_rating: True
+max_seq_len: 20
+
+# network feature, including social network and knowledge graph, the first two fields are remapped the corresponding features
+network_feat_name: ~ #[[social.txt], [ml-100k.kg, ml-100k.link]]
+mapped_feat_field: [*u, *i]
+network_feat_field: [[[source_id:token, target_id:token]], [[head_id:token, tail_id:token, relation_id:token], [*i, entity_id:token]]]
+network_feat_header: [~, ~]
+
+
+save_cache: True # whether to save processed dataset to cache.

@@ -1,12 +1,9 @@
 from recstudio.data.dataset import MFDataset
 from recstudio.model import basemodel, loss_func, scorer
-from recstudio.model.module import graphmodule, layers, data_augmentation
+from recstudio.model.module import graphmodule, data_augmentation
 from recstudio.ann import sampler
 import torch
 import torch.nn.functional as F
-import numpy as np 
-import scipy.sparse as sp
-import dgl
 
 class SimGCLNet(graphmodule.LightGCNNet_dglnn):
 

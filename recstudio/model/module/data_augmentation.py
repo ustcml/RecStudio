@@ -1,18 +1,24 @@
-import numpy as np
+import math
+import os
 import torch
 import random
 import faiss
 import copy
-from typing import List, Tuple, overload, Optional, Union
+import pickle
+import scipy.sparse as sp 
+import numpy as np
+from typing import Optional, Union
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
-from torch.nn.parameter import Parameter
 from recstudio.model.basemodel.recommender import Recommender
+from recstudio.model.module import functional as recfn
 from recstudio.model.module import layers
+from recstudio.data import dataset
+from tqdm import tqdm 
+from recstudio.utils import DEFAULT_CACHE_DIR, md5
 
 
 # sequence augmentation 
-
 class Item_Crop(torch.nn.Module):
     
     def __init__(self, tao=0.2):
@@ -301,21 +307,21 @@ class NodeDropout(torch.nn.Module):
 class InfoNCELoss(torch.nn.Module):
     '''
     Parameters: 
-    neg_type(str):
+    neg_type(str): 'batch_both', 'batch_single', 'all'
     '''
 
-    def __init__(self, temperature:float=1.0, sim_method:str='inner_product', neg_type:str='batch') -> None:
+    def __init__(self, temperature:float=1.0, sim_method:str='inner_product', neg_type:str='batch_both') -> None:
         super().__init__()
         self.temperature = temperature
         self.sim_method = sim_method
         self.neg_type = neg_type
     
     def forward(self, augmented_rep_i: torch.Tensor, augmented_rep_j: torch.Tensor, \
-        sample_labels=None, all_reps: Optional[torch.Tensor]=None):
+        instance_labels=None, all_reps: Optional[torch.Tensor]=None):
         # augmented_rep_i, augmented_rep_j : [B, D], all_reps : [N, D]
         # labels: [B]
         # negative items: 2*N - 1
-        if self.neg_type == 'batch':
+        if self.neg_type == 'batch_both':
             assert all_reps == None, "all_reps is used when the negative strategy is 'all'."
             batch_size = augmented_rep_i.size(0)
             if self.sim_method == 'inner_product':
@@ -327,12 +333,13 @@ class InfoNCELoss(torch.nn.Module):
                 sim_ii = torch.matmul(augmented_rep_i, augmented_rep_i.T) / self.temperature
                 sim_ij = torch.matmul(augmented_rep_i, augmented_rep_j.T) / self.temperature
 
-            if sample_labels is not None:
+            if instance_labels is not None:
                 '''
                 do de-noise as ICLRec, if data_1 and data_2 have the same label, 
                 then (data_1_i, data_2_i) and (data_1_i, data_2_j) won't be treated as negative samples.
                 '''
-                mask = torch.eq(sample_labels.unsqueeze(-1), sample_labels) # [B, B]
+                # instance_labels: [batch_size]
+                mask = torch.eq(instance_labels.unsqueeze(-1), instance_labels) # [B, B]
                 sim_ii[mask == 1] = float('-inf')
                 mask = mask.fill_diagonal_(False)
                 sim_ij[mask == 1] = float('-inf')
@@ -342,17 +349,38 @@ class InfoNCELoss(torch.nn.Module):
 
             logits = torch.cat([sim_ij, sim_ii], dim=-1) # [B, 2 * B]
             labels = torch.arange(batch_size, dtype=torch.long, device=augmented_rep_i.device) # [B]
-
             loss = F.cross_entropy(logits, labels)
-
             return loss 
-        
+
+        elif self.neg_type == 'batch_single':
+            assert all_reps == None, "all_reps is used when the negative strategy is 'all'."
+            batch_size = augmented_rep_i.size(0)
+            if self.sim_method == 'inner_product':
+                sim_ij = torch.matmul(augmented_rep_i, augmented_rep_j.T) / self.temperature # [B, B]
+            elif self.sim_method == 'cosine':
+                augmented_rep_i = F.normalize(augmented_rep_i, p=2, dim=-1)
+                augmented_rep_j = F.normalize(augmented_rep_j, p=2, dim=-1)
+                sim_ij = torch.matmul(augmented_rep_i, augmented_rep_j.T) / self.temperature # [B, B]
+            if instance_labels is not None:
+                '''
+                do de-noise as ICLRec, if data_1 and data_2 have the same label, 
+                then (data_1_i, data_2_i) and (data_1_i, data_2_j) won't be treated as negative samples.
+                '''
+                # instance_labels: [batch_size]
+                mask = torch.eq(instance_labels.unsqueeze(-1), instance_labels) # [B, B]
+                mask = mask.fill_diagonal_(False)
+                sim_ij[mask == 1] = float('-inf')
+
+            labels = torch.arange(batch_size, dtype=torch.long, device=augmented_rep_i.device) # [B] 
+            loss = F.cross_entropy(sim_ij, labels)
+            return loss
+
         elif self.neg_type == 'all':
             # In graph models, the negative items usually are all items in the dataset.
             # augmented_rep_i : [B, D], augmented_rep_j : [B, D], all_reps: [N, D]
             # negative items : N 
             assert all_reps != None, "all_reps shouldn't be None."
-            assert sample_labels == None, "sample_labels is used when the negative strategy is 'batch'."
+            assert instance_labels == None, "instance_labels is used when the negative strategy is 'batch'."
 
             batch_size = augmented_rep_i.size(0)
             if self.sim_method == 'inner_product':
@@ -502,7 +530,7 @@ class SimGCLAugmentation(torch.nn.Module):
         self.fiid = train_data.fiid
         self.num_users = train_data.num_users
         self.num_items = train_data.num_items
-        self.InfoNCELoss_fn = InfoNCELoss(temperature=self.config['temperature'], sim_method='cosine', neg_type='all') 
+        self.InfoNCELoss_fn = InfoNCELoss(temperature=self.config['temperature'], sim_method='cosine', neg_type=self.config['cl_neg_type']) 
         
     def get_gnn_embeddings(self, user_emb, item_emb, adj_mat, gnn_net):
         adj_mat = adj_mat.to(user_emb.weight.device)
@@ -524,10 +552,18 @@ class SimGCLAugmentation(torch.nn.Module):
         user_all_vec1, item_all_vec1 = self.get_gnn_embeddings(user_emb, item_emb, adj_mat, gnn_net)
         user_all_vec2, item_all_vec2 = self.get_gnn_embeddings(user_emb, item_emb, adj_mat, gnn_net)
 
-        user_cl_loss = \
-            self.InfoNCELoss_fn(user_all_vec1[u_idx], user_all_vec2[u_idx], all_reps=user_all_vec2[1:])
-        item_cl_loss = \
-            self.InfoNCELoss_fn(item_all_vec1[i_idx], item_all_vec2[i_idx], all_reps=item_all_vec2[1:])
+        if self.config['cl_neg_type'] == 'all':
+            user_cl_loss = \
+                self.InfoNCELoss_fn(user_all_vec1[u_idx], user_all_vec2[u_idx], all_reps=user_all_vec2[1:])
+        else:
+            user_cl_loss = \
+                self.InfoNCELoss_fn(user_all_vec1[u_idx], user_all_vec2[u_idx])
+        if self.config['cl_neg_type'] == 'all':
+            item_cl_loss = \
+                self.InfoNCELoss_fn(item_all_vec1[i_idx], item_all_vec2[i_idx], all_reps=item_all_vec2[1:])
+        else:
+            item_cl_loss = \
+                self.InfoNCELoss_fn(item_all_vec1[i_idx], item_all_vec2[i_idx])
 
         output_dict['cl_loss'] = user_cl_loss + item_cl_loss
 
@@ -543,25 +579,30 @@ class CL4SRecAugmentation(torch.nn.Module):
         if self.config['augment_type'] == 'item_crop':
             self.augmentation = Item_Crop(self.config['tao'])
         elif self.config['augment_type'] == 'item_mask':
-            self.augmentation = Item_Mask(train_data.num_items)
+            self.augmentation = Item_Mask(mask_id=train_data.num_items)
         elif self.config['augment_type'] == 'item_reorder':
             self.augmentation = Item_Reorder()
         elif self.config['augment_type'] == 'item_random':
-            self.augmentation = Item_Random(train_data.num_items)
+            self.augmentation = Item_Random(mask_id=train_data.num_items)
         else:
             raise ValueError(f"augmentation type: '{self.config['augment_type']}' is invalided")
-        self.InfoNCE_score_func = InfoNCE(temperature=self.config['temperature'], sim_method='inner_product')
+        self.InfoNCE_loss_fn = InfoNCELoss(temperature=self.config['temperature'], sim_method='inner_product', neg_type='batch_both')
 
     def forward(self, batch, query_encoder:torch.nn.Module):
         output_dict = {}
         seq_augmented_i, seq_augmented_i_len = self.augmentation(batch['in_' + self.fiid], batch['seqlen']) # seq: [B, L] seq_len : [B]
         seq_augmented_j, seq_augmented_j_len = self.augmentation(batch['in_' + self.fiid], batch['seqlen'])
-        seq_augmented_i_out = query_encoder({"in_" + self.fiid: seq_augmented_i, "seqlen" : seq_augmented_i_len},\
-            pooling_type='mean') # [B, D]
+
+        seq_augmented_i_out = query_encoder({"in_" + self.fiid: seq_augmented_i, "seqlen": seq_augmented_i_len},\
+            need_pooling=False) # [B, L, D]
+        seq_augmented_i_out = recfn.seq_pooling_function(seq_augmented_i_out, seq_augmented_i_len, pooling_type='mean') # [B, D]
+        
         seq_augmented_j_out = query_encoder({"in_" + self.fiid: seq_augmented_j, "seqlen" : seq_augmented_j_len},\
-            pooling_type='mean') # [B, D]
-        logits, labels = self.InfoNCE_score_func(seq_augmented_i_out, seq_augmented_j_out) 
-        output_dict['cl_score'] = (logits, labels)
+            need_pooling=False) # [B, L, D]
+        seq_augmented_j_out = recfn.seq_pooling_function(seq_augmented_j_out, seq_augmented_j_len, pooling_type='mean') # [B, D]
+        
+        cl_loss = self.InfoNCE_loss_fn(seq_augmented_i_out, seq_augmented_j_out) 
+        output_dict['cl_loss'] = cl_loss
         return output_dict
 
 class ICLRecAugmentation(torch.nn.Module):
@@ -573,16 +614,15 @@ class ICLRecAugmentation(torch.nn.Module):
         if self.config['augment_type'] == 'item_crop':
             self.augmentation = Item_Crop()
         elif self.config['augment_type'] == 'item_mask':
-            self.augmentation = Item_Mask(train_data.num_items)
+            self.augmentation = Item_Mask(mask_id=train_data.num_items)
         elif self.config['augment_type'] == 'item_reorder':
             self.augmentation = Item_Reorder()
         elif self.config['augment_type'] == 'item_random':
-            self.augmentation = Item_Random(train_data.num_items)
+            self.augmentation = Item_Random(mask_id=train_data.num_items)
         else:
             raise ValueError(f"augmentation type: '{self.config['augment_type']}' is invalided")
 
-        self.InfoNCE_score_func = InfoNCE()
-        self.InfoNCE_loss_fn = torch.nn.CrossEntropyLoss()
+        self.InfoNCE_loss_fn = InfoNCELoss(temperature=self.config['temperature'], sim_method='inner_product', neg_type='batch_both')
 
         if self.config['intent_seq_representation_type'] == 'concat':
             self.cluster = faiss.Kmeans(d=self.config['embed_dim'] * self.config['max_seq_len'], k=self.config['num_intent_clusters'], gpu=False)
@@ -596,7 +636,8 @@ class ICLRecAugmentation(torch.nn.Module):
         kmeans_training_data = []
         for batch_idx, batch in enumerate(trainloader):
             batch = Recommender._to_device(batch, device)
-            seq_out = query_encoder(batch, pooling_type=self.config['intent_seq_representation_type'])
+            seq_out = query_encoder(batch, need_pooling=False)
+            seq_out = recfn.seq_pooling_function(seq_out, batch['seqlen'], pooling_type=self.config['intent_seq_representation_type'])
             kmeans_training_data.append(seq_out) # [B, D]
         
         kmeans_training_data = torch.cat(kmeans_training_data, dim=0)
@@ -610,35 +651,292 @@ class ICLRecAugmentation(torch.nn.Module):
         seq_augmented_i, seq_augmented_i_len = self.augmentation(batch['in_'+self.fiid], batch['seqlen']) # seq: [B, L] seq_len : [B]
         seq_augmented_j, seq_augmented_j_len = self.augmentation(batch['in_'+self.fiid], batch['seqlen'])
         seq_augmented_i_out = query_encoder({"in_"+self.fiid : seq_augmented_i, "seqlen" : seq_augmented_i_len}, \
-            pooling_type='origin') # [B, L, D]
+            need_pooling=False) # [B, L, D]
         seq_augmented_j_out = query_encoder({"in_"+self.fiid : seq_augmented_j, "seqlen" : seq_augmented_j_len}, \
-            pooling_type='origin') # [B, L, D]
+            need_pooling=False) # [B, L, D]
 
         # Instance CL
-        instance_seq_i_out = layers.SeqPoolingFunction(seq_augmented_i_out, seq_augmented_i_len, \
+        instance_seq_i_out = recfn.seq_pooling_function(seq_augmented_i_out, seq_augmented_i_len, \
             pooling_type=self.config['instance_seq_representation_type']) # [B, L * D] or [B, D] 
-        instance_seq_j_out = layers.SeqPoolingFunction(seq_augmented_j_out, seq_augmented_j_len, \
+        instance_seq_j_out = recfn.seq_pooling_function(seq_augmented_j_out, seq_augmented_j_len, \
             pooling_type=self.config['instance_seq_representation_type']) # [B, L * D]
-        instance_logits, instance_labels = self.InfoNCE_score_func(instance_seq_i_out, instance_seq_j_out) # [B, 2B]
-        instance_logits_rev, instance_labels_rev = self.InfoNCE_score_func(instance_seq_j_out, instance_seq_i_out)
-        instance_logits = torch.cat([instance_logits, instance_logits_rev], dim=0)
-        instance_labels = torch.cat([instance_labels, instance_labels_rev], dim=0)
-
+        instance_loss = self.InfoNCE_loss_fn(instance_seq_i_out, instance_seq_j_out) # [B, 2B]
+        instance_loss_rev = self.InfoNCE_loss_fn(instance_seq_j_out, instance_seq_i_out)
+        
         # Intent CL
-        seq_out = layers.SeqPoolingFunction(seq_out, batch['seqlen'], pooling_type=self.config['intent_seq_representation_type'])
+        seq_out = recfn.seq_pooling_function(seq_out, batch['seqlen'], pooling_type=self.config['intent_seq_representation_type'])
         _, intent_ids = self.cluster.index.search(seq_out.cpu().detach().numpy(), 1)
         seq2intents = self.centroids[intent_ids.squeeze(-1)]
-        intent_seq_i_out = layers.SeqPoolingFunction(seq_augmented_i_out, seq_augmented_i_len, \
+        intent_seq_i_out = recfn.seq_pooling_function(seq_augmented_i_out, seq_augmented_i_len, \
             pooling_type=self.config['intent_seq_representation_type']) # [B, D] 
-        intent_seq_j_out = layers.SeqPoolingFunction(seq_augmented_j_out, seq_augmented_j_len, \
+        intent_seq_j_out = recfn.seq_pooling_function(seq_augmented_j_out, seq_augmented_j_len, \
             pooling_type=self.config['intent_seq_representation_type']) # [B, D]
         intent_ids = torch.from_numpy(intent_ids.squeeze(-1)).to(seq_out.device)
-        intent_logits_i, intent_labels_i = self.InfoNCE_score_func(intent_seq_i_out, seq2intents, labels=intent_ids)
-        intent_logits_j, intent_labels_j = self.InfoNCE_score_func(intent_seq_j_out, seq2intents, labels=intent_ids)
-        intent_logits = torch.cat([intent_logits_i, intent_logits_j])
-        intent_labels = torch.cat([intent_labels_i, intent_labels_j])
-
-        output_dict['instance_score'] = (instance_logits, instance_labels)
-        output_dict['intent_score'] = (intent_logits, intent_labels)
+        intent_loss_i = self.InfoNCE_loss_fn(intent_seq_i_out, seq2intents, instance_labels=intent_ids)
+        intent_loss_j = self.InfoNCE_loss_fn(intent_seq_j_out, seq2intents, instance_labels=intent_ids)
+        
+        output_dict['instance_cl_loss'] = 0.5 * (instance_loss + instance_loss_rev)
+        output_dict['intent_cl_loss'] = 0.5 * (intent_loss_i + intent_loss_j)
         
         return output_dict
+
+
+class OnlineItemSimilarity(torch.nn.Module):    
+    def __init__(self):
+        super().__init__()
+        self.item_embeddings = None
+    
+    def update_embeddings(self, item_embeddings):
+        self.item_embeddings = item_embeddings.weight[1:].detach().clone()
+        self.max_score, self.min_score = self.get_maximum_minimum_sim_scores()
+        
+    def get_maximum_minimum_sim_scores(self):
+        max_score, min_score = -100.0, 100.0
+        for item_idx in range(self.item_embeddings.size(0)):
+            item_vector = self.item_embeddings[torch.tensor(item_idx).to(self.item_embeddings.device)].view(-1, 1)
+            item_similarity = torch.mm(self.item_embeddings, item_vector).view(-1)
+            max_score = max(torch.max(item_similarity), max_score)
+            min_score = min(torch.min(item_similarity), min_score)
+        return max_score, min_score
+
+    def forward(self, item_idx:Union[torch.Tensor, int], top_k=1, with_score=False):
+        '''
+        Args: 
+        item_idx (torch.Tensor or int)
+        top_k (int)
+        with_score (bool)
+        Return:
+        indices (torch.Tensor or int): [batch_size] or int 
+        values (torch.Tensor or float): [batch_size] or float 
+        '''
+        # item_idx : [batch_size] or int 
+        item_idx = item_idx - 1
+        assert top_k == 1, 'only support top 1' 
+        if type(item_idx) == int:
+            item_vector = self.item_embeddings[item_idx] # [dim]
+            item_similarity = torch.mv(self.item_embeddings, item_vector) # [num_items]
+            # normalize
+            # Different from the min-max normalization in source code.
+            item_similarity = (item_similarity - self.min_score) / (self.max_score - self.min_score)
+            item_similarity[item_idx] = -float('inf') # assume that item_idx is not 0. 
+
+            scores, indices = item_similarity.topk(top_k)
+            indices = indices + 1
+            if with_score:
+                return indices[0].item(), scores[0].item()
+            else:
+                return indices[0].item()
+        else:
+            item_vector = self.item_embeddings[item_idx] # [batch_size, dim]
+            item_similarity = torch.mm(item_vector, self.item_embeddings.T) # [batch_size, num_items]
+            # normalize
+            item_similarity = (item_similarity - self.min_score) / (self.max_score - self.min_score)
+            item_similarity[torch.arange(item_idx.size(0), device=item_idx.device), item_idx] = -float('inf') # assume that item_idx is not 0. 
+
+            scores, indices = item_similarity.topk(top_k) # [B, 1]
+            indices = indices + 1
+            if with_score:
+                return indices.squeeze(-1).to(item_idx.device), scores.squeeze(-1).to(item_idx.device)
+            else:
+                return indices.squeeze(-1).to(item_idx.device)
+
+
+class OfflineItemSimilarity(torch.nn.Module):
+
+    def __init__(self, train_data:dataset.SeqToSeqDataset) -> None:
+        super().__init__()
+        self.fuid = train_data.fuid
+        self.fiid = train_data.fiid
+        self.num_items = train_data.num_items
+        self.max_score = -1.
+        self.min_score = 100.
+        if os.path.exists(os.path.join(DEFAULT_CACHE_DIR, 'coserec', md5(train_data.config))):
+            matrix_path = os.path.join(DEFAULT_CACHE_DIR, 'coserec', md5(train_data.config))
+            print(f"load co-rate matrix from {matrix_path}")
+            with open(matrix_path, 'rb') as f:
+                self.co_rate_matrix = pickle.load(f)
+        else:
+            self.co_rate_matrix = self._generate_item_similarity(train_data.inter_feat[train_data.inter_feat_subset])
+            self._save_matrix(self.co_rate_matrix, md5(train_data.config))
+        self.max_score, self.min_score = self.co_rate_matrix.max(), self.co_rate_matrix.min()
+        self.top_1_score = self.co_rate_matrix.max(axis=-1).A.squeeze()
+        # normlize 
+        # Different from the min-max normalization in source code.
+        self.top_1_score = (self.top_1_score - self.min_score) / (self.max_score - self.min_score)
+        self.top_1_index = self.co_rate_matrix.argmax(axis=-1).A.squeeze()
+
+    def _generate_item_similarity(self, inter_feat):
+        user_ids, item_ids = inter_feat[self.fuid], inter_feat[self.fiid]
+        train_data_dict = dict()
+        for i in range(len(user_ids)):
+            user = user_ids[i].item() - 1
+            item = item_ids[i].item() - 1
+            train_data_dict.setdefault(user, {})
+            train_data_dict[user][item] = 1 
+
+        C = dict()
+        N = dict()
+        print("Step 1: Compute Statistics")
+        data_iter = tqdm(enumerate(train_data_dict.items()), total=len(train_data_dict.items()))
+        for idx, (u, items) in data_iter:
+            for i in items.keys():
+                N.setdefault(i, 0)
+                N[i] += 1
+                for j in items.keys():
+                    if i == j:
+                        continue 
+                    C.setdefault(i, {})
+                    C[i].setdefault(j, 0)
+                    C[i][j] += 1 / math.log(1 + len(items) * 1.0)
+        print("Step 2: Compute co-rate matrix")
+        rows, cols, vals = [], [], []
+        c_iter = tqdm(enumerate(C.items()), total=len(C.items()))
+        for idx, (cur_item, related_items) in c_iter:
+            for related_item, score in related_items.items():
+                score = score / math.sqrt(N[cur_item] * N[related_item])
+                rows.append(cur_item)
+                cols.append(related_item)
+                vals.append(score)
+
+        # co_rate_matrix should be a sparse matrix 
+        co_rate_matrix = sp.coo_matrix((vals, (rows, cols)), shape=(self.num_items - 1, self.num_items - 1))
+        return co_rate_matrix
+
+    def _save_matrix(self, co_rate_matrix, md:str):
+        cache_dir = os.path.join(DEFAULT_CACHE_DIR, "coserec")
+        if not os.path.exists(cache_dir):
+            os.makedirs(cache_dir)
+        with open(os.path.join(cache_dir, md), 'wb') as f:
+            pickle.dump(co_rate_matrix, f)
+
+    def forward(self, item_idx:Union[torch.Tensor, int], top_k=1, with_score=False):
+        '''
+        Returns:
+        index(torch.tensor or int)
+        score(torch.tensor or float)
+        '''
+        # only support top 1
+        item_idx = item_idx - 1
+        assert top_k == 1, 'only support top 1' 
+        if with_score:
+            if type(item_idx) == int:
+                return self.top_1_index[item_idx] + 1, self.top_1_score[item_idx]
+            else:
+                index = self.top_1_index[item_idx.cpu()] + 1 
+                score = self.top_1_score[item_idx.cpu()]
+                if type(index) != np.ndarray: # if item_idx only has one item, the index will be numpy.int, not ndarray
+                    index = np.array([index])
+                    score = np.array([score])
+                return torch.from_numpy(index).to(item_idx.device), torch.from_numpy(score).to(item_idx.device)
+        else:
+            if type(item_idx) == int:
+                return self.top_1_index[item_idx] + 1
+            else:
+                index = self.top_1_index[item_idx.cpu()] + 1 
+                if type(index) != np.ndarray: 
+                    index = np.array([index])
+                return torch.from_numpy(index).to(item_idx.device)
+
+
+class CoSeRecAugmentation(torch.nn.Module):
+
+    def __init__(self, config, train_data:dataset.SeqToSeqDataset) -> None:
+        super().__init__()
+        self.config = config
+        self.fiid = train_data.fiid
+        self.num_items = train_data.num_items 
+        self.augmentation_warm_up_epochs = self.config['augmentation_warm_up_epochs']
+
+        self.offline_similarity_model = OfflineItemSimilarity(train_data)
+        augmentation_dict = {
+            'S' : Item_Substitute(self.offline_similarity_model, self.config['substitute_rate']),
+            'I' : Item_Insert(self.offline_similarity_model, self.config['insert_rate']),
+            'M' : Item_Mask(train_data.num_items),
+            'C' : Item_Crop(), 
+            'R' : Item_Reorder()
+        }
+        short_augmentation_list = []
+        for x in self.config['augment_type_for_short']:
+            short_augmentation_list.append(augmentation_dict[x])
+        long_augmentation_list = list(augmentation_dict.values())
+        self.augmentation = Random_Augmentation(self.config['augment_threshold'], short_augmentation_list, long_augmentation_list)
+        self.InfoNCE_loss_fn = InfoNCELoss(temperature=self.config['temperature'], sim_method='inner_product', neg_type='batch_both')
+
+    def forward(self, batch, query_encoder):
+        output_dict = {}
+        batch_size = len(batch[self.fiid])
+
+        seq_augmented_i, seq_augmented_i_len = self.augmentation(batch['in_' + self.fiid], batch['seqlen']) # seq: [B, L] seq_len : [B]
+        seq_augmented_i_cut = []
+        seq_augmented_i_len_cut = torch.zeros_like(seq_augmented_i_len, device=seq_augmented_i_len.device)
+        for i in range(batch_size):
+            seq = seq_augmented_i[i]
+            seq_len = seq_augmented_i_len[i]
+            if seq_len > self.config['max_seq_len']:
+                seq_augmented_i_cut.append(seq[seq_len-self.config['max_seq_len'] : seq_len])
+                seq_augmented_i_len_cut[i] = self.config['max_seq_len']
+            else:
+                seq_augmented_i_cut.append(seq[ : seq_len])
+                seq_augmented_i_len_cut[i] = seq_len
+        seq_augmented_i, seq_augmented_i_len = pad_sequence(seq_augmented_i_cut, batch_first=True), seq_augmented_i_len_cut
+        if seq_augmented_i.size(1) < self.config['max_seq_len']:
+            seq_augmented_i = torch.cat(
+                [seq_augmented_i, 
+                torch.zeros((batch_size, self.config['max_seq_len'] - seq_augmented_i.size(1)),
+                dtype=torch.int64, device=seq_augmented_i.device)],
+                dim=-1
+                )
+
+        seq_augmented_j, seq_augmented_j_len = self.augmentation(batch['in_' + self.fiid], batch['seqlen'])
+        seq_augmented_j_cut = []
+        seq_augmented_j_len_cut = torch.zeros_like(seq_augmented_j_len, device=seq_augmented_j_len.device)
+        for i in range(batch_size):
+            seq = seq_augmented_j[i]
+            seq_len = seq_augmented_j_len[i]
+            if seq_len > self.config['max_seq_len']:
+                seq_augmented_j_cut.append(seq[seq_len-self.config['max_seq_len'] : seq_len])
+                seq_augmented_j_len_cut[i] = self.config['max_seq_len']
+            else:
+                seq_augmented_j_cut.append(seq[ : seq_len])
+                seq_augmented_j_len_cut[i] = seq_len
+        seq_augmented_j, seq_augmented_j_len = pad_sequence(seq_augmented_j_cut, batch_first=True), seq_augmented_j_len_cut
+        if seq_augmented_j.size(1) < self.config['max_seq_len']:
+            seq_augmented_j = torch.cat(
+                [seq_augmented_j, 
+                torch.zeros((batch_size, self.config['max_seq_len'] - seq_augmented_j.size(1)),
+                dtype=torch.int64, device=seq_augmented_j.device)],
+                dim=-1
+                )
+
+        seq_augmented_i_out = query_encoder({"in_" + self.fiid: seq_augmented_i, "seqlen": seq_augmented_i_len},\
+            need_pooling=False) # [B, L, D]
+        seq_augmented_i_out = seq_augmented_i_out.reshape(batch_size, -1) # [B, D * len]
+        
+        seq_augmented_j_out = query_encoder({"in_" + self.fiid: seq_augmented_j, "seqlen" : seq_augmented_j_len},\
+            need_pooling=False) # [B, L, D]
+        seq_augmented_j_out = seq_augmented_j_out.reshape(batch_size, -1) # [B, D * len]
+        
+        cl_loss = self.InfoNCE_loss_fn(seq_augmented_i_out, seq_augmented_j_out) 
+        cl_loss_inv = self.InfoNCE_loss_fn(seq_augmented_j_out, seq_augmented_i_out)
+        output_dict['cl_loss'] = 0.5 * (cl_loss + cl_loss_inv)
+        return output_dict
+
+    def update_online_model(self, nepoch:int, item_encoder:Optional[torch.nn.Module]=None):
+        if nepoch + 1 == self.augmentation_warm_up_epochs + 1:
+            self.similarity_model = [self.offline_similarity_model, OnlineItemSimilarity()]
+            augmentation_dict = {
+                'S' : Item_Substitute(self.similarity_model, self.config['substitute_rate']),
+                'I' : Item_Insert(self.similarity_model, self.config['insert_rate']),
+                'M' : Item_Mask(self.num_items),
+                'C' : Item_Crop(), 
+                'R' : Item_Reorder()
+            }
+            short_augmentation_list = []
+            for x in self.config['augment_type_for_short']:
+                short_augmentation_list.append(augmentation_dict[x])
+            long_augmentation_list = list(augmentation_dict.values())
+            self.augmentation = Random_Augmentation(self.config['augment_threshold'], short_augmentation_list, long_augmentation_list)
+
+        if nepoch + 1 > self.augmentation_warm_up_epochs:
+            self.similarity_model[1].update_embeddings(item_encoder)
+

@@ -109,14 +109,22 @@ class BinaryCrossEntropyLoss(PairwiseLoss):
                 neg_score.shape[:-1])) or (pos_score.dim() == neg_score.dim())
         if not self.dns:
             weight = self._cal_weight(neg_score, log_neg_prob)
-            notpadnum = torch.logical_not(torch.isinf(pos_score)).float().sum()
-            output = torch.nan_to_num(F.logsigmoid(pos_score), neginf=0.0).sum() / notpadnum
-            neg_score = F.softplus(neg_score) * weight
-            neg_score_sum = neg_score.sum(-1)
+            padding_mask = torch.isinf(pos_score)
+            # positive
+            pos_loss = F.logsigmoid(pos_score)
+            pos_loss.masked_fill_(padding_mask, 0.0)
+            pos_loss = pos_loss.sum() / (~padding_mask).sum()
+            # negative
+            neg_loss = F.softplus(neg_score) * weight
+            neg_loss = neg_loss.sum(-1)
+            # mask
             if pos_score.dim() == neg_score.dim()-1:
-                padding_mask = torch.isinf(pos_score)
-                neg_score_sum.masked_fill_(padding_mask, 0.0)
-            return -output + torch.mean(neg_score_sum)
+                neg_loss.masked_fill_(padding_mask, 0.0)
+                neg_loss = neg_loss.sum() / (~padding_mask).sum()
+            else:
+                neg_loss = torch.mean(neg_loss)
+
+            return -pos_loss + neg_loss
         else:
             return torch.mean(-F.logsigmoid(pos_score) + F.softplus(torch.max(neg_score, dim=-1)))
 
