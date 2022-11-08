@@ -110,14 +110,14 @@ class BinaryCrossEntropyLoss(PairwiseLoss):
         if not self.dns:
             weight = self._cal_weight(neg_score, log_neg_prob)
             padding_mask = torch.isinf(pos_score)
-            # positive 
+            # positive
             pos_loss = F.logsigmoid(pos_score)
             pos_loss.masked_fill_(padding_mask, 0.0)
             pos_loss = pos_loss.sum() / (~padding_mask).sum()
             # negative
             neg_loss = F.softplus(neg_score) * weight
             neg_loss = neg_loss.sum(-1)
-            # mask 
+            # mask
             if pos_score.dim() == neg_score.dim()-1:
                 neg_loss.masked_fill_(padding_mask, 0.0)
                 neg_loss = neg_loss.sum() / (~padding_mask).sum()
@@ -190,4 +190,30 @@ def l2_reg_loss_fn(*args):
     loss = 0.
     for emb in args:
         loss = loss + torch.mean(torch.sum(emb * emb, dim=-1)) # [B, D] -> [B] -> []
-    return loss 
+    return loss
+
+
+class BCEWithLogitLoss(PointwiseLoss):
+    def __init__(self, threshold: float=3.0, reduction: str='mean') -> None:
+        super().__init__()
+        self.threshold = threshold
+        self.reduction = reduction
+
+    def forward(self, label, pos_score):
+        label = (label > self.threshold).float()
+        loss = torch.nn.functional.binary_cross_entropy_with_logits(
+            pos_score, label, reduction=self.reduction)
+        return loss
+
+
+class MSELoss(PointwiseLoss):
+    def __init__(self, threshold: float=None, reduction: str='mean') -> None:
+        super().__init__()
+        self.threshold = threshold
+        self.reduction = reduction
+
+    def forward(self, label, pos_score):
+        if self.threshold is not None:
+            label = (label > self.threshold).float()
+        loss = torch.nn.functional.mse_loss(pos_score, label)
+        return loss

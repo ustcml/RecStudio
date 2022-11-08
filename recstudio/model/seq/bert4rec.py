@@ -37,10 +37,10 @@ class BERT4Rec(basemodel.BaseRetriever):
 
     def _get_loss_func(self):
         r"""SoftmaxLoss is used as the loss function."""
-        return loss_func.BinaryCrossEntropyLoss()
+        return loss_func.SoftmaxLoss()
 
     def _get_sampler(self, train_data):
-        return sampler.UniformSampler(train_data.num_items)
+        return None
 
     def _reconstruct_train_data(self, batch):
         item_seq = batch['in_'+self.fiid]
@@ -58,6 +58,6 @@ class BERT4Rec(basemodel.BaseRetriever):
         batch['mask_token'] = masked_mask
         return batch
 
-    def forward(self, batch, full_score):
+    def training_step(self, batch):
         batch = self._reconstruct_train_data(batch)
-        return super().forward(batch, full_score)
+        return super().training_step(batch)

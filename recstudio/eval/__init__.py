@@ -11,10 +11,10 @@ def recall(pred, target, k):
     Recall value is defined as below:
 
     .. math::
-        Recall= \frac{TP}{TP+FN} 
+        Recall= \frac{TP}{TP+FN}
 
     Args:
-        pred(torch.BoolTensor): [B, num_items]. The prediction result of the model with bool type values. 
+        pred(torch.BoolTensor): [B, num_items]. The prediction result of the model with bool type values.
             If the value in the j-th column is `True`, the j-th highest item predicted by model is right.
 
         target(torch.FloatTensor): [B, num_target]. The ground truth.
@@ -36,7 +36,7 @@ def precision(pred, target, k):
         Precision = \frac{TP}{TP+FP}
 
     Args:
-        pred(torch.BoolTensor): [B, num_items]. The prediction result of the model with bool type values. 
+        pred(torch.BoolTensor): [B, num_items]. The prediction result of the model with bool type values.
             If the value in the j-th column is `True`, the j-th highest item predicted by model is right.
 
         target(torch.FloatTensor): [B, num_target]. The ground truth.
@@ -52,7 +52,7 @@ def map(pred, target, k):
     r"""Calculate the mean Average Precision(mAP).
 
     Args:
-        pred(torch.BoolTensor): [B, num_items]. The prediction result of the model with bool type values. 
+        pred(torch.BoolTensor): [B, num_items]. The prediction result of the model with bool type values.
             If the value in the j-th column is `True`, the j-th highest item predicted by model is right.
 
         target(torch.FloatTensor): [B, num_target]. The ground truth.
@@ -78,7 +78,7 @@ def ndcg(pred, target, k):
     r"""Calculate the Normalized Discounted Cumulative Gain(NDCG).
 
     Args:
-        pred(torch.BoolTensor): [B, num_items]. The prediction result of the model with bool type values. 
+        pred(torch.BoolTensor): [B, num_items]. The prediction result of the model with bool type values.
             If the value in the j-th column is `True`, the j-th highest item predicted by model is right.
 
         target(torch.FloatTensor): [B, num_target]. The ground truth.
@@ -88,7 +88,7 @@ def ndcg(pred, target, k):
     """
     pred_dcg = _dcg(pred.float(), k)
     #TODO replace target>0 with target
-    ideal_dcg = _dcg(torch.sort((target > 0).float(), descending=True)[0], k) 
+    ideal_dcg = _dcg(torch.sort((target > 0).float(), descending=True)[0], k)
     all_irrelevant = torch.all(target <= sys.float_info.epsilon, dim=-1)
     pred_dcg[all_irrelevant] = 0
     pred_dcg[~all_irrelevant] /= ideal_dcg[~all_irrelevant]
@@ -99,7 +99,7 @@ def mrr(pred, target, k):
     r"""Calculate the Mean Reciprocal Rank(MRR).
 
     Args:
-        pred(torch.BoolTensor): [B, num_items]. The prediction result of the model with bool type values. 
+        pred(torch.BoolTensor): [B, num_items]. The prediction result of the model with bool type values.
             If the value in the j-th column is `True`, the j-th highest item predicted by model is right.
 
         target(torch.FloatTensor): [B, num_target]. The ground truth.
@@ -121,7 +121,7 @@ def hits(pred, target, k):
     r"""Calculate the Hits.
 
     Args:
-        pred(torch.BoolTensor): [B, num_items]. The prediction result of the model with bool type values. 
+        pred(torch.BoolTensor): [B, num_items]. The prediction result of the model with bool type values.
             If the value in the j-th column is `True`, the j-th highest item predicted by model is right.
 
         target(torch.FloatTensor): [B, num_target]. The ground truth.
@@ -132,11 +132,51 @@ def hits(pred, target, k):
     return torch.any(pred[:, :k] > 0, dim=-1).float().mean()
 
 
-def logloss(pred, target):
+def logloss(pred, target, thres=None):
     r"""Calculate the log loss (log cross entropy).
 
     Args:
-        pred(torch.BoolTensor): [B, num_items]. The prediction result of the model with bool type values. 
+        pred(torch.BoolTensor): [B, num_items]. The prediction result of the model with bool type values.
+            If the value in the j-th column is `True`, the j-th highest item predicted by model is right.
+
+        target(torch.FloatTensor): [B, num_target]. The ground truth.
+
+        thres(float): threshold for rating dataset. Scores below the thres will be marked as 0, otherwise 1.
+
+    Returns:
+        torch.FloatTensor: a 0-dimensional tensor.
+    """
+    if thres is not None:
+        target = target > thres
+    if pred.dim() == target.dim():
+        return F.binary_cross_entropy_with_logits(pred, target.float())
+    else:
+        return F.cross_entropy(pred, target)
+
+def auc(pred, target, thres=None):
+    r"""Calculate the global AUC.
+
+    Args:
+        pred(torch.BoolTensor): [B, num_items]. The prediction result of the model with bool type values.
+            If the value in the j-th column is `True`, the j-th highest item predicted by model is right.
+
+        target(torch.FloatTensor): [B, num_target]. The ground truth.
+
+        thres(float): threshold for rating dataset. Scores below the thres will be marked as 0, otherwise 1.
+
+    Returns:
+        torch.FloatTensor: a 0-dimensional tensor.
+    """
+    if thres is not None:
+        target = target > thres
+    return M.auroc(pred, target)
+
+
+def f1(pred, target, k):
+    r"""Calculate the F1.
+
+    Args:
+        pred(torch.BoolTensor): [B, num_items]. The prediction result of the model with bool type values.
             If the value in the j-th column is `True`, the j-th highest item predicted by model is right.
 
         target(torch.FloatTensor): [B, num_target]. The ground truth.
@@ -144,10 +184,9 @@ def logloss(pred, target):
     Returns:
         torch.FloatTensor: a 0-dimensional tensor.
     """
-    if pred.dim() == target.dim():
-        return F.binary_cross_entropy_with_logits(pred, target.float())
-    else:
-        return F.cross_entropy(pred, target)
+    count = (target > 0).sum(-1)
+    output = 2 * pred[:, :k].sum(dim=-1).float() / (count + k)
+    return output.mean()
 
 
 metric_dict = {
@@ -159,7 +198,7 @@ metric_dict = {
     'mrr': mrr,
     'rmse': M.mean_squared_error,
     'mse': M.mean_absolute_error,
-    'auc': M.auroc,
+    'auc': auc,
     'logloss': logloss
 }
 
@@ -180,3 +219,12 @@ def get_pred_metrics(metric):
     pred_m = [(m, metric_dict[m])
               for m in metric if m in pred_metrics and m in metric_dict]
     return pred_m
+
+
+def get_global_metrics(metric):
+    if (not isinstance(metric, list)) and (not isinstance(metric, dict)):
+        metric = [metric]
+    global_metrics = {"auc"}
+    global_m = [(m, metric_dict[m])
+                for m in metric if m in global_metrics and m in metric_dict]
+    return global_m

@@ -82,6 +82,16 @@ class SASRec(basemodel.BaseRetriever):
         - ``layer_norm_eps``: The layer norm epsilon in transformer. Default: ``1e-12``.
     """
 
+    def add_model_specific_args(parent_parser):
+        parent_parser = basemodel.Recommender.add_model_specific_args(parent_parser)
+        parent_parser.add_argument_group('SASRec')
+        parent_parser.add_argument("--hidden_size", type=int, default=128, help='hidden size of feedforward')
+        parent_parser.add_argument("--layer_num", type=int, default=2, help='layer num of transformers')
+        parent_parser.add_argument("--head_num", type=int, default=2, help='head num of multi-head attention')
+        parent_parser.add_argument("--dropout_rate", type=float, default=0.5, help='dropout rate')
+        parent_parser.add_argument("--negative_count", type=int, default=1, help='negative sampling numbers')
+        return parent_parser
+
     def _get_dataset_class():
         r"""SeqDataset is used for SASRec."""
         return dataset.SeqDataset

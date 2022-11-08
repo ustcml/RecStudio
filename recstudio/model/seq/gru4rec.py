@@ -20,6 +20,15 @@ class GRU4Rec(basemodel.BaseRetriever):
     of the RNN.
     """
 
+    def add_model_specific_args(parent_parser):
+        parent_parser = basemodel.Recommender.add_model_specific_args(parent_parser)
+        parent_parser.add_argument_group('GRU4Rec')
+        parent_parser.add_argument("--hidden_size", type=int, default=128, help='hidden size of feedforward')
+        parent_parser.add_argument("--layer_num", type=int, default=1, help='layer num of transformers')
+        parent_parser.add_argument("--dropout_rate", type=float, default=0.2, help='dropout rate')
+        parent_parser.add_argument("--negative_count", type=int, default=1, help='negative sampling numbers')
+        return parent_parser
+
     def _get_dataset_class():
         r"""The dataset is SeqDataset."""
         return dataset.SeqDataset

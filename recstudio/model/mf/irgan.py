@@ -50,6 +50,8 @@ class IRGAN(basemodel.BaseRetriever):
 
     def _get_loss_func(self):
         def bce_loss(label, pos_score, log_pos_prob, neg_score, log_neg_prob):
+            # the reshape operation is designed for sampling negatives for each positive.
+            neg_score = neg_score.reshape(*pos_score.shape, -1).mean(-1)
             mask = torch.logical_not(torch.isinf(pos_score))
             return torch.mean(torch.masked_select((-F.logsigmoid(pos_score) + F.softplus(neg_score)), mask))
         return bce_loss

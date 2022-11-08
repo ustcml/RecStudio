@@ -20,8 +20,8 @@ item_feat_header: ~
 
 use_fields: ~  # TODO:
 field_separator: ","
-min_user_inter: 15
-min_item_inter: 15
+min_user_inter: 10
+min_item_inter: 10
 field_max_len: ~
 rating_threshold: ~
 ranker_rating_threshold: 3
