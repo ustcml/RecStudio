@@ -1,14 +1,13 @@
 import copy
 
 import torch
-from recstudio.data.dataset import MFDataset, SeqDataset, SortedDataSampler
-from torch.utils.data import DataLoader
+from recstudio.data.dataset import MFDataset, SeqDataset
 
 
 class ALSDataset(MFDataset):
     r"""ALSDataset is a dataset designed for Alternating Least Squares algorithms.
 
-    For Alternating Least Squares algorithms, embeddings of users and items are optimized alternatively. 
+    For Alternating Least Squares algorithms, embeddings of users and items are optimized alternatively.
     So the data provided should be ``<u, Iu>`` and ``<i, Ui>`` alternatively.
     """
 

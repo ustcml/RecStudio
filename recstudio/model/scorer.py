@@ -7,12 +7,12 @@ class InnerProductScorer(torch.nn.Module):
         # query, item : ([B, D], [B, D]), ([B, D], [B, neg, D]), ([B, D], [N, D]),
         # ([B, L, D], [B, L, D]), ([B, L, D], [B, L, neg, D])
         if query.size(0) == items.size(0):
-            if query.dim() < items.dim():
+            if query.dim() < items.dim(): #([B,D], [B,N,D])
                 output = torch.matmul(items, query.view(*query.shape, 1))
                 output = output.view(output.shape[:-1])
-            else:
+            else:   #([B,D], [B,D]), ([B,L,D], [B,L,D])
                 output = torch.sum(query * items, dim=-1)
-        else:
+        else:   # ([B,D], [N,D])
             output = torch.matmul(query, items.T)
         return output
 

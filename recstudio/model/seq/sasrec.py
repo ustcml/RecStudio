@@ -1,18 +1,20 @@
 import torch
 from recstudio.ann import sampler
 from recstudio.data import dataset
+from recstudio.model.module import functional as recfn
 from recstudio.model import basemodel, loss_func, module, scorer
 
 
 class SASRecQueryEncoder(torch.nn.Module):
     def __init__(
-            self, fiid, embed_dim, max_seq_len, n_head, hidden_size, dropout, activation, n_layer, item_encoder,
-            bidirectional=False, return_full_seq_training=False) -> None:
+            self, fiid, embed_dim, max_seq_len, n_head, hidden_size, dropout, activation, layer_norm_eps, n_layer, item_encoder,
+            bidirectional=False, training_pooling_type='last', eval_pooling_type='last') -> None:
         super().__init__()
         self.fiid = fiid
         self.item_encoder = item_encoder
         self.bidirectional = bidirectional
-        self._return_full_seq_training = return_full_seq_training
+        self.training_pooling_type = training_pooling_type
+        self.eval_pooling_type = eval_pooling_type 
         self.position_emb = torch.nn.Embedding(max_seq_len, embed_dim)
         transformer_encoder = torch.nn.TransformerEncoderLayer(
             d_model=embed_dim,
@@ -20,6 +22,7 @@ class SASRecQueryEncoder(torch.nn.Module):
             dim_feedforward=hidden_size,
             dropout=dropout,
             activation=activation,
+            layer_norm_eps=layer_norm_eps,
             batch_first=True,
             norm_first=False
         )
@@ -28,9 +31,10 @@ class SASRecQueryEncoder(torch.nn.Module):
             num_layers=n_layer,
         )
         self.dropout = torch.nn.Dropout(p=dropout)
-        self.gather_layer = module.SeqPoolingLayer(pooling_type='last')
+        self.training_pooling_layer = module.SeqPoolingLayer(pooling_type=self.training_pooling_type)
+        self.eval_pooling_layer = module.SeqPoolingLayer(pooling_type=self.eval_pooling_type)
 
-    def forward(self, batch):
+    def forward(self, batch, need_pooling=True):
         user_hist = batch['in_'+self.fiid]
         positions = torch.arange(user_hist.size(1), dtype=torch.long, device=user_hist.device)
         positions = positions.unsqueeze(0).expand_as(user_hist)
@@ -48,13 +52,19 @@ class SASRecQueryEncoder(torch.nn.Module):
             mask=attention_mask,
             src_key_padding_mask=mask4padding)  # BxLxD
 
-        if self.training and self._return_full_seq_training:
-            if batch['seqlen'].dim() == 2:  # masked token
-                mask_token = batch['seqlen']
-                transformer_out = transformer_out[mask_token]
-            return transformer_out  # BxLxD or NxD
+        if need_pooling:
+            if self.training:
+                if self.training_pooling_type == 'mask':
+                    return self.training_pooling_layer(transformer_out, batch['seqlen'], mask_token=batch['mask_token'])
+                else:
+                    return self.training_pooling_layer(transformer_out, batch['seqlen'])
+            else:
+                if self.eval_pooling_type == 'mask':
+                    return self.eval_pooling_layer(transformer_out, batch['seqlen'], mask_token=batch['mask_token'])
+                else:
+                    return self.eval_pooling_layer(transformer_out, batch['seqlen'])
         else:
-            return self.gather_layer(transformer_out, batch['seqlen'])
+            return transformer_out
 
 
 class SASRec(basemodel.BaseRetriever):
@@ -72,6 +82,16 @@ class SASRec(basemodel.BaseRetriever):
         - ``layer_norm_eps``: The layer norm epsilon in transformer. Default: ``1e-12``.
     """
 
+    def add_model_specific_args(parent_parser):
+        parent_parser = basemodel.Recommender.add_model_specific_args(parent_parser)
+        parent_parser.add_argument_group('SASRec')
+        parent_parser.add_argument("--hidden_size", type=int, default=128, help='hidden size of feedforward')
+        parent_parser.add_argument("--layer_num", type=int, default=2, help='layer num of transformers')
+        parent_parser.add_argument("--head_num", type=int, default=2, help='head num of multi-head attention')
+        parent_parser.add_argument("--dropout_rate", type=float, default=0.5, help='dropout rate')
+        parent_parser.add_argument("--negative_count", type=int, default=1, help='negative sampling numbers')
+        return parent_parser
+
     def _get_dataset_class():
         r"""SeqDataset is used for SASRec."""
         return dataset.SeqDataset
@@ -81,7 +101,8 @@ class SASRec(basemodel.BaseRetriever):
             fiid=self.fiid, embed_dim=self.embed_dim,
             max_seq_len=train_data.config['max_seq_len'], n_head=self.config['head_num'],
             hidden_size=self.config['hidden_size'], dropout=self.config['dropout_rate'],
-            activation=self.config['activation'], n_layer=self.config['layer_num'],
+            activation=self.config['activation'], layer_norm_eps=self.config['layer_norm_eps'],
+            n_layer=self.config['layer_num'],
             item_encoder=self.item_encoder
         )
 

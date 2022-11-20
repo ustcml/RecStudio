@@ -3,10 +3,11 @@ activation: dice
 attention_mlp: [128, 64]
 fc_mlp: [128, 64, 64]
 dropout: 0.3
+batch_norm: True
 
 negative_count: 20
 batch_size: 256
 eval_batch_size: 32
 
-test_metrics: [recall, precision, map, ndcg, mrr, hit]
+test_metrics: [auc, logloss]
 val_metrics: [auc, logloss]

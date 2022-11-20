@@ -17,7 +17,7 @@ from ..loss_func import FullScoreLoss
 def swish(x):
     return x.mul(torch.sigmoid(x))
 
-def log_norm_pdf(x, mu, logvar):#计算的就是(mu,var)对应的正态概率密度函数在x点的值的log
+def log_norm_pdf(x, mu, logvar):#calculate log(PDF(x)) for  N(mu,var)
     return -0.5*(logvar + np.log(2 * np.pi) + (x - mu).pow(2) / logvar.exp())
 
 class CompositePrior(nn.Module):
@@ -53,7 +53,7 @@ class CompositePrior(nn.Module):
         return torch.logsumexp(density_per_gaussian, dim=-1)
 
 class RecVAEQueryEncoder(torch.nn.Module):
-    def __init__(self, fiid, hidden_dim, latent_dim, input_dim, eps=1e-1):#input_dim应该就是num items?
+    def __init__(self, fiid, hidden_dim, latent_dim, input_dim, eps=1e-1):#input_dim==num items
         super().__init__()
 
         self.fiid = fiid
@@ -72,7 +72,6 @@ class RecVAEQueryEncoder(torch.nn.Module):
         
 
     def forward(self, batch, dropout_rate=0):
-        # encode,看起来是用positive item embedding均值作为raw user embedding，再输入encoder进行编码输出均值和方差
         user_emb = self.encoder_layer_0(batch["in_"+self.fiid])
         non_zero_num = batch["in_"+self.fiid].count_nonzero(dim=1).unsqueeze(-1)
         user_emb = user_emb.sum(1) / non_zero_num.pow(0.5)

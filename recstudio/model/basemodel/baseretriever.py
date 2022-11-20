@@ -1,4 +1,3 @@
-from copy import copy
 from typing import Dict, List, Optional, Tuple, Union
 import inspect
 import recstudio.eval as eval
@@ -9,7 +8,6 @@ from . import Recommender
 from ..loss_func import FullScoreLoss
 from recstudio.ann.sampler import *
 from recstudio.data import AEDataset, SeqDataset
-# from recstudio.model.module import data_augmentation
 
 
 class BaseRetriever(Recommender):
@@ -49,8 +47,14 @@ class BaseRetriever(Recommender):
                 (isinstance(self.score_func, InnerProductScorer) or
                  isinstance(self.score_func, EuclideanScorer)))
 
-    def _init_model(self, train_data):
-        super()._init_model(train_data)
+    def _set_data_field(self, data):
+        data.use_field = set([data.fuid, data.fiid, data.frating])
+        if hasattr(self, 'logger'):
+            self.logger.info("The default fields to be used is set as [user_id, item_id, rating]. "
+                             "If more fields are needed, please use `self._set_data_field()` to reset.")
+
+    def _init_model(self, train_data, drop_unused_field=True):
+        super()._init_model(train_data, drop_unused_field)
         self.query_fields = set(train_data.user_feat.fields).intersection(train_data.use_field)
         if isinstance(train_data, AEDataset) or isinstance(train_data, SeqDataset):
             self.query_fields = self.query_fields | set(["in_"+f for f in self.item_fields])
@@ -96,14 +100,14 @@ class BaseRetriever(Recommender):
 
     def _get_query_encoder(self, train_data):
         if self.fuid in self.query_fields:
-            self.logger.warning("No specific query_encoder is configured, query_encoder "
-                                "is set as Embedding for user id by default due to detect user id is in"
-                                "use_fields")
+            self.logger.warning("No specific query_encoder is configured, "
+                                "query_encoder is set as Embedding for user id "
+                                "by default due to detect user id is in use_fields")
             return torch.nn.Embedding(train_data.num_users, self.embed_dim, padding_idx=0)
         else:
-            self.logger.error("query_encoder missing. please configure query_encoder. if you "
-                              "want to use Embedding for user id as query_encoder, please add user id "
-                              "field name in use_field in your configuration.")
+            self.logger.error("query_encoder missing. Please configure query_encoder. "
+                              "If you want to use Embedding for user id as query_encoder, "
+                              "please add user id field name in use_field in your configuration.")
             raise ValueError("query_encoder missing.")
 
     def _get_score_func(self):
@@ -137,7 +141,15 @@ class BaseRetriever(Recommender):
         if self.use_index:
             self.ann_index = self.build_ann_index()
 
-    def forward(self, batch, full_score, return_query=False, return_item=False, return_neg_item=False, return_neg_id=False):
+    def forward(
+            self,
+            batch: Dict,
+            full_score: bool = False,
+            return_query: bool = False,
+            return_item: bool = False,
+            return_neg_item: bool = False,
+            return_neg_id: bool = False
+        ):
         # query_vec, pos_item_vec, neg_item_vec,
         output = {}
         pos_items = self._get_item_feat(batch)
@@ -171,7 +183,7 @@ class BaseRetriever(Recommender):
                 pos_score[batch[self.fiid] == 0] = -float('inf')  # padding
             output['score'] = {'pos_score': pos_score}
             if full_score:
-                item_vectors = self._get_item_vector()#这里不会把padding的那个item embedding取出来
+                item_vectors = self._get_item_vector()#no padding item
                 all_item_scores = self.score_func(query, item_vectors)
                 output['score']['all_score'] = all_item_scores
 
@@ -183,16 +195,13 @@ class BaseRetriever(Recommender):
 
     def score(self, batch, query=None, neg_id=None):
         # designed for cascade models like RankFlow or CoRR
+        if query is None:
+            query = self.scorer.query_encoder(self.scorer._get_query_feat(batch))
         if neg_id is not None:
-            if query is None:
-                query = self.scorer.query_encoder(self.scorer._get_query_feat(batch))
-            neg_vec = self.scorer.item_encoder(self.scorer_get_item_feat(neg_id))
-            return self.scorer.score_func(query, neg_vec)
+            item_vec = self.scorer.item_encoder(self.scorer_get_item_feat(neg_id))
         else:   # score on positive items in batch
-            if query is None:
-                query = self.scorer.query_encoder(self.scorer._get_query_feat(batch))
-            pos_vec = self.scorer.item_encoder(self.scorer_get_item_feat(batch))
-            return self.scorer.score_func(query, pos_vec)
+            item_vec = self.scorer.item_encoder(self.scorer_get_item_feat(batch))
+        return self.scorer.score_func(query, item_vec)
 
     def _sample(
         self,
@@ -204,12 +213,8 @@ class BaseRetriever(Recommender):
         query = self.query_encoder(self._get_query_feat(batch))
         pos_items = batch.get(self.fiid, None)
         if excluding_hist:
-            # TODO(@AngusHuang17): user hist v.s. pos item, if user_hist, user_hist should be passed
-                # in train_loaders
-            user_hist = batch.get('user_hist', None) 
-            if batch.get('user_hist', None) is None:
-                self.logger.warning("user_hist is None, so the \
-                    target item will be used as user_hist.")
+            user_hist = batch.get('user_hist', None)
+            if user_hist is None:
                 user_hist = batch.get(self.fiid, None)
         else:
             user_hist = None
@@ -219,6 +224,8 @@ class BaseRetriever(Recommender):
                 'num_neg': neg,
                 'pos_items': pos_items,
             }
+            if 'excluding_hist' in inspect.signature(self.sampler.forward).parameters:
+                kwargs['excluding_hist'] = excluding_hist
             if 'user_hist' in inspect.signature(self.sampler.forward).parameters:
                 kwargs['user_hist'] = user_hist
             if isinstance(self.sampler, RetrieverSampler):
@@ -244,7 +251,17 @@ class BaseRetriever(Recommender):
             self, batch, num_neg, method='none', excluding_hist=False, t=1,
             return_query=False, query=None):
         pos_items = batch.get(self.fiid, None)
+        # TODO: consider the case of multi positive items, then the negatives should be sampled for
+        # each postive.
+        if pos_items.dim() == 1:
+            # In order to keep consistent with multi positives, otherwise gather function
+            # in brute method will report error.
+            pos_items = pos_items.view(-1, 1)
+
         user_hist = batch.get('user_hist', None)
+        if user_hist is None:
+            user_hist = batch.get(self.fiid, None)
+
         if isinstance(num_neg, int):
             num_neg = [num_neg, num_neg]
         elif isinstance(num_neg, (List, Tuple)):
@@ -255,23 +272,7 @@ class BaseRetriever(Recommender):
         else:
             raise TypeError("num_neg only support int and List/Tuple type.")
 
-        if method.endswith('&rand'):
-            if isinstance(num_neg, int):
-                num_neg_0 = num_neg // 2
-                num_neg_1 = num_neg - num_neg_0
-            elif isinstance(num_neg, (Tuple, List)):
-                num_neg_0 = [num_neg[0], num_neg[1] // 2]
-                num_neg_1 = num_neg[1] - num_neg_0[1]
-            method_0 = method.split("&")[0]
-            (_, neg_id_0, __), query = self.sampling(batch, num_neg_0, method_0, excluding_hist, t, True, query)
-            num_queries = np.prod(query.shape[:-1])
-            rand_sampled_idx = torch.randint(1, self.sampler.num_items+1,
-                                             size=(num_queries, num_neg_1), device=query.device)
-            neg_id = torch.cat((neg_id_0, rand_sampled_idx), dim=-1)
-            log_neg_prob = torch.zeros_like(neg_id)
-            log_pos_prob = None if pos_items is None else torch.zeros_like(pos_items)
-
-        elif method in ("none", "top", "sir", "dns", "toprand", "brute"):
+        if method in ("none", "top", "sir", "dns", "toprand", "brute", "top&rand"):
 
             if method == 'none':
                 assert self.sampler is not None, "excepted sampler of retriever to be Sampler, but get None."
@@ -286,8 +287,14 @@ class BaseRetriever(Recommender):
                 log_neg_prob = torch.zeros_like(neg_id)
                 log_pos_prob = None if pos_items is None else torch.zeros_like(pos_items)
 
-            elif method == 'top':
-                scores, neg_id, query = self.topk(batch, k=num_neg[1], user_h=user_hist, return_query=True)
+            elif method == 'top&rand':
+                num_neg_0 = num_neg[1] // 2
+                scores, neg_id, query = self.topk(batch, k=num_neg_0, user_h=user_hist, return_query=True)
+                num_queries = np.prod(query.shape[:-1])
+                rand_sampled_idx = torch.randint(1, self.item_vector.size(0)+1,
+                                                 size=(num_queries, num_neg[1]-num_neg_0),
+                                                 device=query.device)
+                neg_id = torch.cat((neg_id, rand_sampled_idx), dim=-1)
                 log_neg_prob = torch.zeros_like(neg_id)
                 log_pos_prob = None if pos_items is None else torch.zeros_like(pos_items)
 
@@ -295,7 +302,16 @@ class BaseRetriever(Recommender):
                 query = self.query_encoder(self._get_query_feat(batch)) if query is None else query
 
                 item_vectors = self.item_vector
-                all_score = self.score_func(query, item_vectors) / t
+                if ('split_num' in self.config) and (self.config['split_num'] is not None):
+                    # if the items are enormous, the scores of all items should be split into steps to calculate.
+                    item_vectors = torch.tensor_split(self.item_vector, self.config['split_num'], dim=0)
+                    all_score = []
+                    for vec in item_vectors:
+                        score = self.score_func(query, vec) / t
+                        all_score.append(score)
+                    all_score = torch.cat(all_score, dim=0)
+                else:
+                    all_score = self.score_func(query, item_vectors) / t
                 all_prob = torch.softmax(all_score, dim=-1)
                 all_prob = F.pad(all_prob, pad=(1, 0))   # padding
                 sampling_prob = all_prob
@@ -306,10 +322,8 @@ class BaseRetriever(Recommender):
                     num_pos = pos_items.size(-1)
 
                 if excluding_hist:
-                    # TODO(@AngusHuang17): mask items in user_hist instead of pos_items
-                    row_index = torch.arange(pos_items.size(0), device=pos_items.device)
-                    row_index = row_index.view(-1, 1).repeat(1, pos_items.size(1))
-                    sampling_prob[row_index, pos_items] = 0.0
+                    from recstudio.utils.utils import mask_with_hist
+                    sampling_prob = mask_with_hist(sampling_prob, user_hist, 0)
 
                 sampled_idx = torch.multinomial(sampling_prob, num_neg[1] * num_pos, replacement=True)
                 neg_id = sampled_idx
@@ -343,12 +357,13 @@ class BaseRetriever(Recommender):
                     log_neg_prob = torch.gather(scores_on_pool_items, dim=-1, index=resampled_id)
         else:
             raise NotImplementedError(
-                'sampling method only support one of none/brute/is/dns/top/toprand/top&rand/dns&rand')
+                'sampling method only support one of none/brute/is/dns/top/toprand/top&rand')
 
         if pos_items is not None:
-            sampled_result = (log_pos_prob, neg_id, log_neg_prob)
+            log_pos_prob = log_pos_prob.view_as(batch.get(self.fiid))
+            sampled_result = (log_pos_prob.detach(), neg_id, log_neg_prob.detach())
         else:
-            sampled_result = (None, neg_id, log_neg_prob)
+            sampled_result = (None, neg_id, log_neg_prob.detach())
 
         if return_query:
             return sampled_result, query
@@ -360,7 +375,7 @@ class BaseRetriever(Recommender):
 
     def topk(self, batch, k, user_h=None, return_query=False):
         # TODO: complete topk with retriever
-        query = self.query_encoder(self._get_query_feat(batch))#默认dropout_rate=0, 并且
+        query = self.query_encoder(self._get_query_feat(batch))#default dropout_rate=0
         more = user_h.size(1) if user_h is not None else 0
         if self.use_index:
             if isinstance(self.score_func, CosineScorer):
@@ -409,9 +424,9 @@ class BaseRetriever(Recommender):
         score, topk_items = self.topk(batch, topk, batch['user_hist'])
         if batch[self.fiid].dim() > 1:
             target, _ = batch[self.fiid].sort()
-            idx_ = torch.searchsorted(target, topk_items)#idx_每一个元素i指target[i]>=topk_items对应位置元素，本质上就是分段，target=[3,14]时，那么topk_items里在(3,14]之间的数id就是1
+            idx_ = torch.searchsorted(target, topk_items)
             idx_[idx_ == target.size(1)] = target.size(1) - 1
-            label = torch.gather(target, 1, idx_) == topk_items#为True的位置代表一个正例
+            label = torch.gather(target, 1, idx_) == topk_items#pos_item for each True position
             pos_rating = batch[self.frating]
         else:
             label = batch[self.fiid].view(-1, 1) == topk_items

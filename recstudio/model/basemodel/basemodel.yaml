@@ -3,10 +3,11 @@ learning_rate: 0.001
 weight_decay: 0
 learner: adam
 scheduler: ~
-epochs: 100
-batch_size: 2048
+grad_clip_norm: ~
+epochs: 1000
+batch_size: 1024
 num_workers: 0 # please do not use this parameter, slowing down the training process
-gpu: [0,] # TODO: gpu=int: number of gpus, use free gpus;  gpu=list: gpu ids
+gpu: 1
 num_threads: 10
 accelerator: gpu
 seed: 2022
@@ -34,8 +35,14 @@ excluding_hist: False
 embed_dim: 64
 item_bias: False
 
+# `split_num` is set when the number of items are enormous, which will cause out-of-memory
+# problem. The `split_num` represents that the item vectors should be cut into several parts
+# to calculate scores step by step.
+split_num: ~
+
 # used for evaluating tower-based model
 eval_batch_size: 128
+val_n_epoch: 1
 split_ratio: [0.8,0.1,0.1]
 test_metrics: [recall, precision, map, ndcg, mrr, hit]
 val_metrics: [ndcg, recall]

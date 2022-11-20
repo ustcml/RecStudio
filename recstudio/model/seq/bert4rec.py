@@ -2,7 +2,7 @@ import torch
 from recstudio.ann import sampler
 from recstudio.data import dataset
 from recstudio.model import basemodel, loss_func, scorer
-
+from recstudio.model.module import functional as recfn 
 from .sasrec import SASRecQueryEncoder
 
 
@@ -11,7 +11,7 @@ class BERT4Rec(basemodel.BaseRetriever):
     def _init_model(self, train_data):
         super()._init_model(train_data)
         self.mask_token = train_data.num_items
-        self.query_fields = self.query_fields | set("mask_token")
+        self.query_fields = self.query_fields | set(["mask_token"])
 
     def _get_dataset_class():
         return dataset.SeqDataset
@@ -21,10 +21,11 @@ class BERT4Rec(basemodel.BaseRetriever):
             fiid=self.fiid, embed_dim=self.embed_dim,
             max_seq_len=train_data.config['max_seq_len'], n_head=self.config['head_num'],
             hidden_size=self.config['hidden_size'], dropout=self.config['dropout'],
-            activation=self.config['activation'], n_layer=self.config['layer_num'],
+            activation=self.config['activation'], layer_norm_eps=self.config['layer_norm_eps'],
+            n_layer=self.config['layer_num'],
+            training_pooling_type='mask',
             item_encoder=self.item_encoder,
             bidirectional=True,
-            return_full_seq_training=True
         )
 
     def _get_item_encoder(self, train_data):
@@ -36,10 +37,10 @@ class BERT4Rec(basemodel.BaseRetriever):
 
     def _get_loss_func(self):
         r"""SoftmaxLoss is used as the loss function."""
-        return loss_func.BinaryCrossEntropyLoss()
+        return loss_func.SoftmaxLoss()
 
     def _get_sampler(self, train_data):
-        return sampler.UniformSampler(train_data.num_items)
+        return None
 
     def _reconstruct_train_data(self, batch):
         item_seq = batch['in_'+self.fiid]
@@ -54,9 +55,9 @@ class BERT4Rec(basemodel.BaseRetriever):
         batch['in_'+self.fiid] = item_seq
 
         batch[self.fiid] = masked_token     # N
-        batch['seqlen'] = masked_mask
+        batch['mask_token'] = masked_mask
         return batch
 
-    def forward(self, batch, full_score):
+    def training_step(self, batch):
         batch = self._reconstruct_train_data(batch)
-        return super().forward(batch, full_score)
+        return super().training_step(batch)

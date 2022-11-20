@@ -2,7 +2,7 @@ from typing import Set
 
 import torch
 import torch.nn as nn
-from recstudio.model.module import SeqPoolingLayer
+from .layers import MLPModule, AttentionLayer, SeqPoolingLayer, get_act
 
 
 class DenseEmbedding(torch.nn.Module):
@@ -129,7 +129,7 @@ class FMLayer(nn.Module):
         self.reduction = reduction
 
         if reduction is not None:
-            if reduction not in ['sum', 'mean']:
+            if reduction not in {'sum', 'mean'}:
                 raise ValueError(f"reduction only support `mean`|`sum`, but get {reduction}")
 
     def forward(self, inputs):
@@ -218,8 +218,10 @@ class DINScorer(torch.nn.Module):
 
 
 class BehaviorSequenceTransformer(nn.Module):
-    def __init__(self, fuid, fiid, num_users, num_items, max_len, embed_dim, hidden_size, n_layer, n_head, dropout,
-                 mlp_layers=[1024, 512, 256], activation='relu', batch_first=True, norm_first=False):
+    def __init__(self, fuid, fiid, num_users, num_items, max_len,
+                 embed_dim, hidden_size, n_layer, n_head, dropout,
+                 mlp_layers=[1024, 512, 256], activation='leakyrelu',
+                 batch_first=True, norm_first=False):
         super().__init__()
         self.fuid = fuid
         self.fiid = fiid
@@ -227,26 +229,29 @@ class BehaviorSequenceTransformer(nn.Module):
         self.item_embedding = torch.nn.Embedding(num_items, embed_dim, 0)
         self.position_embedding = torch.nn.Embedding(max_len+2, embed_dim, 0)
         tfm_encoder = torch.nn.TransformerEncoderLayer(
-            d_model=embed_dim, nhead=n_head, dim_feedforward=hidden_size, dropout=dropout, activation=activation,
-            batch_first=batch_first, norm_first=norm_first)
+            d_model=embed_dim, nhead=n_head, dim_feedforward=hidden_size,
+            dropout=dropout, activation='relu', batch_first=batch_first,
+            norm_first=norm_first)
         self.transformer = torch.nn.TransformerEncoder(
             encoder_layer=tfm_encoder, num_layers=n_layer)
-        self.mlp = MLPModule([(max_len+1)*embed_dim, ] +
-                             mlp_layers, activation_func=activation)
+        self.mlp = MLPModule([(max_len+1)*embed_dim, ] + mlp_layers,
+                             activation_func = activation,
+                             dropout = dropout)
         self.predict = torch.nn.Linear(mlp_layers[-1], 1)
 
     def forward(self, batch):
         hist = batch['in_'+self.fiid]
         target = batch[self.fiid]
         seq_len = batch['seqlen']
-        hist = torch.cat((hist, target.view(-1, 1)), dim=1)
+        hist = torch.cat((hist, torch.zeros_like(target.view(-1, 1))), dim=1)
         B, L = hist.shape
+        idx_ = torch.arange(0, B, dtype=torch.long)
+        hist[idx_, seq_len] = target.long()
         seq_emb = self.item_embedding(hist)
         positions = torch.arange(1, L+1, device=seq_emb.device)
         positions = torch.tile(positions, (B,)).view(B, -1)
         padding_mask = hist == 0
         positions[padding_mask] = 0
-        positions[:, -1] = seq_len + 1
         position_emb = self.position_embedding(positions)
         attention_mask = torch.triu(torch.ones(
             (L, L), dtype=torch.bool, device=hist.device), 1)
@@ -289,3 +294,69 @@ class DIENScorer(torch.nn.Module):
 
     def forward(self, batch):
         pass
+
+
+class CIN(torch.nn.Module):
+    def __init__(self, embed_dim, num_features, cin_layer_size, activation='relu', direct=True):
+        super(CIN, self).__init__()
+        self.embed_dim = embed_dim
+        self.num_features = num_features
+        self.cin_layer_size = _temp = cin_layer_size
+        self.activation = get_act(activation)
+        self.direct = direct
+        self.weight = torch.nn.ModuleList()
+        # Check whether the size of the CIN layer is legal.
+        if not self.direct:
+            self.cin_layer_size = list(map(lambda x: int(x // 2 * 2), _temp))
+            if self.cin_layer_size[:-1] != _temp[:-1]:
+                self.logger.warning(
+                    "Layer size of CIN should be even except for the last layer when direct is True."
+                    "It is changed to {}".format(self.cin_layer_size)
+                )
+        #
+        # Convolutional layer for each CIN layer
+        self.weight_list = nn.ModuleList()
+        self.field_num_list = [self.num_features]
+        for i, layer_size in enumerate(self.cin_layer_size):
+            conv1d = nn.Conv1d(self.field_num_list[-1] * self.field_num_list[0], layer_size, 1)
+            self.weight_list.append(conv1d)
+            if self.direct:
+                self.field_num_list.append(layer_size)
+            else:
+                self.field_num_list.append(layer_size // 2)
+        #
+        # Get the output size of CIN
+        if self.direct:
+            output_dim = sum(self.cin_layer_size)
+        else:
+            output_dim = (
+                sum(self.cin_layer_size[:-1]) // 2 + self.cin_layer_size[-1]
+            )
+        self.linear = torch.nn.Linear(output_dim, 1)
+
+    def forward(self, input):
+        B, _, D = input.shape
+        hidden_nn_layers = [input]
+        final_result = []
+        for i, layer_size in enumerate(self.cin_layer_size):
+            z_i = torch.einsum("bhd,bmd->bhmd", hidden_nn_layers[-1], hidden_nn_layers[0])
+            z_i = z_i.view(B, self.field_num_list[0] * self.field_num_list[i], D)
+            z_i = self.weight_list[i](z_i)
+            output = self.activation(z_i)
+            # Get the output of the hidden layer.
+            if self.direct:
+                direct_connect = output
+                next_hidden = output
+            else:
+                if i != len(self.cin_layer_size) - 1:
+                    next_hidden, direct_connect = torch.split(output, 2 * [layer_size // 2], 1)
+                else:
+                    direct_connect = output
+                    next_hidden = 0
+
+            final_result.append(direct_connect)
+            hidden_nn_layers.append(next_hidden)
+        result = torch.cat(final_result, dim=1)
+        result = torch.sum(result, -1)
+        score = self.linear(result).squeeze(-1)
+        return score

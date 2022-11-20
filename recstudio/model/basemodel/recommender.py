@@ -2,21 +2,22 @@ import abc
 import os
 import inspect
 import logging
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
 from collections import defaultdict
 
-import copy
 import time
 import nni
 import recstudio.eval as eval
 import torch
 import torch.optim as optim
 import torch.distributed as dist
+from torch.utils.tensorboard import SummaryWriter
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.multiprocessing as mp
+from torch.nn.utils.clip_grad import clip_grad_norm_
 from recstudio.model import init, basemodel, loss_func
 from recstudio.utils import callbacks
-from recstudio.utils.utils import color_dict, seed_everything, parser_yaml, get_model
+from recstudio.utils.utils import color_dict, seed_everything, parser_yaml, set_color, get_gpus
 from recstudio.data.dataset import (MFDataset, CombinedLoaders)
 
 
@@ -31,10 +32,7 @@ class Recommender(torch.nn.Module, abc.ABC):
         if self.config['seed'] is not None:
             seed_everything(self.config['seed'], workers=True)
 
-        # self.fields = self.config['use_fields']
         self.embed_dim = self.config['embed_dim']
-
-        self.logger = logging.getLogger('recstudio')
 
         self.logged_metrics = {}
 
@@ -53,7 +51,7 @@ class Recommender(torch.nn.Module, abc.ABC):
                 recstudio.loss_func.PairwiseLoss, recstudio.loss_func.PointWiseLoss]"
             self.loss_fn = kwargs['loss']
         else:
-            self.loss_fn = self._get_loss_func()
+            self.loss_fn = None
 
         self.ckpt_path = None
 
@@ -66,8 +64,13 @@ class Recommender(torch.nn.Module, abc.ABC):
         parent_parser.add_argument('--epochs', type=int, default=50, help='training epochs')
         parent_parser.add_argument('--batch_size', type=int, default=256, help='training batch size')
         parent_parser.add_argument('--eval_batch_size', type=int, default=128, help='evaluation batch size')
+        parent_parser.add_argument('--val_n_epoch', type=int, default=1, help='valid epoch interval')
         parent_parser.add_argument('--embed_dim', type=int, default=64, help='embedding dimension')
+        parent_parser.add_argument('--early_stop_patience', type=int, default=10, help='early stop patience')
         parent_parser.add_argument('--gpu', type=int, action='append', default=None, help='gpu number')
+        parent_parser.add_argument('--init_method', type=str, default='xavier_normal', help='init method for model')
+        parent_parser.add_argument('--init_range', type=float, help='init range for some methods like normal')
+        parent_parser.add_argument('--seed', type=int, default=2022, help='random seed')
         return parent_parser
 
     def _add_modules(self, train_data):
@@ -76,21 +79,21 @@ class Recommender(torch.nn.Module, abc.ABC):
     def _set_data_field(self, data):
         pass
 
-    def _init_model(self, train_data):
+    def _init_model(self, train_data, drop_unused_field=True):
         self._set_data_field(train_data) #TODO(@AngusHuang17): to be considered in a better way
         self.fields = train_data.use_field
         self.frating = train_data.frating
         assert self.frating in self.fields, 'rating field is required.'
-        train_data.drop_feat(self.fields)
-        # if self.fields is not None:
-        #     assert self.frating in self.fields, 'rating field is required.'
-        #     train_data.drop_feat(self.fields)
-        # else:
-        #     self.fields = set(f for f in train_data.field2type) # 需要去除time吗？
-
+        if drop_unused_field:
+            train_data.drop_feat(self.fields)
         self.item_feat = train_data.item_feat
         self.item_fields = set(train_data.item_feat.fields).intersection(self.fields)
         self.neg_count = self.config['negative_count']
+        if self.loss_fn is None:
+            if 'train_data' in inspect.signature(self._get_loss_func).parameters:
+                self.loss_fn = self._get_loss_func(train_data)
+            else:
+                self.loss_fn = self._get_loss_func()
 
 
 
@@ -106,7 +109,14 @@ class Recommender(torch.nn.Module, abc.ABC):
         Fit the model with train data.
         """
         # self.set_device(self.config['gpu'])
-        torch.set_num_threads(self.config['num_threads'])
+        self.logger = logging.getLogger('recstudio')
+        if len(self.logger.handlers) > 1:
+            tb_log_name = os.path.basename(self.logger.handlers[1].baseFilename).split('.')[0]
+        else:
+            import time
+            tb_log_name = time.strftime(f"{self.__class__.__name__}-{train_data.name}-%Y-%m-%d-%H-%M-%S.log",
+                                         time.localtime())
+        self.tensorboard_logger = SummaryWriter(f"tensorboard/{tb_log_name}")
 
         if config is not None:
             self.config.update(config)
@@ -132,8 +142,7 @@ class Recommender(torch.nn.Module, abc.ABC):
                 else [self.config['cutoff']]
             if len(eval.get_rank_metrics(self.val_metric)) > 0:
                 self.val_metric += '@' + str(cutoffs[0])
-        # logger = TensorBoardLogger(save_dir=save_dir, name="tensorboard")
-        self.callback = self._get_callback()
+        self.callback = self._get_callback(train_data.name)
         self.logger.info('save_dir:' + self.callback.save_dir)
         # refresh_rate = 0 if run_mode in ['light', 'tune'] else 1
 
@@ -155,6 +164,7 @@ class Recommender(torch.nn.Module, abc.ABC):
                 val_loader = None
             self.optimizers = self._get_optimizers()
             self.fit_loop(val_loader)
+        return self.callback.best_ckpt['metric']
 
     def parallel_training(self, rank, world_size, train_data, val_data):
         dist.init_process_group("nccl", rank=rank, world_size=world_size)
@@ -171,7 +181,6 @@ class Recommender(torch.nn.Module, abc.ABC):
         self = self.to(self.device)
         self = DDP(self, device_ids=[self.device], output_device=self.device).module
         self.optimizers = self._get_optimizers()
-        # self.
         self.fit_loop(val_loader)
         dist.destroy_process_group()
 
@@ -189,14 +198,14 @@ class Recommender(torch.nn.Module, abc.ABC):
         Returns:
             dict: dict of metrics. The key is the name of metrics.
         """
-        if 'config' in kwargs:
-            self.config.update(kwargs['config'])
 
         test_data.drop_feat(self.fields)
         test_loader = test_data.eval_loader(batch_size=self.config['eval_batch_size'],
                                             num_workers=self.config['num_workers'])
         output = {}
-        self.load_checkpoint(os.path.join(self.config['save_path'], self.ckpt_path)) # bug to fix 应该支持使用保存的模型进行评测
+        self.load_checkpoint(os.path.join(self.config['save_path'], self.ckpt_path))
+        if 'config' in kwargs:
+            self.config.update(kwargs['config'])
         self.eval()
         output_list = self.test_epoch(test_loader)
         output.update(self.test_epoch_end(output_list))
@@ -205,7 +214,7 @@ class Recommender(torch.nn.Module, abc.ABC):
             nni.report_final_result(output)
         if verbose:
             self.logger.info(color_dict(output, self.run_mode == 'tune'))
-        # return output
+        return output
 
     def predict(self, batch, k, *args, **kwargs):
         pass
@@ -214,13 +223,13 @@ class Recommender(torch.nn.Module, abc.ABC):
     def forward(self, batch):
         pass
 
-    def _get_callback(self):
+    def _get_callback(self, dataset_name):
         save_dir = self.config['save_path']
         if self.val_check:
-            return callbacks.EarlyStopping(self, self.val_metric, save_dir=save_dir, \
+            return callbacks.EarlyStopping(self, self.val_metric, dataset_name, save_dir=save_dir, \
                 patience=self.config['early_stop_patience'], mode=self.config['early_stop_mode'])
         else:
-            return callbacks.SaveLastCallback(self, save_dir=save_dir)
+            return callbacks.SaveLastCallback(self, dataset_name, save_dir=save_dir)
 
     def current_epoch_trainloaders(self, nepoch) -> Tuple:
         r"""
@@ -251,7 +260,6 @@ class Recommender(torch.nn.Module, abc.ABC):
     @abc.abstractmethod
     def test_step(self, batch):
         pass
-
 
     def training_epoch_end(self, output_list):
         output_list = [output_list] if not isinstance(output_list, list) else output_list
@@ -297,7 +305,7 @@ class Recommender(torch.nn.Module, abc.ABC):
             out = dict(zip(test_metric, out))
         elif isinstance(outputs[0][0], Dict):
             out = self._test_epoch_end(outputs)
-        self.log_dict(out)
+        self.log_dict(out, tensorboard=False)
         return out
 
     def _test_epoch_end(self, outputs):
@@ -318,7 +326,13 @@ class Recommender(torch.nn.Module, abc.ABC):
                 out[k] = (metric * bs).sum() / bs.sum()
         return out
 
-    def log_dict(self, metrics: Dict):
+    def log_dict(self, metrics: Dict, tensorboard: bool=True):
+        if tensorboard:
+            for k, v in metrics.items():
+                if 'train' in k:
+                    self.tensorboard_logger.add_scalar(f"train/{k}", v, self.logged_metrics['epoch']+1)
+                else:
+                    self.tensorboard_logger.add_scalar(f"valid/{k}", v, self.logged_metrics['epoch']+1)
         self.logged_metrics.update(metrics)
 
     def _init_parameter(self):
@@ -368,8 +382,8 @@ class Recommender(torch.nn.Module, abc.ABC):
     def _get_optimizers(self) -> List[Dict]:
         if 'learner' not in self.config:
             self.config['learner'] = 'adam'
-            self.logger.warning("`learner` is not detected in the configuration, Adam optimizer"
-                                "is used.")
+            self.logger.warning("`learner` is not detected in the configuration, "
+                                "Adam optimizer is used.")
 
         if self.config['learner'] is None:
             self.logger.warning('There is no optimizers in the model due to `learner` is'
@@ -377,9 +391,9 @@ class Recommender(torch.nn.Module, abc.ABC):
             return None
 
         if isinstance(self.config['learner'], list):
-            self.logger.warning("If you want to use multi learner, please \
-                override `_get_optimizers` function. We will use the first \
-                learner for all the parameters.")
+            self.logger.warning("If you want to use multi learner, "
+                                "please override `_get_optimizers` function. "
+                                "We will use the first learner for all the parameters.")
             opt_name = self.config['learner'][0]
             lr = self.config['learning_rate'][0]
             weight_decay = None if self.config['weight_decay'] is None \
@@ -389,13 +403,13 @@ class Recommender(torch.nn.Module, abc.ABC):
         else:
             opt_name = self.config['learner']
             if 'learning_rate' not in self.config:
-                self.logger.warning("`learning_rate` is not detected in the configurations,"
+                self.logger.warning("`learning_rate` is not detected in the configurations, "
                                     "the default learning is set as 0.001.")
                 self.config['learning_rate'] = 0.001
             lr = self.config['learning_rate']
 
             if 'weight_decay' not in self.config:
-                self.logger.warning("`weight_decay` is not detected in the configurations,"
+                self.logger.warning("`weight_decay` is not detected in the configurations, "
                                     "the default weight_decay is set as 0.")
                 self.config['weight_decay'] = 0
             weight_decay = self.config['weight_decay']
@@ -490,18 +504,25 @@ class Recommender(torch.nn.Module, abc.ABC):
                 tik_valid = time.time()
                 if self.val_check:
                     self.eval()
-                    validation_output_list = self.validation_epoch(nepoch, val_dataloader)
-                    self.validation_epoch_end(validation_output_list)
-                    if self.run_mode == 'tune' and nepoch % 20 == 0:
-                        metric = self.logged_metrics[self.val_metric]
-                        nni.report_intermediate_result(metric.item())
+                    if nepoch % self.config['val_n_epoch'] == 0:
+                        validation_output_list = self.validation_epoch(nepoch, val_dataloader)
+                        self.validation_epoch_end(validation_output_list)
+                        if self.run_mode == 'tune' and nepoch % 20 == 0:
+                            metric = self.logged_metrics[self.val_metric]
+                            nni.report_intermediate_result(metric.item())
                 tok_valid = time.time()
 
                 self.training_epoch_end(training_output_list)
-                self.logger.info("Train time: {:.5f}s. Valid time: {:.5f}s".format(
-                    (tok_train-tik_train), (tok_valid-tik_valid)
+                if self.config['gpu'] is not None:
+                    mem_reversed = torch.cuda.max_memory_reserved(self._parameter_device) / (1024**3)
+                    mem_total = torch.cuda.mem_get_info(self._parameter_device)[1] / (1024**3)
+                else:
+                    mem_reversed = mem_total = 0
+                self.logger.info("{} {:.5f}s. {} {:.5f}s. {} {:.2f}/{:.2f} GB".format(
+                    set_color('Train time:', 'white', False), (tok_train-tik_train),
+                    set_color('Valid time:', 'white', False), (tok_valid-tik_valid),
+                    set_color('GPU RAM:', 'white', False), mem_reversed, mem_total
                 ))
-
                 # learning rate scheduler step
                 optimizers = self.current_epoch_optimizers(e)
                 if optimizers is not None:
@@ -510,9 +531,10 @@ class Recommender(torch.nn.Module, abc.ABC):
                             opt['scheduler'].step()
 
                 # model is saved in callback when the callback return True.
-                stop_training = self.callback(self, nepoch, self.logged_metrics)
-                if stop_training:
-                    break
+                if nepoch % self.config['val_n_epoch'] == 0:
+                    stop_training = self.callback(self, nepoch, self.logged_metrics)
+                    if stop_training:
+                        break
 
                 nepoch += 1
 
@@ -534,7 +556,11 @@ class Recommender(torch.nn.Module, abc.ABC):
 
         if hasattr(self, "sampler"):
             if hasattr(self.sampler, "update"):
-                self.sampler.update(item_embs=self.item_vector)  # TODO: add frequency
+                if hasattr(self, 'item_vector'):
+                    # TODO: add frequency
+                    self.sampler.update(item_embs=self.item_vector)
+                else:
+                    self.sampler.update(item_embs=None)
         output_list = []
         optimizers = self.current_epoch_optimizers(nepoch)
 
@@ -550,49 +576,59 @@ class Recommender(torch.nn.Module, abc.ABC):
 
         for loader_idx, loader in enumerate(trn_dataloaders):
             outputs = []
-            for optimizer_idx, opt in enumerate(optimizers):
-                for batch_idx, batch in enumerate(loader):
-                    # data to device
-                    batch = self._to_device(batch, self._parameter_device)
+            for batch_idx, batch in enumerate(loader):
+                # data to device
+                batch = self._to_device(batch, self._parameter_device)
 
+                for opt in optimizers:
                     if opt is not None:
                         opt['optimizer'].zero_grad()
-                    # model loss
-                    training_step_args = {'batch': batch}
-                    if 'nepoch' in inspect.getargspec(self.training_step).args:
-                        training_step_args['nepoch'] = nepoch
-                    if 'loader_idx' in inspect.getargspec(self.training_step).args:
-                        training_step_args['loader_idx'] = loader_idx 
-                    if 'batch_idx' in inspect.getargspec(self.training_step).args:
-                        training_step_args['batch_idx'] = batch_idx
+                # model loss
+                training_step_args = {'batch': batch}
+                if 'nepoch' in inspect.getargspec(self.training_step).args:
+                    training_step_args['nepoch'] = nepoch
+                if 'loader_idx' in inspect.getargspec(self.training_step).args:
+                    training_step_args['loader_idx'] = loader_idx
+                if 'batch_idx' in inspect.getargspec(self.training_step).args:
+                    training_step_args['batch_idx'] = batch_idx
 
-                    loss = self.training_step(**training_step_args)
+                loss = self.training_step(**training_step_args)
 
-                    if isinstance(loss, dict):
-                        if loss['loss'].requires_grad:
+                if isinstance(loss, dict):
+                    if loss['loss'].requires_grad:
+                        if isinstance(loss['loss'], torch.Tensor):
                             loss['loss'].backward()
-                        loss_ = {}
-                        for k, v in loss.items():
-                            if k == 'loss':
+                        elif isinstance(loss['loss'], List):
+                            for l in loss['loss']:
+                                l.backward()
+                        else:
+                            raise TypeError("loss must be Tensor or List of Tensor")
+                    loss_ = {}
+                    for k, v in loss.items():
+                        if k == 'loss':
+                            if isinstance(v, torch.Tensor):
                                 v = v.detach()
-                            loss_[f'{k}_{loader_idx}'] = v
-                        outputs.append(loss_)
-                    elif isinstance(loss, torch.Tensor):
-                        if loss.requires_grad:
-                            loss.backward()
-                        outputs.append({f"loss_{loader_idx}": loss.detach()})
-
+                            elif isinstance(v, List):
+                                v = [_ for _ in v]
+                        loss_[f'{k}_{loader_idx}'] = v
+                    outputs.append(loss_)
+                elif isinstance(loss, torch.Tensor):
+                    if loss.requires_grad:
+                        loss.backward()
+                    outputs.append({f"loss_{loader_idx}": loss.detach()})
+                #
+                for opt in optimizers:
+                    if self.config['grad_clip_norm'] is not None:
+                        clip_grad_norm_(opt['optimizer'].params, self.config['grad_clip_norm'])
+                    #
                     if opt is not None:
                         opt['optimizer'].step()
-
-                    del loss
-
                 if len(outputs) > 0:
                     output_list.append(outputs)
         return output_list
 
     def validation_epoch(self, nepoch, dataloader):
-        if hasattr(self, '_update_item_vector'):  # TODO: config frequency
+        if hasattr(self, '_update_item_vector'):
             self._update_item_vector()
         output_list = []
 
@@ -648,14 +684,13 @@ class Recommender(torch.nn.Module, abc.ABC):
                 List or Tuple, but {type(batch)} given.")
 
     def _accelerate(self):
-        gpu_list = self.config['gpu']
+        gpu_list = get_gpus(self.config['gpu'])
         if gpu_list is not None:
+            self.logger.info(f"GPU id {gpu_list} are selected.")
             if len(gpu_list) == 1:
-                # self._set_device(gpu_list)
                 self.device = torch.device("cuda", gpu_list[0])
                 self = self._to_device(self, self.device)
             elif self.config['accelerator'] == 'dp':
-                # self._set_device(gpu_list)
                 self.device = torch.device("cuda")
                 self = self.to(self.device)
                 self = torch.nn.DataParallel(self, device_ids=gpu_list, output_device=gpu_list[0])
@@ -686,7 +721,7 @@ class Recommender(torch.nn.Module, abc.ABC):
     def _get_ckpt_param(self):
         '''
         Returns:
-        OrderedDict : the parameters to be saved as check point.
+            OrderedDict: the parameters to be saved as check point.
         '''
         return self.state_dict()
 
@@ -703,4 +738,8 @@ class Recommender(torch.nn.Module, abc.ABC):
     def load_checkpoint(self, path: str) -> None:
         ckpt = torch.load(path)
         self.config = ckpt['config']
+        # the _update_item_vector should be called, otherwise loading state_dict will
+        # raise key unmapped error.
+        if hasattr(self, '_update_item_vector') and (not hasattr(self,'item_vector')):
+            self._update_item_vector()
         self.load_state_dict(ckpt['parameters'])

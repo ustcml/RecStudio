@@ -9,7 +9,7 @@ import torch.nn.functional as F
 class MacridVAEDecoder(torch.nn.Module):
     def __init__(self, num_items, embed_dim) -> None:
         super().__init__()
-        self.item_vector =torch.nn.Embedding(num_items, embed_dim, 0)#0是pad
+        self.item_vector =torch.nn.Embedding(num_items, embed_dim, 0)#0 for padding
         self.items_idx = None
     
     def forward(self, batch):
@@ -62,7 +62,7 @@ class MacridVAEQueryEncoder(torch.nn.Module):
         #对ci进行预测
         cores = F.normalize(self.k_embedding.weight, dim=1)#(k,embed_dim)
         items = F.normalize(self.item_encoder.weight, dim=1)#(num_items, embed_dim)
-        cates_logits = torch.matmul(items, cores.transpose(0,1)) / self.tau#(num_items, k)每个item是每个类别的概率
+        cates_logits = torch.matmul(items, cores.transpose(0,1)) / self.tau#(num_items, k), prob for each item belonging to which category
 
         if self.nogb:
             self.cates = torch.softmax(cates_logits, dim=-1).T
@@ -75,8 +75,7 @@ class MacridVAEQueryEncoder(torch.nn.Module):
         mulist = []
         logvarlist = []
         for k in range(self.kfac):#为user生成每个z_k
-            cates_k = self.cates[k,:].reshape(1,-1)#(1, num_items),每个item属于k类别的概率，c_i,k
-            # encode,具体就是得到所有pos item embedding以及pos item的c_i,k值，然后加权和后过神经网络
+            cates_k = self.cates[k,:].reshape(1,-1)#(1, num_items),The probability that each item belongs to category k，c_i,k
             cates_batch = cates_k.expand(batch["in_"+self.fiid].shape[0],cates_k.shape[1])#(batch, num_items)
             cates_pos = cates_batch.gather(1,batch["in_"+self.fiid])#(batch, pos_items)
             
@@ -93,7 +92,7 @@ class MacridVAEQueryEncoder(torch.nn.Module):
             mulist.append(mu)
             logvarlist.append(logvar)
 
-            z_k = self.reparameterize(mu,logvar)#重参数化后，服从(mu, (sigma * sigma_0)**2)
+            z_k = self.reparameterize(mu,logvar)#reparameterize，(mu, (sigma * sigma_0)**2)
             zk_list.append(z_k)
 
         self.z = torch.stack(zk_list, dim=1)

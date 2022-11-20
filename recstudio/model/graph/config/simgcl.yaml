@@ -11,5 +11,6 @@ split_ratio: [0.8, 0.1, 0.1]
 l2_reg_weight: 1e-4
 n_layers: 3
 eps: 0.1
+cl_neg_type: all
 cl_weight: 0.5
 temperature: 0.2
