@@ -4,12 +4,9 @@ import torch.nn.functional as F
 from recstudio.data.dataset import AEDataset
 from recstudio.model.basemodel import BaseRetriever, Recommender
 from recstudio.model.loss_func import SoftmaxLoss
-from recstudio.model.module import MLPModule
 from recstudio.model.scorer import InnerProductScorer
 import numpy as np
-from typing import Dict, List,Tuple
-from recstudio.data.dataset import (MFDataset, CombinedLoaders)
-import inspect
+from typing import Dict, List
 from copy import deepcopy
 from ..loss_func import FullScoreLoss
 
@@ -68,8 +65,8 @@ class RecVAEQueryEncoder(torch.nn.Module):
         self.fc5 = nn.Linear(hidden_dim, hidden_dim)
         self.ln5 = nn.LayerNorm(hidden_dim, eps=eps)
         self.fc_mu = nn.Linear(hidden_dim, latent_dim)
-        self.fc_logvar = nn.Linear(hidden_dim, latent_dim)        
-        
+        self.fc_logvar = nn.Linear(hidden_dim, latent_dim)           
+
 
     def forward(self, batch, dropout_rate=0):
         user_emb = self.encoder_layer_0(batch["in_"+self.fiid])
