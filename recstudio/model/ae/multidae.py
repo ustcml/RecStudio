@@ -20,7 +20,7 @@ class MultiDAEQueryEncoder(torch.nn.Module):
         self.dropout = torch.nn.Dropout(p=dropout_rate)
 
         self.encoder_decoder = torch.nn.Sequential(
-            MLPModule([embed_dim]+encoder_dims+decoder_dims[1: -1], activation),
+            MLPModule([embed_dim]+encoder_dims+decoder_dims[1:], activation),
             torch.nn.Linear(decoder_dims[-1], embed_dim)
         )
 
