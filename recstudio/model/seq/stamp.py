@@ -15,7 +15,8 @@ class STAMPQueryEncoder(torch.nn.Module):
             k_dim=embed_dim,
             mlp_layers=[embed_dim],
         )
-        self.mlp = module.MLPModule([2 * embed_dim, 2 * embed_dim], torch.nn.Tanh())
+        self.mlpA = module.MLPModule([embed_dim, embed_dim], torch.nn.Tanh())
+        self.mlpB = module.MLPModule([embed_dim, embed_dim], torch.nn.Tanh())
 
     def forward(self, batch):
         user_hist = batch['in_'+self.fiid]
@@ -26,8 +27,8 @@ class STAMPQueryEncoder(torch.nn.Module):
         query = torch.cat((m_t, m_s), dim=1)    # Bx2D
         m_a = self.attention_layer(query.unsqueeze(1), seq_emb, seq_emb,
                                    key_padding_mask=(user_hist == 0)).squeeze(1)
-        h_cat = self.mlp(torch.cat((m_s, m_a), dim=1))
-        h_s, h_t = h_cat.tensor_split(2, dim=1)
+        h_s = self.mlpA(m_a)
+        h_t = self.mlpB(m_t)
         return h_s * h_t
 
 
