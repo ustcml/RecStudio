@@ -906,7 +906,8 @@ class MFDataset(Dataset):
                 ucnts = pd.DataFrame({self.fuid : splits[1]})
                 for i, (start, end) in enumerate(zip(splits_[:-1], splits_[1:])):
                     self.inter_feat[start:end] = self.inter_feat[start:end].sort_values(
-                        by=[self.fuid, self.ftime] if self.ftime in self.inter_feat else self.fuid)
+                        by=[self.fuid, self.ftime] if self.ftime in self.inter_feat 
+                        else self.fuid)
                     ucnts[i] = self.inter_feat[start:end][self.fuid].groupby(
                         self.inter_feat[self.fuid], sort=True).count().values
                 self.inter_feat.sort_values(by=[self.fuid], inplace=True, kind='mergesort')
@@ -914,7 +915,8 @@ class MFDataset(Dataset):
                 ucnts = ucnts.astype(int)
                 ucnts = torch.from_numpy(ucnts.values)
                 u_cumsum = ucnts[:, 1:].cumsum(dim=1)
-                u_start = torch.hstack([torch.tensor(0), u_cumsum[:, -1][:-1]]).view(-1, 1).cumsum(dim=0)
+                u_start = torch.hstack(
+                    [torch.tensor(0), u_cumsum[:, -1][:-1]]).view(-1, 1).cumsum(dim=0)
                 splits = torch.hstack([u_start, u_cumsum + u_start])
                 uids = ucnts[:, 0]
                 if isinstance(self, AEDataset):
@@ -924,7 +926,8 @@ class MFDataset(Dataset):
             else:
                 for start, end in zip(splits_[:-1], splits_[1:]):
                     self.inter_feat[start:end] = self.inter_feat[start:end].sort_values(
-                        by=[self.fuid, self.ftime] if self.ftime in self.inter_feat else self.fuid)
+                        by=[self.fuid, self.ftime] if self.ftime in self.inter_feat 
+                        else self.fuid)
         
 
         self.dataframe2tensors()
