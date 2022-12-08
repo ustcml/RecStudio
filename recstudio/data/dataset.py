@@ -1178,7 +1178,7 @@ class AEDataset(MFDataset):
         return self._build(split_ratio, shuffle, split_mode, False)
 
     def _get_data_idx(self, splits):
-        splits, uids_or_ucnts = splits
+        splits, uids = splits
         # filter out users whose behaviors are not in valid and test data,
         # otherwise it will cause nan in metric calculation such as recall.
         # usually the reason is that the number of behavior is too small due to the sparsity.
