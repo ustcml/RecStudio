@@ -78,7 +78,10 @@ class MFDataset(Dataset):
 
     @property
     def drop_dup(self):
-        return True
+        if self.split_mode == 'entry':
+            return False
+        else:
+            return True
 
     def _load_cache(self, path):
         with open(path, 'rb') as f:
@@ -645,6 +648,19 @@ class MFDataset(Dataset):
         splits = cumsum.reshape(-1, 1) + splits
         return splits, data_count.index if m > 1 else None
 
+    def _split_by_num(self, num, data_count):
+        r"""Split dataset into train/valid/test by specific ratio.
+        num: list of int
+        assert split_mode is entry                       
+        """
+        m = len(data_count)
+        splits = np.hstack([0, num]).cumsum().reshape(1, -1)
+        if splits[0][-1] == data_count.values.sum():
+            return splits, data_count.index if m > 1 else None
+        else:
+            ValueError(f'Expecting the number of interactions \
+            should be equal to the sum of {num}')
+    
     def _split_by_leave_one_out(self, leave_one_num, data_count, rep=True):
         r"""Split dataset into train/valid/test by leave one out method.
         The split methods are usually used for sequential recommendation, where the last item of the item sequence will be used for test.
@@ -830,16 +846,17 @@ class MFDataset(Dataset):
             list: A list contains train/valid/test data-[train, valid, test]
         """
         self.fmeval = fmeval
+        self.split_mode = split_mode
         self._init_sampler(dataset_sampler, dataset_neg_count)
-        return self._build(split_ratio, shuffle, split_mode, True, False)
+        return self._build(split_ratio, shuffle, split_mode, False)
 
-    def _build(self, ratio_or_num, shuffle, split_mode, drop_dup, rep):
+    def _build(self, ratio_or_num, shuffle, split_mode, rep):
         # for general recommendation, only support non-repetive recommendation
         # keep first data, sorted by time or not, split by user or not
         if not hasattr(self, 'first_item_idx'):
             self.first_item_idx = ~self.inter_feat.duplicated(
                 subset=[self.fuid, self.fiid], keep='first')
-        if drop_dup:
+        if self.drop_dup:
             self.inter_feat = self.inter_feat[self.first_item_idx]
 
         if (split_mode == 'user_entry') or (split_mode == 'user'):
@@ -859,10 +876,15 @@ class MFDataset(Dataset):
                     for start, c in zip(cumsum, user_count)])
                 self.inter_feat = self.inter_feat.iloc[idx].reset_index(drop=True)
         elif split_mode == 'entry':
-            if shuffle:
-                self.inter_feat = self.inter_feat.sample(
-                    frac=1).reset_index(drop=True)
-            user_count = np.array([len(self.inter_feat)])
+            if isinstance(ratio_or_num, list) and \
+                isinstance(ratio_or_num[0], int): # split by num
+                user_count = self.inter_feat[self.fuid].groupby(
+                self.inter_feat[self.fuid], sort=True).count()
+            else:
+                if shuffle:
+                    self.inter_feat = self.inter_feat.sample(
+                        frac=1).reset_index(drop=True)
+                user_count = np.array([len(self.inter_feat)])
         elif split_mode == 'user':
             user_count = self.inter_feat[self.fuid].groupby(
                 self.inter_feat[self.fuid], sort=False).count()
@@ -870,15 +892,43 @@ class MFDataset(Dataset):
         if isinstance(ratio_or_num, int):
             splits = self._split_by_leave_one_out(
                 ratio_or_num, user_count, rep)
-        else:
+        elif isinstance(ratio_or_num, list) and \
+            isinstance(ratio_or_num[0], float):
             splits = self._split_by_ratio(
                 ratio_or_num, user_count, split_mode == 'user')
-
+        else:
+            splits = self._split_by_num(
+                ratio_or_num, user_count)
+            
+        splits_ = splits[0][0]
         if split_mode == 'entry':
-            splits_ = splits[0][0]
-            for start, end in zip(splits_[:-1], splits_[1:]):
-                self.inter_feat[start:end] = self.inter_feat[start:end].sort_values(
-                    by=self.fuid)
+            if isinstance(self, AEDataset) or isinstance(self, SeqDataset):
+                ucnts = pd.DataFrame({self.fuid : splits[1]})
+                for i, (start, end) in enumerate(zip(splits_[:-1], splits_[1:])):
+                    self.inter_feat[start:end] = self.inter_feat[start:end].sort_values(
+                        by=[self.fuid, self.ftime] if self.ftime in self.inter_feat 
+                        else self.fuid)
+                    ucnts[i] = self.inter_feat[start:end][self.fuid].groupby(
+                        self.inter_feat[self.fuid], sort=True).count().values
+                self.inter_feat.sort_values(by=[self.fuid], inplace=True, kind='mergesort')
+                self.inter_feat.reset_index(drop=True, inplace=True)
+                ucnts = ucnts.astype(int)
+                ucnts = torch.from_numpy(ucnts.values)
+                u_cumsum = ucnts[:, 1:].cumsum(dim=1)
+                u_start = torch.hstack(
+                    [torch.tensor(0), u_cumsum[:, -1][:-1]]).view(-1, 1).cumsum(dim=0)
+                splits = torch.hstack([u_start, u_cumsum + u_start])
+                uids = ucnts[:, 0]
+                if isinstance(self, AEDataset):
+                    splits = (splits, uids.view(-1, 1))
+                else:
+                    splits = (splits.numpy(), uids)
+            else:
+                for start, end in zip(splits_[:-1], splits_[1:]):
+                    self.inter_feat[start:end] = self.inter_feat[start:end].sort_values(
+                        by=[self.fuid, self.ftime] if self.ftime in self.inter_feat 
+                        else self.fuid)
+        
 
         self.dataframe2tensors()
         datasets = [self._copy(_) for _ in self._get_data_idx(splits)]
@@ -1097,7 +1147,15 @@ class MFDataset(Dataset):
 
 
 class AEDataset(MFDataset):
-    def build(self, split_ratio=[0.8, 0.1, 0.1], shuffle=False, dataset_sampler=None, dataset_neg_count=None, **kwargs):
+    def build(
+            self,
+            split_ratio=[0.8, 0.1, 0.1],
+            shuffle=False,
+            split_mode='user_entry',
+            dataset_sampler=None, 
+            dataset_neg_count=None, 
+            **kwargs
+        ):
         """Build dataset.
 
         Args:
@@ -1113,23 +1171,35 @@ class AEDataset(MFDataset):
         Returns:
             list or ChainedDataLoader: list of loaders if load_combine is True else ChainedDataLoader.
         """
+        self.split_mode = split_mode
         self._init_sampler(dataset_sampler, dataset_neg_count)
-
-        return self._build(split_ratio, shuffle, 'user_entry', True, False)
+        if split_mode == 'entry':
+            # False if split_by_num
+            shuffle = shuffle and \
+                        not (isinstance(split_ratio, list) and \
+                        isinstance(split_ratio[0], int))
+        return self._build(split_ratio, shuffle, split_mode, False)
 
     def _get_data_idx(self, splits):
         splits, uids = splits
         # filter out users whose behaviors are not in valid and test data,
         # otherwise it will cause nan in metric calculation such as recall.
         # usually the reason is that the number of behavior is too small due to the sparsity.
-        mask = splits[:, 1] < splits[:, 2]
-        splits, uids = splits[mask], uids[mask]
-        data_idx = [list(zip(splits[:, i-1], splits[:, i]))
-                    for i in range(1, splits.shape[1])]
-        data_idx = [torch.tensor([[u, *e] for e, u in zip(_, uids)])
-                    for _ in data_idx]
-        data = [torch.cat((data_idx[0], data_idx[i]), -1)
-                for i in range(len(data_idx))]
+        if self.split_mode == 'user_entry':
+            mask = splits[:, 1] < splits[:, 2]
+            splits, uids = splits[mask], uids[mask]
+            data_idx = [list(zip(splits[:, i-1], splits[:, i]))
+                        for i in range(1, splits.shape[1])]
+            data_idx = [torch.tensor([[u, *e] for e, u in zip(_, uids)])
+                        for _ in data_idx]
+            data = [torch.cat((data_idx[0], data_idx[i]), -1)
+                    for i in range(len(data_idx))]
+        elif self.split_mode == 'entry':
+            data_idx = [torch.hstack([uids, splits[:,i:i+2]])
+                        for i in range(splits.shape[1] - 1)]
+            data = [torch.cat((data_idx[0], data_idx[i]), -1)
+                    for i in range(len(data_idx))]
+            
         return data
 
     def __getitem__(self, index):
@@ -1169,12 +1239,22 @@ class SeqDataset(MFDataset):
     def drop_dup(self):
         return False
 
-    def build(self, split_ratio=2, rep=True, train_rep=True, dataset_sampler=None, dataset_neg_count=None, **kwargs):
+    def build(
+            self, 
+            split_ratio=2, 
+            split_mode='user_entry',
+            rep=True, 
+            train_rep=True, 
+            dataset_sampler=None, 
+            dataset_neg_count=None, 
+            **kwargs
+        ):
         self.test_rep = rep
         self.train_rep = train_rep if not rep else True
+        self.split_mode = split_mode
         self._init_sampler(dataset_sampler, dataset_neg_count)
 
-        return self._build(split_ratio, False, 'user_entry', False, rep) #TODO: add split method 'user'
+        return self._build(split_ratio, False, split_mode, rep) #TODO: add split method 'user'
 
     def _get_data_idx(self, splits):
         splits, uids = splits
