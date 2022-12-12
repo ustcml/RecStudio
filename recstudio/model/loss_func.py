@@ -1,6 +1,7 @@
 from operator import neg
 import torch
 import torch.nn.functional as F
+import scorer
 
 
 class FullScoreLoss(torch.nn.Module):
@@ -26,14 +27,6 @@ class PointwiseLoss(torch.nn.Module):
     def forward(self, label, pos_score):
         raise NotImplementedError(f'{type(self).__name__} is an abstrat class, \
             this method would not be implemented')
-
-
-class SquareLoss(PointwiseLoss):
-    def forward(self, label, pos_score):
-        if label.dim() > 1:
-            return torch.mean(torch.mean(torch.square(label - pos_score), dim=-1))
-        else:
-            return torch.mean(torch.square(label - pos_score))
 
 
 class SoftmaxLoss(FullScoreLoss):
@@ -169,17 +162,16 @@ class NCELoss(PairwiseLoss):
 
 
 class CCLLoss(PairwiseLoss):
-    def __init__(self, margin=0.8, neg_weight=0.3) -> None:
+    def __init__(self, score_func=None, margin=0.8, neg_weight=0.3) -> None:
         super().__init__()
         self.margin = margin
         self.neg_weight = neg_weight
+        assert isinstance(score_func, scorer.CosineScorer), "score_func must be CosineScorer"
 
     def forward(self, label, pos_score, log_pos_prob, neg_score, log_neg_prob):
         # pos_score: [B,] or [B, N]
         # neg_score: [B, num_neg] or [B, N, num_neg]
-        pos_score = torch.sigmoid(pos_score)
-        neg_score = torch.sigmoid(neg_score)
-        neg_score_mean = torch.mean(torch.relu(neg_score - self.margin), dim=-1)  # [B] or [B,N]
+        neg_score_mean = torch.mean(torch.max(torch.zeros_like(neg_score), neg_score - self.margin), dim=-1)  # [B] or [B,N]
         notpadnum = torch.logical_not(torch.isinf(pos_score)).float().sum()
         loss = (1 - pos_score) + self.neg_weight * neg_score_mean
         loss = torch.nan_to_num(loss, posinf=0.0)
