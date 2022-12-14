@@ -116,6 +116,8 @@ class Recommender(torch.nn.Module, abc.ABC):
             import time
             tb_log_name = time.strftime(f"{self.__class__.__name__}-{train_data.name}-%Y-%m-%d-%H-%M-%S.log",
                                          time.localtime())
+        if run_mode == 'tune':
+            tb_log_name = nni.get_experiment_id() + "/" + nni.get_trial_id() + "-" + tb_log_name
         self.tensorboard_logger = SummaryWriter(f"tensorboard/{tb_log_name}")
 
         if config is not None:
@@ -148,7 +150,9 @@ class Recommender(torch.nn.Module, abc.ABC):
 
         self.logger.info(self)
 
-        self._accelerate()
+        #self._accelerate()
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self = self._to_device(self, self.device)
 
         if self.config['accelerator'] == 'ddp':
             mp.spawn(self.parallel_training, args=(self.world_size, train_data, val_data),

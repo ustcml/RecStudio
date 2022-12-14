@@ -1,0 +1,15 @@
+embed_dim: 100
+beta_max: 0.2
+beta_min: 0.02
+num_steps: 100
+alpha: 0.2
+margin: 1
+schedule: 1
+
+learning_rate: 0.002
+weight_decay: 0.0
+learner: adam
+epochs: 1000
+batch_size: 256
+eval_batch_size: 256
+early_stop_patience: 30

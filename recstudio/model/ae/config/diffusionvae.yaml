@@ -1,9 +1,14 @@
 embed_dim: 100
-dropout_rate: 0.5
+dropout_rate: 0.1
 encoder_dims: [400, 400, 100]
-decoder_dims: [-1]
 activation: tanh
 share_item_encoder: 1
+stage: 0
+beta_max: 20.0
+beta_min: 0.1
+scale: 5.0
+num_steps: 500
+snr: 0.16
 
 anneal_max: 0.2
 anneal_total_step: 200000
