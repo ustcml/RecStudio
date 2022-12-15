@@ -1,7 +1,7 @@
 from operator import neg
 import torch
 import torch.nn.functional as F
-import scorer
+from . import scorer
 
 
 class FullScoreLoss(torch.nn.Module):
