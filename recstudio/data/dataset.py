@@ -78,10 +78,7 @@ class MFDataset(Dataset):
 
     @property
     def drop_dup(self):
-        if self.split_mode == 'entry':
-            return False
-        else:
-            return True
+        return True
 
     def _load_cache(self, path):
         with open(path, 'rb') as f:
@@ -428,8 +425,6 @@ class MFDataset(Dataset):
 
     def _filter(self, min_user_inter, min_item_inter):
         self._filter_ratings()
-        if self.drop_dup:
-            self._drop_duplicated_pairs()
         item_list = self.inter_feat[self.fiid]
         item_idx_list, items = pd.factorize(item_list)
         user_list = self.inter_feat[self.fuid]
