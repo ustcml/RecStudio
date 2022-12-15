@@ -78,10 +78,7 @@ class MFDataset(Dataset):
 
     @property
     def drop_dup(self):
-        if self.split_mode == 'entry':
-            return False
-        else:
-            return True
+        return True
 
     def _load_cache(self, path):
         with open(path, 'rb') as f:
