@@ -609,11 +609,11 @@ class Recommender(torch.nn.Module, abc.ABC):
                             raise TypeError("loss must be Tensor or List of Tensor")
                     loss_ = {}
                     for k, v in loss.items():
-                        if k == 'loss':
-                            if isinstance(v, torch.Tensor):
-                                v = v.detach()
-                            elif isinstance(v, List):
-                                v = [_ for _ in v]
+                        # if k == 'loss':
+                        if isinstance(v, torch.Tensor):
+                            v = v.detach()
+                        elif isinstance(v, List):
+                            v = [_ for _ in v]
                         loss_[f'{k}_{loader_idx}'] = v
                     outputs.append(loss_)
                 elif isinstance(loss, torch.Tensor):

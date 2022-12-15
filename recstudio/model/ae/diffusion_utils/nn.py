@@ -87,6 +87,7 @@ class ScoreNet(nn.Module):
         encoder_out = self.encoders(x_start)
         mu, logvar = encoder_out.tensor_split(2, dim=-1)
         cond_embed = self.reparameterize(mu, logvar, training)
+        #cond_embed = x_start
         for i in range(3):
             t_embed = self.t_layers[i](t_embed)
             cond_embed = self.cond_layers[i](cond_embed)
@@ -94,7 +95,7 @@ class ScoreNet(nn.Module):
             x_t = self.out_layers[i](torch.cat((x_t + t_embed, cond_embed), dim=-1))
         kl_loss=None
         if training:
-            kl_loss = self.kl_loss_func(mu, logvar)
+            kl_loss = self.kl_loss_func(mu, logvar) #torch.tensor(0.0).to(x_t.device)
         return (x_t, kl_loss)
 
     def reparameterize(self, mu, logvar, training):

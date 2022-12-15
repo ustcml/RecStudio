@@ -1,5 +1,5 @@
 embed_dim: 100
-dropout_rate: 0.1
+dropout_rate: 0.2
 encoder_dims: [400, 400, 100]
 activation: tanh
 anneal_max: 0.2
@@ -8,20 +8,20 @@ share_item_encoder: 1
 
 stage: 0
 learn_sigma: False
-sigma_small: False
-diffusion_steps: 500
+sigma_small: True
+diffusion_steps: 100
 noise_schedule: cosine
-timestep_respacing: 'ddim250'
+timestep_respacing: ''
 use_kl: False
-predict_xstart: False
-rescale_timesteps: False
-rescale_learned_sigmas: False
+predict_xstart: True
+rescale_timesteps: True
+rescale_learned_sigmas: True
 schedule_sampler: uniform
 kl_lambda: 1e-4
 clip_denoised: False
-use_ddim: True
+use_ddim: False
 
-learning_rate: 2e-3
+learning_rate: 5e-3
 weight_decay: 1e-6
 learner: adam
 epochs: 1000

@@ -60,12 +60,15 @@ class DDPMVAEQueryEncoder(torch.nn.Module):
         else:#训练第二阶段，训练diffusion
             if self.training:
                 t, weights = self.schedule_sampler.sample(z.shape[0], device=z.device)
-                losses = self.diffusion.training_losses(self.diffusion_model, z, t, model_kwargs={'x_start':z, 'training':self.training, 'mu':mu, 'logvar':logvar})
+                terms = self.diffusion.training_losses(self.diffusion_model, z, t, model_kwargs={'x_start':z, 'training':self.training, 'mu':mu, 'logvar':logvar})
+                terms["loss"] = (terms["loss"] * weights).mean() + self.kl_lambda * terms["kl_loss"]
+                for k, v in terms.items():
+                    terms[k] = v.mean()
+                self.diffusion_loss = terms
                 if isinstance(self.schedule_sampler, LossAwareSampler):
                     self.schedule_sampler.update_with_local_losses(
-                        t, losses["loss"].detach()
+                        t, terms["loss"].detach()
                     )
-                self.diffusion_loss = (losses["loss"] * weights).mean() + self.kl_lambda * losses["kl_loss"].mean()
             else:
                 z = self.pc_sampler(z)
 
