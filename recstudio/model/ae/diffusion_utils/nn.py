@@ -63,23 +63,23 @@ class ScoreNet(nn.Module):
         )
         self.encoders = torch.nn.Sequential(
             nn.Linear(embed_dim, 2*embed_dim),
-            nn.ReLU(),
+            SiLU(),
             nn.Linear(2*embed_dim, 2*embed_dim),
-            nn.ReLU(),
+            SiLU(),
             nn.Linear(2*embed_dim, 2*embed_dim),
         )
-        self.t_layers = nn.ModuleList([nn.Sequential(nn.ReLU(), nn.Linear(embed_dim, 2*embed_dim)),
-                                        nn.Sequential(nn.ReLU(), nn.Linear(2*embed_dim, 2*embed_dim)),
-                                        nn.Sequential(nn.ReLU(), nn.Linear(2*embed_dim, 2*embed_dim))])
-        self.cond_layers = nn.ModuleList([nn.Sequential(nn.ReLU(), nn.Linear(embed_dim, 2*embed_dim)),
-                                        nn.Sequential(nn.ReLU(), nn.Linear(2*embed_dim, 2*embed_dim)),
-                                        nn.Sequential(nn.ReLU(), nn.Linear(2*embed_dim, 2*embed_dim))])
-        self.in_layers = nn.ModuleList([nn.Sequential(nn.ReLU(), nn.Linear(embed_dim, 2*embed_dim)),
-                                        nn.Sequential(nn.ReLU(), nn.Linear(2*embed_dim, 2*embed_dim)),
-                                        nn.Sequential(nn.ReLU(), nn.Linear(2*embed_dim, 2*embed_dim))])
-        self.out_layers = nn.ModuleList([nn.Sequential(nn.Dropout(p=self.dropout_rate), nn.Linear(4*embed_dim, 2*embed_dim)),
-                                        nn.Sequential(nn.Dropout(p=self.dropout_rate), nn.Linear(4*embed_dim, 2*embed_dim)),
-                                        nn.Sequential(nn.Dropout(p=self.dropout_rate), nn.Linear(4*embed_dim, 2*embed_dim if learn_sigma else embed_dim))])
+        self.t_layers = nn.ModuleList([nn.Sequential(SiLU(), nn.Linear(embed_dim, 4*embed_dim)),
+                                        nn.Sequential(SiLU(), nn.Linear(4*embed_dim, 4*embed_dim)),
+                                        nn.Sequential(SiLU(), nn.Linear(4*embed_dim, 4*embed_dim))])
+        self.cond_layers = nn.ModuleList([nn.Sequential(SiLU(), nn.Linear(embed_dim, 2*embed_dim)),
+                                        nn.Sequential(SiLU(), nn.Linear(2*embed_dim, 2*embed_dim)),
+                                        nn.Sequential(SiLU(), nn.Linear(2*embed_dim, 2*embed_dim))])
+        self.in_layers = nn.ModuleList([nn.Sequential(nn.BatchNorm1d(embed_dim), SiLU(), nn.Linear(embed_dim, 2*embed_dim)),
+                                        nn.Sequential(nn.BatchNorm1d(2*embed_dim), SiLU(), nn.Linear(2*embed_dim, 2*embed_dim)),
+                                        nn.Sequential(nn.BatchNorm1d(2*embed_dim), SiLU(), nn.Linear(2*embed_dim, 2*embed_dim))])
+        self.out_layers = nn.ModuleList([nn.Sequential(nn.Dropout(p=self.dropout_rate), nn.Linear(2*embed_dim, 2*embed_dim)),
+                                        nn.Sequential(nn.Dropout(p=self.dropout_rate), nn.Linear(2*embed_dim, 2*embed_dim)),
+                                        nn.Sequential(nn.Dropout(p=self.dropout_rate), nn.Linear(2*embed_dim, 2*embed_dim if learn_sigma else embed_dim))])
         
 
     def forward(self, x_t, t, x_start, training, **kwargs):
@@ -87,12 +87,13 @@ class ScoreNet(nn.Module):
         encoder_out = self.encoders(x_start)
         mu, logvar = encoder_out.tensor_split(2, dim=-1)
         cond_embed = self.reparameterize(mu, logvar, training)
-        #cond_embed = x_start
         for i in range(3):
             t_embed = self.t_layers[i](t_embed)
+            scale, shift = torch.chunk(t_embed, 2, dim=1)
             cond_embed = self.cond_layers[i](cond_embed)
             x_t = self.in_layers[i](x_t)
-            x_t = self.out_layers[i](torch.cat((x_t + t_embed, cond_embed), dim=-1))
+            x_t = x_t * (1+scale) + shift
+            x_t = self.out_layers[i](x_t * cond_embed)
         kl_loss=None
         if training:
             kl_loss = self.kl_loss_func(mu, logvar) #torch.tensor(0.0).to(x_t.device)

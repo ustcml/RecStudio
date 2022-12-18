@@ -29,6 +29,9 @@ class Recommender(torch.nn.Module, abc.ABC):
         else:
             self.config = parser_yaml(os.path.join(os.path.dirname(__file__), "basemodel.yaml"))
 
+        if self.config['num_threads'] is not None:
+            torch.set_num_threads(self.config['num_threads'])
+
         if self.config['seed'] is not None:
             seed_everything(self.config['seed'], workers=True)
 

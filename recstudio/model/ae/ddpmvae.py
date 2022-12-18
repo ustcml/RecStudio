@@ -128,9 +128,8 @@ class DDPMVAE(BaseRetriever):
         return parent_parser
 
     def _init_parameter(self):
-        if self.config["stage"] == 1:
-            super()._init_parameter()
-        else:
+        super()._init_parameter()
+        if self.config["stage"] == 0:
             state_dict = torch.load('./saved/1stage_DiffusionVAE-ml-1m-2022-11-22-20-39-05.ckpt', map_location='cpu')
             update_state_dict = {}
             for key, value in state_dict['parameters'].items():

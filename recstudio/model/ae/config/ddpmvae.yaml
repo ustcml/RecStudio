@@ -10,7 +10,7 @@ stage: 0
 learn_sigma: False
 sigma_small: True
 diffusion_steps: 100
-noise_schedule: cosine
+noise_schedule: linear
 timestep_respacing: ''
 use_kl: False
 predict_xstart: True
@@ -21,7 +21,7 @@ kl_lambda: 1e-4
 clip_denoised: False
 use_ddim: False
 
-learning_rate: 5e-3
+learning_rate: 3e-3
 weight_decay: 1e-6
 learner: adam
 epochs: 1000
