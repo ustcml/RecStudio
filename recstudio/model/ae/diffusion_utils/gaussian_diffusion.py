@@ -751,6 +751,11 @@ class GaussianDiffusion:
                 terms["loss"] = terms["mse"]
             if kl_loss!=None:
                 terms["kl_loss"] = kl_loss
+            terms["z"] = {
+                ModelMeanType.START_X: model_output,
+                ModelMeanType.EPSILON: self._predict_xstart_from_eps(x_t, self._scale_timesteps(t), model_output),
+            }[self.model_mean_type]
+            
         else:
             raise NotImplementedError(self.loss_type)
 
