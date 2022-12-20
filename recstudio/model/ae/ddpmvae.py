@@ -16,12 +16,13 @@ class DDPMVAEQueryEncoder(torch.nn.Module):
         super().__init__()
 
         self.fiid = fiid
+        self.num_items = num_items
         self.embed_dim = embed_dim
         self.kl_lambda = kl_lambda
         self.clip_denoised = clip_denoised
         self.use_ddim = use_ddim
 
-        self.diffusion_model = ScoreNet(embed_dim, dropout_rate, learn_sigma)
+        self.diffusion_model = ScoreNet(num_items-1, embed_dim, dropout_rate, learn_sigma)
         self.diffusion = create_gaussian_diffusion(steps=diffusion_steps, learn_sigma=learn_sigma, sigma_small=sigma_small, noise_schedule=noise_schedule,
                                                    use_kl=use_kl, predict_xstart=predict_xstart,rescale_timesteps=rescale_timesteps,
                                                    rescale_learned_sigmas=rescale_learned_sigmas, timestep_respacing='')
@@ -40,25 +41,34 @@ class DDPMVAEQueryEncoder(torch.nn.Module):
         non_zero_num = batch["in_"+self.fiid].count_nonzero(dim=1).unsqueeze(-1)
         seq_emb = seq_emb.sum(1) / non_zero_num.pow(0.5)
         z = self.dropout(seq_emb)
-        z = seq_emb
+        
+        batch_size = batch["in_"+self.fiid].shape[0]
+        x_int = torch.zeros([batch_size, self.num_items], dtype=torch.long, device=batch["in_"+self.fiid].device)
+        x_int = x_int.scatter(1, batch["in_"+self.fiid], 1)
+        x_int = x_int[:,1:]
+        x_int = torch.where(x_int==0, -torch.ones_like(x_int), x_int)
         
         #训练第二阶段，训练diffusion
         if self.training:
             t, weights = self.schedule_sampler.sample(z.shape[0], device=z.device)
-            terms = self.diffusion.training_losses(self.diffusion_model, z, t, model_kwargs={'x_start':z, 'training':self.training})
-            z = terms["z"]
-            terms["loss"] = (terms["loss"] * weights).mean() + self.kl_lambda * terms["kl_loss"]
-            for k, v in terms.items():
-                terms[k] = v.mean()
-            self.diffusion_loss = terms
-            if isinstance(self.schedule_sampler, LossAwareSampler):
-                self.schedule_sampler.update_with_local_losses(
-                    t, terms["loss"].detach()
-                )
+            terms = self.diffusion.training_losses(self.diffusion_model, x_int.float(), t, model_kwargs={'x_start':z, 'training':self.training})
+            all_scores = terms['z']
+            all_scores = torch.cat([-torch.inf * torch.ones([all_scores.shape[0], 1], device=all_scores.device), all_scores], dim=1)
+            pos_scores = torch.gather(all_scores, 1, batch["in_"+self.fiid])
+            terms['pos_scores'] = pos_scores
+            terms['all_scores'] = all_scores
+            # terms["loss"] = (terms["loss"] * weights).mean() + self.kl_lambda * terms["kl_loss"]
+            # for k, v in terms.items():
+            #     terms[k] = v.mean()
+            # self.diffusion_loss = terms
+            # if isinstance(self.schedule_sampler, LossAwareSampler):
+            #     self.schedule_sampler.update_with_local_losses(
+            #         t, terms["loss"].detach()
+            #     )
+            return terms
         else:
             z = self.pc_sampler(z)
-
-        return z
+            return z
 
     def pc_sampler(self, x_start):
         sample_fn = (
@@ -66,7 +76,7 @@ class DDPMVAEQueryEncoder(torch.nn.Module):
         )
         sample = sample_fn(
             self.diffusion_model,
-            (x_start.shape[0], x_start.shape[1]),
+            (x_start.shape[0], self.num_items-1),
             clip_denoised=self.clip_denoised,
             model_kwargs={"x_start": x_start, "training": False},
         )
@@ -110,18 +120,40 @@ class DDPMVAE(BaseRetriever):
                                         self.config['schedule_sampler'], self.config['kl_lambda'], self.config['clip_denoised'], self.config['use_ddim'])
 
     def _get_score_func(self):
-        return InnerProductScorer()
+        return None
 
     def _get_sampler(self, train_data):
         return None
 
     def _get_loss_func(self):
-        self.anneal = 0.0
         return SoftmaxLoss()
 
     def training_step(self, batch):
-        loss = super().training_step(batch)
-        all_loss = self.query_encoder.diffusion_loss
-        all_loss["rec_loss"] = loss
-        all_loss["loss"] = loss + all_loss["loss"]
-        return all_loss
+        output = self.forward(batch)
+        loss = self.loss_fn(None, output['pos_scores'], output['all_scores'])
+        loss += self.query_encoder.kl_lambda * output['kl_loss']
+        return loss
+
+    def forward(self, batch):
+        output = self.query_encoder(self._get_query_feat(batch))
+        return output
+    
+    def topk(self, batch, k, user_h=None, return_query=False):
+        # TODO: complete topk with retriever
+        output = self.query_encoder(self._get_query_feat(batch))
+        more = user_h.size(1) if user_h is not None else 0
+        
+        score, topk_items = torch.topk(output, k + more)
+        topk_items = topk_items + 1
+        if user_h is not None:
+            existing, _ = user_h.sort()
+            idx_ = torch.searchsorted(existing, topk_items)#idx of the first term in existing satisfies topk_items <= existing[idx],        shape:(batch_size, k+more)
+            idx_[idx_ == existing.size(1)] = existing.size(1) - 1
+            score[torch.gather(existing, 1, idx_) == topk_items] = -float('inf')
+            score, idx = score.topk(k)
+            topk_items = torch.gather(topk_items, 1, idx)
+
+        if return_query:
+            return score, topk_items, output
+        else:
+            return score, topk_items

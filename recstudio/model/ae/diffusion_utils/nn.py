@@ -52,10 +52,11 @@ def timestep_embedding(timesteps, dim, max_period=10000):
     return embedding
 
 class ScoreNet(nn.Module):
-    def __init__(self, embed_dim, dropout_rate, learn_sigma) -> None:
+    def __init__(self, num_items, embed_dim, dropout_rate, learn_sigma) -> None:
         super(ScoreNet, self).__init__()
         self.embed_dim = embed_dim
         self.dropout_rate = dropout_rate
+        self.num_items = num_items
         self.time_embed = nn.Sequential(
             nn.Linear(embed_dim, 2*embed_dim),
             SiLU(),
@@ -63,23 +64,23 @@ class ScoreNet(nn.Module):
         )
         self.encoders = torch.nn.Sequential(
             nn.Linear(embed_dim, 2*embed_dim),
-            SiLU(),
+            nn.Tanh(),
             nn.Linear(2*embed_dim, 2*embed_dim),
-            SiLU(),
+            nn.Tanh(),
             nn.Linear(2*embed_dim, 2*embed_dim),
         )
-        self.t_layers = nn.ModuleList([nn.Sequential(SiLU(), nn.Linear(embed_dim, 4*embed_dim)),
-                                        nn.Sequential(SiLU(), nn.Linear(4*embed_dim, 4*embed_dim)),
-                                        nn.Sequential(SiLU(), nn.Linear(4*embed_dim, 4*embed_dim))])
-        self.cond_layers = nn.ModuleList([nn.Sequential(SiLU(), nn.Linear(embed_dim, 2*embed_dim)),
-                                        nn.Sequential(SiLU(), nn.Linear(2*embed_dim, 2*embed_dim)),
-                                        nn.Sequential(SiLU(), nn.Linear(2*embed_dim, 2*embed_dim))])
-        self.in_layers = nn.ModuleList([nn.Sequential(nn.BatchNorm1d(embed_dim), SiLU(), nn.Linear(embed_dim, 2*embed_dim)),
-                                        nn.Sequential(nn.BatchNorm1d(2*embed_dim), SiLU(), nn.Linear(2*embed_dim, 2*embed_dim)),
-                                        nn.Sequential(nn.BatchNorm1d(2*embed_dim), SiLU(), nn.Linear(2*embed_dim, 2*embed_dim))])
+        self.t_layers = nn.ModuleList([nn.Sequential(nn.Tanh(), nn.Linear(embed_dim, 4*embed_dim)),
+                                        nn.Sequential(nn.Tanh(), nn.Linear(4*embed_dim, 4*embed_dim)),
+                                        nn.Sequential(nn.Tanh(), nn.Linear(4*embed_dim, 4*embed_dim))])
+        self.cond_layers = nn.ModuleList([nn.Sequential(nn.Tanh(), nn.Linear(embed_dim, 2*embed_dim)),
+                                        nn.Sequential(nn.Tanh(), nn.Linear(2*embed_dim, 2*embed_dim)),
+                                        nn.Sequential(nn.Tanh(), nn.Linear(2*embed_dim, 2*embed_dim))])
+        self.in_layers = nn.ModuleList([nn.Sequential(nn.Linear(num_items, 2*embed_dim)),
+                                        nn.Sequential(nn.Linear(2*embed_dim, 2*embed_dim)),
+                                        nn.Sequential(nn.Linear(2*embed_dim, 2*embed_dim))])
         self.out_layers = nn.ModuleList([nn.Sequential(nn.Dropout(p=self.dropout_rate), nn.Linear(2*embed_dim, 2*embed_dim)),
                                         nn.Sequential(nn.Dropout(p=self.dropout_rate), nn.Linear(2*embed_dim, 2*embed_dim)),
-                                        nn.Sequential(nn.Dropout(p=self.dropout_rate), nn.Linear(2*embed_dim, 2*embed_dim if learn_sigma else embed_dim))])
+                                        nn.Sequential(nn.Dropout(p=self.dropout_rate), nn.Linear(2*embed_dim, 2*num_items if learn_sigma else num_items))])
         
 
     def forward(self, x_t, t, x_start, training, **kwargs):
