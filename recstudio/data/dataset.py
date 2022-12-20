@@ -76,12 +76,6 @@ class MFDataset(Dataset):
     def use_field(self, fields):
         self._use_field = set(fields)
 
-    @property
-    def drop_dup(self):
-        if self.split_mode == 'entry':
-            return False
-        else:
-            return True
 
     def _load_cache(self, path):
         with open(path, 'rb') as f:
@@ -826,6 +820,7 @@ class MFDataset(Dataset):
             fmeval: bool = False,
             dataset_sampler: str = None,
             dataset_neg_count: int = None,
+            drop_dup: bool = True,
             **kwargs
         ):
         """Build dataset.
@@ -845,6 +840,7 @@ class MFDataset(Dataset):
         """
         self.fmeval = fmeval
         self.split_mode = split_mode
+        self.drop_dup = drop_dup
         self._init_sampler(dataset_sampler, dataset_neg_count)
         return self._build(split_ratio, shuffle, split_mode, False)
 
@@ -1232,10 +1228,7 @@ class AEDataset(MFDataset):
         return index
 
 
-class SeqDataset(MFDataset):
-    @property
-    def drop_dup(self):
-        return False
+class SeqDataset(MFDataset):    
 
     def build(
             self, 
@@ -1245,8 +1238,10 @@ class SeqDataset(MFDataset):
             train_rep=True, 
             dataset_sampler=None, 
             dataset_neg_count=None, 
+            drop_dup=False,
             **kwargs
         ):
+        self.drop_dup = drop_dup
         self.test_rep = rep
         self.train_rep = train_rep if not rep else True
         self.split_mode = split_mode

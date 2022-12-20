@@ -177,6 +177,9 @@ class CCLLoss(PairwiseLoss):
         loss = torch.nan_to_num(loss, posinf=0.0)
         return loss.sum() / notpadnum
 
+    def extra_repr(self):
+        return f"score_func={self.score_func}, margin={self.margin}, neg_weight={self.neg_weight}"
+
 
 def l2_reg_loss_fn(*args):
     loss = 0.
