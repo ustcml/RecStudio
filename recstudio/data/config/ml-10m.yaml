@@ -38,3 +38,4 @@ network_feat_header: [~, ~]
 
 
 save_cache: True # whether to save processed dataset to cache.
+drop_dup: True

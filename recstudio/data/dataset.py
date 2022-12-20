@@ -76,12 +76,6 @@ class MFDataset(Dataset):
     def use_field(self, fields):
         self._use_field = set(fields)
 
-    @property
-    def drop_dup(self):
-        if self.split_mode == 'entry':
-            return False
-        else:
-            return True
 
     def _load_cache(self, path):
         with open(path, 'rb') as f:
@@ -428,7 +422,7 @@ class MFDataset(Dataset):
 
     def _filter(self, min_user_inter, min_item_inter):
         self._filter_ratings()
-        if self.drop_dup:
+        if self.config['drop_dup']:
             self._drop_duplicated_pairs()
         item_list = self.inter_feat[self.fiid]
         item_idx_list, items = pd.factorize(item_list)
@@ -856,7 +850,7 @@ class MFDataset(Dataset):
         if not hasattr(self, 'first_item_idx'):
             self.first_item_idx = ~self.inter_feat.duplicated(
                 subset=[self.fuid, self.fiid], keep='first')
-        if self.drop_dup:
+        if self.config['drop_dup']:
             self.inter_feat = self.inter_feat[self.first_item_idx]
 
         if (split_mode == 'user_entry') or (split_mode == 'user'):
@@ -1234,10 +1228,17 @@ class AEDataset(MFDataset):
         return index
 
 
-class SeqDataset(MFDataset):
-    @property
-    def drop_dup(self):
-        return False
+class SeqDataset(MFDataset):    
+
+    def __init__(self, name: str = 'ml-100k', drop_dup = False, config: Union[Dict, str] = None):
+        if isinstance(config, Dict):
+            config.update({"drop_dup": drop_dup})
+        elif config is None:
+            config = {"drop_dup": drop_dup}
+        super(SeqDataset, self).__init__(
+            name=name,
+            config=config
+        )
 
     def build(
             self, 
@@ -1246,7 +1247,7 @@ class SeqDataset(MFDataset):
             rep=True, 
             train_rep=True, 
             dataset_sampler=None, 
-            dataset_neg_count=None, 
+            dataset_neg_count=None,
             **kwargs
         ):
         self.test_rep = rep
@@ -1328,7 +1329,7 @@ class SeqToSeqDataset(SeqDataset):
         maxlen = self.config['max_seq_len'] or (splits[:, -1] - splits[:, 0]).max()
 
         def keep_first_item(dix, part):
-            # self.drop_dup is set to False in SeqDataset
+            # self.config['drop_dup'] is set to False in SeqDataset
             if ((dix == 0) and self.train_rep) or ((dix > 0) and self.test_rep):
                 return part
             else:
