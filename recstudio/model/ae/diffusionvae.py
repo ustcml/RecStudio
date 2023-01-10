@@ -198,7 +198,7 @@ class DiffusionVAE(BaseRetriever):
     def add_model_specific_args(parent_parser):
         parent_parser = Recommender.add_model_specific_args(parent_parser)
         parent_parser.add_argument_group('DiffusionVAE')
-        parent_parser.add_argument("--dropout", type=int, default=0.5, help='dropout rate for MLP layers')
+        parent_parser.add_argument("--dropout_rate", type=int, default=0.2, help='dropout rate for MLP layers')
         parent_parser.add_argument("--encoder_dims", type=int, nargs='+', default=64, help='MLP layer size for encoder')
         #parent_parser.add_argument("--decoder_dims", type=int, nargs='+', default=64, help='MLP layer size for decocer')
         parent_parser.add_argument("--activation", type=str, default='relu', help='activation function for MLP layers')

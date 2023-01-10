@@ -64,7 +64,7 @@ class ScoreNet(nn.Module):
                                         nn.Sequential(nn.Linear(2*embed_dim, 2*embed_dim))])
         self.out_layers = nn.ModuleList([nn.Sequential(nn.Dropout(p=self.dropout_rate), nn.Linear(2*embed_dim, 2*embed_dim)),
                                         nn.Sequential(nn.Dropout(p=self.dropout_rate), nn.Linear(2*embed_dim, 2*embed_dim)),
-                                        nn.Sequential(nn.Dropout(p=self.dropout_rate), nn.Linear(2*embed_dim, num_items), nn.Sigmoid())])
+                                        nn.Sequential(nn.Dropout(p=self.dropout_rate), nn.Linear(2*embed_dim, num_items))])
         
 
     def forward(self, x_t, t, x_start, training):
@@ -99,11 +99,10 @@ class ScoreNet(nn.Module):
 
 
 class D3PMVAEQueryEncoder(torch.nn.Module):
-    def __init__(self, fiid, num_items, embed_dim, num_steps, beta_min, beta_max, alpha, margin, schedule, item_encoder, dropout_rate, kl_lambda):
+    def __init__(self, fiid, num_items, embed_dim, num_steps, beta_min, beta_max, margin, schedule, item_encoder, dropout_rate, kl_lambda):
         super().__init__()
 
         self.num_steps = num_steps
-        self.alpha = alpha
         self.margin = margin
         self.kl_lambda = kl_lambda
         if schedule==1:#linear:
@@ -115,6 +114,7 @@ class D3PMVAEQueryEncoder(torch.nn.Module):
         self.Q_matrix = torch.nn.Parameter(torch.zeros(num_steps, 2, 2, dtype=torch.float32), requires_grad=False)
         for i in range(num_steps):
             self.Q_matrix[i,:,:] = torch.tensor([[1-0.5*self.betas[i], 0.5*self.betas[i]], [0.5*self.betas[i], 1-0.5*self.betas[i]]], dtype=torch.float32)
+            #self.Q_matrix[i,:,:] = torch.tensor([[1.0, 0.0], [0.5*self.betas[i], 1-0.5*self.betas[i]]], dtype=torch.float32)
         self.Q_prod_matrix = copy.deepcopy(self.Q_matrix)
         for i in range(1, num_steps):
             self.Q_prod_matrix[i,:,:] = torch.matmul(self.Q_prod_matrix[i-1,:,:], self.Q_prod_matrix[i,:,:])
@@ -125,6 +125,7 @@ class D3PMVAEQueryEncoder(torch.nn.Module):
         self.embed_dim = embed_dim
         self.num_items = num_items
         self.scorenet = ScoreNet(num_items-1, embed_dim, dropout_rate)
+        self.loss_func = SoftmaxLoss()
 
     def forward(self, batch):
         seq_emb = self.item_embedding(batch["in_"+self.fiid])
@@ -155,23 +156,17 @@ class D3PMVAEQueryEncoder(torch.nn.Module):
         output, kl_loss = self.scorenet(x_perturbed, t, z, True)
         #output += x_one_hot
 
-        loss_func = nn.BCELoss(reduction='mean')
-        pos_idx = torch.where(x_int>0)
-        pos_loss = loss_func(output[pos_idx], x_int[pos_idx].float())
-        neg_idx = torch.where(x_int==0)
-        neg_loss = loss_func(output[neg_idx], x_int[neg_idx].float())
-        
-        terms={}
-        terms['pos_loss'] = pos_loss
-        terms['neg_loss'] = neg_loss
-        terms['kl_loss'] = kl_loss
-        terms['loss'] = pos_loss + self.alpha * neg_loss + self.kl_lambda * kl_loss
+        all_scores = output
+        all_scores = torch.cat([-torch.inf * torch.ones([all_scores.shape[0], 1], device=all_scores.device), all_scores], dim=1)
+        pos_scores = torch.gather(all_scores, 1, item_ids)
+        loss = self.loss_func(None, pos_scores, all_scores)
 
-        return terms
+        return loss + self.kl_lambda * kl_loss
 
     def pc_sampler(self, item_ids, z):
         with torch.no_grad():
             cur_x = torch.distributions.Bernoulli(probs=0.5*torch.ones([item_ids.shape[0], self.num_items], device=item_ids.device)).sample()
+            #cur_x = torch.zeros([item_ids.shape[0], self.num_items], dtype=torch.float32, device=item_ids.device)
             cur_x = cur_x.scatter(1, item_ids, 1)
             cur_x = cur_x[:,1:]
             x0_1 = torch.nn.functional.one_hot(torch.ones_like(cur_x, dtype=torch.long, device=item_ids.device), num_classes=2).float()#(batch_size, num_items, 2)
@@ -186,6 +181,8 @@ class D3PMVAEQueryEncoder(torch.nn.Module):
                                 / (torch.matmul(x0_0, self.Q_prod_matrix[i]) * cur_x_one_hot).sum(-1)[:,:,None]
                 prob = x0_bar[:,:,None] * prob_1 + (1-x0_bar)[:,:,None] * prob_0
                 cur_x = torch.argmax(prob, dim=-1).float()
+                # prob_sample = torch.softmax(prob, dim=-1)
+                # cur_x = torch.distributions.Bernoulli(probs=prob_sample[:, :, 1]).sample()
                 #inpaint
                 cur_x = torch.cat((torch.zeros([cur_x.shape[0], 1], dtype=torch.float32, device=cur_x.device), cur_x), dim=1)
                 cur_x = cur_x.scatter(1, item_ids, 1)
@@ -203,7 +200,6 @@ class D3PMVAE(BaseRetriever):
         parent_parser.add_argument("--num_steps", type=int, default=1000, help="total diffusion steps")
         parent_parser.add_argument("--beta_min", type=float, default=0.02, help="min value for beta")
         parent_parser.add_argument("--beta_max", type=float, default=1.0, help="max value for beta")
-        parent_parser.add_argument("--alpha", type=float, default=0.2, help="weight for negative samples loss")
         parent_parser.add_argument("--margin", type=int, default=1, help="DDIM margin")
         parent_parser.add_argument("--schedule", type=int, default=1, help="noise schedule")
         parent_parser.add_argument("--dropout_rate", type=float, default=0.2, help="")
@@ -218,7 +214,7 @@ class D3PMVAE(BaseRetriever):
 
     def _get_query_encoder(self, train_data):
         return D3PMVAEQueryEncoder(train_data.fiid, train_data.num_items, self.embed_dim, self.config['num_steps'], self.config['beta_min'], self.config['beta_max'],
-                                    self.config['alpha'], self.config['margin'], self.config['schedule'], self.item_encoder, self.config['dropout_rate'], self.config['kl_lambda'])
+                                    self.config['margin'], self.config['schedule'], self.item_encoder, self.config['dropout_rate'], self.config['kl_lambda'])
 
     def _get_score_func(self):
         return None

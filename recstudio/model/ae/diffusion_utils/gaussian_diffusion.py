@@ -658,7 +658,7 @@ class GaussianDiffusion:
             x_start=x_start, x_t=x_t, t=t
         )
         out = self.p_mean_variance(
-            model, x_t, t, clip_denoised=clip_denoised, model_kwargs=None
+            model, x_t, t, clip_denoised=clip_denoised, model_kwargs=None #conflict for use_kl and others
         )
         kl = normal_kl(
             true_mean, true_log_variance_clipped, out["mean"], out["log_variance"]
@@ -749,12 +749,12 @@ class GaussianDiffusion:
                 terms["loss"] = terms["mse"] + terms["vb"]
             else:
                 terms["loss"] = terms["mse"]
-            if kl_loss!=None:
+            if kl_loss is not None:
                 terms["kl_loss"] = kl_loss
-            terms["z"] = {
-                ModelMeanType.START_X: model_output,
-                ModelMeanType.EPSILON: self._predict_xstart_from_eps(x_t, self._scale_timesteps(t), model_output),
-            }[self.model_mean_type]
+            # terms["z"] = {
+            #     ModelMeanType.START_X: model_output,
+            #     ModelMeanType.EPSILON: self._predict_xstart_from_eps(x_t, self._scale_timesteps(t), model_output),
+            # }[self.model_mean_type]
             
         else:
             raise NotImplementedError(self.loss_type)

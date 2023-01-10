@@ -6,7 +6,6 @@ anneal_max: 0.2
 anneal_total_step: 200000
 share_item_encoder: 1
 
-stage: 0
 learn_sigma: False
 sigma_small: True
 diffusion_steps: 100
@@ -21,10 +20,13 @@ kl_lambda: 1e-4
 clip_denoised: False
 use_ddim: False
 
+vae_epoch: 1
+diffusion_epoch: 1
+
 learning_rate: 3e-3
 weight_decay: 1e-6
 learner: adam
 epochs: 1000
 batch_size: 512
 eval_batch_size: 512
-early_stop_patience: 30
+early_stop_patience: 50
