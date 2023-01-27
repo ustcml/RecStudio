@@ -52,3 +52,4 @@ early_stop_mode: max
 early_stop_patience: 10
 
 save_path: './saved/'
+tensorboard_path: './tensorboard'

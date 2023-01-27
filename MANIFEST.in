@@ -1,1 +1,2 @@
 recursive-include recstudio/ *.yaml
+recursive-include recstudio/dataset_demo *.inter *.item *.kg *.link *.user *txt

@@ -8,7 +8,7 @@ from setuptools import setup, find_packages
 
 install_requires = ['numpy>=1.20.1', 'torch>=1.9.0', 'scipy>=1.6.0', 'pandas>=1.3.0', 'tqdm>=4.48.2',
                     'colorlog==4.7.2','colorama==0.4.4', 'pyyaml>=5.1.0', 'tensorboard>=2.5.0', 
-                     'faiss-gpu==1.7.2', 'torchmetrics==0.7.3', 'dgl']
+                     'faiss-gpu==1.7.2', 'torchmetrics==0.7.3']
 
 setup_requires = []
 
