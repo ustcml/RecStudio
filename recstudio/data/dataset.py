@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader, Dataset, Sampler
 from torch.utils.data.distributed import DistributedSampler
 
 
-class MFDataset(Dataset):
+class TripletDataset(Dataset):
     r""" Dataset for Matrix Factorized Methods.
 
     The basic dataset class in RecStudio.
@@ -30,7 +30,7 @@ class MFDataset(Dataset):
             config(str): config file path or config dict for the dataset.
 
         Returns:
-            recstudio.data.dataset.MFDataset: The ingredients list.
+            recstudio.data.dataset.TripletDataset: The ingredients list.
         """
         self.name = name
 
@@ -78,10 +78,7 @@ class MFDataset(Dataset):
 
     @property
     def drop_dup(self):
-        if self.split_mode == 'entry':
-            return False
-        else:
-            return True
+        return self.config.get("drop_dup", True)
 
     def _load_cache(self, path):
         with open(path, 'rb') as f:
@@ -651,7 +648,7 @@ class MFDataset(Dataset):
     def _split_by_num(self, num, data_count):
         r"""Split dataset into train/valid/test by specific ratio.
         num: list of int
-        assert split_mode is entry                       
+        assert split_mode is entry
         """
         m = len(data_count)
         splits = np.hstack([0, num]).cumsum().reshape(1, -1)
@@ -660,7 +657,7 @@ class MFDataset(Dataset):
         else:
             ValueError(f'Expecting the number of interactions \
             should be equal to the sum of {num}')
-    
+
     def _split_by_leave_one_out(self, leave_one_num, data_count, rep=True):
         r"""Split dataset into train/valid/test by leave one out method.
         The split methods are usually used for sequential recommendation, where the last item of the item sequence will be used for test.
@@ -840,7 +837,7 @@ class MFDataset(Dataset):
             split_mode(str, optional): controls the split mode. If set to ``user_entry``, then the interactions of each user will be splited into 3 cut.
             If ``entry``, then dataset is splited by interactions. If ``user``, all the users will be splited into 3 cut. Default: ``user_entry``
 
-            fmeval(bool, optional): set True for MFDataset and ALSDataset when use TowerFreeRecommender. Default: ``False``
+            fmeval(bool, optional): set True for TripletDataset and ALSDataset when use TowerFreeRecommender. Default: ``False``
 
         Returns:
             list: A list contains train/valid/test data-[train, valid, test]
@@ -899,14 +896,14 @@ class MFDataset(Dataset):
         else:
             splits = self._split_by_num(
                 ratio_or_num, user_count)
-            
+
         splits_ = splits[0][0]
         if split_mode == 'entry':
-            if isinstance(self, AEDataset) or isinstance(self, SeqDataset):
+            if isinstance(self, UserDataset) or isinstance(self, SeqDataset):
                 ucnts = pd.DataFrame({self.fuid : splits[1]})
                 for i, (start, end) in enumerate(zip(splits_[:-1], splits_[1:])):
                     self.inter_feat[start:end] = self.inter_feat[start:end].sort_values(
-                        by=[self.fuid, self.ftime] if self.ftime in self.inter_feat 
+                        by=[self.fuid, self.ftime] if self.ftime in self.inter_feat
                         else self.fuid)
                     ucnts[i] = self.inter_feat[start:end][self.fuid].groupby(
                         self.inter_feat[self.fuid], sort=True).count().values
@@ -919,16 +916,16 @@ class MFDataset(Dataset):
                     [torch.tensor(0), u_cumsum[:, -1][:-1]]).view(-1, 1).cumsum(dim=0)
                 splits = torch.hstack([u_start, u_cumsum + u_start])
                 uids = ucnts[:, 0]
-                if isinstance(self, AEDataset):
+                if isinstance(self, UserDataset):
                     splits = (splits, uids.view(-1, 1))
                 else:
                     splits = (splits.numpy(), uids)
             else:
                 for start, end in zip(splits_[:-1], splits_[1:]):
                     self.inter_feat[start:end] = self.inter_feat[start:end].sort_values(
-                        by=[self.fuid, self.ftime] if self.ftime in self.inter_feat 
+                        by=[self.fuid, self.ftime] if self.ftime in self.inter_feat
                         else self.fuid)
-        
+
 
         self.dataframe2tensors()
         datasets = [self._copy(_) for _ in self._get_data_idx(splits)]
@@ -1146,14 +1143,14 @@ class MFDataset(Dataset):
             return len(self.field2tokens[field])
 
 
-class AEDataset(MFDataset):
+class UserDataset(TripletDataset):
     def build(
             self,
             split_ratio=[0.8, 0.1, 0.1],
             shuffle=False,
             split_mode='user_entry',
-            dataset_sampler=None, 
-            dataset_neg_count=None, 
+            dataset_sampler=None,
+            dataset_neg_count=None,
             **kwargs
         ):
         """Build dataset.
@@ -1166,7 +1163,7 @@ class AEDataset(MFDataset):
             split_mode(str, optional): controls the split mode. If set to ``user_entry``, then the interactions of each user will be splited into 3 cut.
             If ``entry``, then dataset is splited by interactions. If ``user``, all the users will be splited into 3 cut. Default: ``user_entry``
 
-            fmeval(bool, optional): set True for MFDataset and ALSDataset when use TowerFreeRecommender. Default: ``False``
+            fmeval(bool, optional): set True for TripletDataset and ALSDataset when use TowerFreeRecommender. Default: ``False``
 
         Returns:
             list or ChainedDataLoader: list of loaders if load_combine is True else ChainedDataLoader.
@@ -1199,7 +1196,7 @@ class AEDataset(MFDataset):
                         for i in range(splits.shape[1] - 1)]
             data = [torch.cat((data_idx[0], data_idx[i]), -1)
                     for i in range(len(data_idx))]
-            
+
         return data
 
     def __getitem__(self, index):
@@ -1234,19 +1231,19 @@ class AEDataset(MFDataset):
         return index
 
 
-class SeqDataset(MFDataset):
+class SeqDataset(TripletDataset):
     @property
     def drop_dup(self):
         return False
 
     def build(
-            self, 
-            split_ratio=2, 
+            self,
+            split_ratio=2,
             split_mode='user_entry',
-            rep=True, 
-            train_rep=True, 
-            dataset_sampler=None, 
-            dataset_neg_count=None, 
+            rep=True,
+            train_rep=True,
+            dataset_sampler=None,
+            dataset_neg_count=None,
             **kwargs
         ):
         self.test_rep = rep
@@ -1429,7 +1426,7 @@ class TensorFrame(Dataset):
 
         Args:
             dataframe(pandas.DataFrame): Dataframe read from csv file.
-            dataset(recstudio.data.MFDataset): target dataset where the TensorFrame is used.
+            dataset(recstudio.data.TripletDataset): target dataset where the TensorFrame is used.
 
         Return:
             recstudio.data.TensorFrame: the TensorFrame get from the dataframe.

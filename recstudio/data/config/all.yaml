@@ -28,6 +28,7 @@ field_max_len: ~
 rating_threshold: ~
 ranker_rating_threshold: ~
 drop_low_rating: ~
+drop_dup: True
 max_seq_len: 20
 
 # network feature, including social network and knowledge graph, the first two fields are remapped the corresponding features

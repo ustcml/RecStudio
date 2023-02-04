@@ -1,14 +1,14 @@
 import torch
 from recstudio.model.basemodel import BaseRanker
 from recstudio.model.module import ctr, MLPModule
-from recstudio.data.dataset import MFDataset
+from recstudio.data.dataset import TripletDataset
 from ..loss_func import BCEWithLogitLoss
 
 
 class NFM(BaseRanker):
 
     def _get_dataset_class():
-        return MFDataset
+        return TripletDataset
 
     def _init_model(self, train_data, drop_unused_field=True):
         super()._init_model(train_data, drop_unused_field)

@@ -1,5 +1,5 @@
 import torch
-from recstudio.data.dataset import AEDataset
+from recstudio.data.dataset import UserDataset
 from recstudio.model.basemodel import BaseRetriever, Recommender
 from recstudio.model.loss_func import SoftmaxLoss
 from recstudio.model.module import MLPModule
@@ -74,7 +74,7 @@ class MultiVAE(BaseRetriever):
         return parent_parser
 
     def _get_dataset_class():
-        return AEDataset
+        return UserDataset
 
     def _get_item_encoder(self, train_data):
         return torch.nn.Embedding(train_data.num_items, self.embed_dim, 0)

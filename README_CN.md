@@ -22,13 +22,13 @@ RecStudio 是一个基于PyTorch实现的，高效、统一、全面的推荐系
 - 具有用户和物品塔
 
 在数据集结构方面，
-我们根据任务的不同将数据集分为 `MFDataset`, `AEDataset`, `SeqDataset`, `Seq2SeqDataset`,`ALSDataset`
+我们根据任务的不同将数据集分为 `TripletDataset`, `UserDataset`, `SeqDataset`, `Seq2SeqDataset`,`ALSDataset`
 五大类，五类数据集应用如下：
 
 |Dataset    |适用情形   | 使用模型举例  |
 |-----------|-----------|----------|
-|MFDataset|矩阵分解系列模型|BPR,NCF 等|
-|AEDataset|自动编码器系列模型|MultiVAE,RecVAE等|
+|TripletDataset|矩阵分解系列模型|BPR,NCF 等|
+|UserDataset|自动编码器系列模型|MultiVAE,RecVAE等|
 |SeqDataset|序列化推荐系列模型|GRU4Rec,SASRec等|
 |Seq2SeqDataset|序列化推荐部分基于MLM的模型|Bert4Rec等|
 |ALSDataset|交替优化系列模型|CML等|
@@ -113,13 +113,13 @@ use_fields=['user_id', 'item_id', 'rating']
 [2022-04-11 14:30:30] INFO (pytorch_lightning.utilities.distributed/MainThread) TPU available: False, using: 0 TPU cores
 [2022-04-11 14:30:30] INFO (pytorch_lightning.utilities.distributed/MainThread) IPU available: False, using: 0 IPUs
 [2022-04-11 14:30:30] INFO (pytorch_lightning.utilities.distributed/MainThread) The following callbacks returned in `LightningModule.configure_callbacks` will override existing callbacks passed to Trainer: ModelCheckpoint
-[2022-04-11 14:30:30] INFO (pytorch_lightning.core.lightning/MainThread) 
+[2022-04-11 14:30:30] INFO (pytorch_lightning.core.lightning/MainThread)
   | Name         | Type               | Params
 ----------------------------------------------------
-0 | loss_fn      | BPRLoss            | 0     
-1 | score_func   | InnerProductScorer | 0     
-2 | item_encoder | Embedding          | 107 K 
-3 | sampler      | UniformSampler     | 0     
+0 | loss_fn      | BPRLoss            | 0
+1 | score_func   | InnerProductScorer | 0
+2 | item_encoder | Embedding          | 107 K
+3 | sampler      | UniformSampler     | 0
 4 | user_encoder | Embedding          | 60.4 K
 ----------------------------------------------------
 168 K     Trainable params
@@ -141,7 +141,7 @@ use_fields=['user_id', 'item_id', 'rating']
 
 如果需要尝试其他的模型或采用不同的数据集训练，可以通过命令行简单设置：
 ```bash
-python run.py -m=NCF -d=ml-1m 
+python run.py -m=NCF -d=ml-1m
 ```
 
 - 命令行还支持修改的参数有：
@@ -198,7 +198,7 @@ python run.py -m=NCF -d=ml-1m
 
 
 ## 项目团队
-RecStudio由中国科学技术大学的同学和老师进行开发和维护。 
+RecStudio由中国科学技术大学的同学和老师进行开发和维护。
 |用户|贡献|
 |---|---|
 |@[DefuLian](https://github.com/DefuLian)|基础框架设计和搭建|

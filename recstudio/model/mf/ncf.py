@@ -17,7 +17,7 @@ class NCF(basemodel.BaseRetriever):
 
 
     def _get_dataset_class():
-        return dataset.MFDataset
+        return dataset.TripletDataset
 
     def _get_item_encoder(self, train_data):
         return torch.nn.Embedding(train_data.num_items, self.embed_dim, padding_idx=0)

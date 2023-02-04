@@ -2,7 +2,7 @@ from typing import OrderedDict
 
 import numpy as np
 import torch
-from recstudio.data.dataset import MFDataset
+from recstudio.data.dataset import TripletDataset
 from recstudio.model import basemodel
 
 
@@ -23,7 +23,7 @@ class EASE(basemodel.BaseRetriever):
         return parent_parser
 
     def _get_dataset_class():
-        return MFDataset
+        return TripletDataset
 
     def _get_train_loaders(self, train_data):
         return {'user_item_matrix': train_data.get_graph(0, 'csr')[0]}

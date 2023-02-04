@@ -1,7 +1,7 @@
 from collections import OrderedDict
 
 import torch
-from recstudio.data import MFDataset
+from recstudio.data import TripletDataset
 
 from .. import basemodel, loss_func, scorer
 from ..module import LambdaLayer, MLPModule, ctr
@@ -23,7 +23,7 @@ class DSSM(basemodel.BaseRetriever):
         data.use_field = data.field
 
     def _get_dataset_class():
-        return MFDataset
+        return TripletDataset
 
     def _get_query_encoder(self, train_data):
         if len(self.query_fields) == 1 and list(self.query_fields)[0] == self.fuid:

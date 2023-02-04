@@ -7,7 +7,7 @@ from ..scorer import *
 from . import Recommender
 from ..loss_func import FullScoreLoss
 from recstudio.ann.sampler import *
-from recstudio.data import AEDataset, SeqDataset
+from recstudio.data import UserDataset, SeqDataset
 
 
 class BaseRetriever(Recommender):
@@ -56,7 +56,7 @@ class BaseRetriever(Recommender):
     def _init_model(self, train_data, drop_unused_field=True):
         super()._init_model(train_data, drop_unused_field)
         self.query_fields = set(train_data.user_feat.fields).intersection(train_data.use_field)
-        if isinstance(train_data, AEDataset) or isinstance(train_data, SeqDataset):
+        if isinstance(train_data, UserDataset) or isinstance(train_data, SeqDataset):
             self.query_fields = self.query_fields | set(["in_"+f for f in self.item_fields])
             if isinstance(train_data, SeqDataset):
                 self.query_fields = self.query_fields | set(['seqlen'])

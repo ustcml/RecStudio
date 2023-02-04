@@ -18,7 +18,7 @@ from torch.nn.utils.clip_grad import clip_grad_norm_
 from recstudio.model import init, basemodel, loss_func
 from recstudio.utils import callbacks
 from recstudio.utils.utils import color_dict, seed_everything, parser_yaml, set_color, get_gpus
-from recstudio.data.dataset import (MFDataset, CombinedLoaders)
+from recstudio.data.dataset import (TripletDataset, CombinedLoaders)
 
 
 class Recommender(torch.nn.Module, abc.ABC):
@@ -99,8 +99,8 @@ class Recommender(torch.nn.Module, abc.ABC):
 
     def fit(
         self,
-        train_data: MFDataset,
-        val_data: Optional[MFDataset] = None,
+        train_data: TripletDataset,
+        val_data: Optional[TripletDataset] = None,
         run_mode='light',
         config: Dict = None,
         **kwargs

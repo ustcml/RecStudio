@@ -1,5 +1,5 @@
 import torch
-from recstudio.data.dataset import MFDataset
+from recstudio.data.dataset import TripletDataset
 
 from ..basemodel import BaseRanker
 from ..loss_func import BCEWithLogitLoss
@@ -9,7 +9,7 @@ from ..module import ctr, MLPModule
 class DCN(BaseRanker):
 
     def _get_dataset_class():
-        return MFDataset
+        return TripletDataset
 
     def add_model_specific_args(parent_parser):
         parent_parser.add_argument_group("DCN")
