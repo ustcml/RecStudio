@@ -1,11 +1,7 @@
-
 from typing import Union, Optional
 import torch
 from torch import nn
 import copy 
-import dgl
-import dgl.nn.pytorch.conv as dglnn
-import dgl.function as fn
 import torch.nn.functional as F
 
 
@@ -134,20 +130,42 @@ class LightGCNNet(torch.nn.Module):
     .. math::
         `norm_adj = D^{-\frac{1}{2}}A D^{-\frac{1}{2}}`
     """
+    
+
     def __init__(self, combiners:torch.nn.ModuleList, normalize:Optional[int]=None, mess_norm:str='both') -> None:
         super().__init__()
+        try:
+            import dgl
+            import dgl.nn.pytorch.conv as dglnn
+            import dgl.function as fn
+        except ModuleNotFoundError:
+            raise ModuleNotFoundError("Package 'dgl' not found, please "
+                "refer to https://www.dgl.ai/pages/start.html to install.")
+
         self.n_layers = len(combiners)
         self.normalize = normalize
         self.mess_norm = mess_norm
         self.combiners = combiners
 
     def _get_message_func(self):
+        try:
+            import dgl.function as fn
+        except ModuleNotFoundError:
+            raise ModuleNotFoundError("Package 'dgl' not found, please "
+                "refer to https://www.dgl.ai/pages/start.html to install.")
+
         return fn.copy_src('h', 'msg')
     
     def _get_reduce_func(self):
+        try:
+            import dgl.function as fn
+        except ModuleNotFoundError:
+            raise ModuleNotFoundError("Package 'dgl' not found, please "
+                "refer to https://www.dgl.ai/pages/start.html to install.")
+                
         return fn.sum('msg', 'neigh')
 
-    def conv_layer(self, layer_index: int, graph: dgl.DGLGraph, feat: torch.tensor):
+    def conv_layer(self, layer_index: int, graph, feat: torch.tensor):
         with graph.local_scope():
             graph.ndata['h'] = (feat * self.l_norm) if self.mess_norm in ['left', 'both'] else feat
             graph.update_all(self._get_message_func(), self._get_reduce_func())
@@ -155,7 +173,7 @@ class LightGCNNet(torch.nn.Module):
                 else graph.ndata['neigh']            
         return output
 
-    def forward(self, graph:dgl.DGLGraph, feat:torch.Tensor):
+    def forward(self, graph, feat:torch.Tensor):
         if self.mess_norm in ['left', 'both']:
             if self.mess_norm == 'both':
                 self.l_norm = torch.pow(graph.out_degrees(), -0.5).unsqueeze(-1) # [num_nodes, 1]
@@ -183,15 +201,23 @@ class LightGCNNet(torch.nn.Module):
 class LightGCNNet_dglnn(LightGCNNet):
     def __init__(self, combiners:torch.nn.ModuleList, normalize:int=None, mess_norm:str='both') -> None:
         super().__init__(combiners, normalize, mess_norm)
+        try:
+            import dgl
+            import dgl.nn.pytorch.conv as dglnn
+            import dgl.function as fn
+        except ModuleNotFoundError:
+            raise ModuleNotFoundError("Package 'dgl' not found, please "
+                "refer to https://www.dgl.ai/pages/start.html to install.")
+        
         self.convs = torch.nn.ModuleList()
         for i in range(self.n_layers):
             self.convs.append(dglnn.GraphConv(self.combiners[i].input_size, self.combiners[i].output_size, \
                 norm=mess_norm, weight=False, bias=False, allow_zero_in_degree=True))
         
-    def conv_layer(self, layer_index: int, graph: dgl.DGLGraph, feat: torch.tensor):
+    def conv_layer(self, layer_index: int, graph, feat: torch.tensor):
         return self.convs[layer_index](graph, feat)
 
-    def forward(self, graph: dgl.DGLGraph, feat: torch.Tensor):
+    def forward(self, graph, feat: torch.Tensor):
         all_embeddings = [feat]
         for i in range(self.n_layers):
             neigh_feat = self.conv_layer(i, graph, feat)
@@ -220,6 +246,12 @@ class EdgeDropout(torch.nn.Module):
         Returns:
             (torch.Tensor or dgl.DGLGraph): the graph after dropout in sparse COO or dgl.DGLGraph format.
         """
+        try:
+            import dgl
+        except ModuleNotFoundError:
+            raise ModuleNotFoundError("Package 'dgl' not found, please "
+                "refer to https://www.dgl.ai/pages/start.html to install.")
+
         if not self.training:
             return X
         if isinstance(X, torch.Tensor) and X.is_sparse and (not X.is_sparse_csr):

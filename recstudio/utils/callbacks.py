@@ -72,12 +72,18 @@ class EarlyStopping(object):
             'parameters': copy.deepcopy(model._get_ckpt_param()),
             'metric': {self.monitor: np.inf if self.mode=='min' else -np.inf}
         }
-        if len(self.logger.handlers) > 1:
-            _file_name = os.path.basename(self.logger.handlers[1].baseFilename).split('.')[0]
+
+        if filename != None:
+            self._best_ckpt_path = filename
         else:
-            import time
-            _file_name = time.strftime(f"{self.model_name}-{dataset_name}-%Y-%m-%d-%H-%M-%S.log", time.localtime())
-        self._best_ckpt_path = f"{_file_name}.ckpt"
+            _file_name = None 
+            for handler in self.logger.handlers:
+                if type(handler) == logging.FileHandler:
+                    _file_name = os.path.basename(handler.baseFilename).split('.')[0]
+            if _file_name is None:
+                import time
+                _file_name = time.strftime(f"{self.model_name}-{dataset_name}-%Y-%m-%d-%H-%M-%S.log", time.localtime())
+            self._best_ckpt_path = f"{_file_name}.ckpt"
 
     def __check_save_dir(self):
         if self.save_dir is not None:
@@ -150,15 +156,17 @@ class SaveLastCallback(object):
         }
         self.save_dir = save_dir
         self.__check_save_dir()
+
         if filename != None:
             self._last_ckpt_path = filename
         else:
-            if len(self.logger.handlers) > 1:
-                _file_name = os.path.basename(self.logger.handlers[1].baseFilename).split('.')[0]
-            else:
+            _file_name = None 
+            for handler in self.logger.handlers:
+                if type(handler) == logging.FileHandler:
+                    _file_name = os.path.basename(handler.baseFilename).split('.')[0]
+            if _file_name is None:
                 import time
-                _file_name = time.strftime(f"{self.model_name}-{dataset_name}-%Y-%m-%d-%H-%M-%S.log",
-                                           time.localtime())
+                _file_name = time.strftime(f"{self.model_name}-{dataset_name}-%Y-%m-%d-%H-%M-%S.log", time.localtime())
             self._last_ckpt_path = f"{_file_name}.ckpt"
 
     def __check_save_dir(self):
@@ -188,6 +196,7 @@ class IntervalCallback(object):
         print_logger,
         dataset_name: str,
         save_dir: Optional[str] = None,
+        filename: Optional[str] = None,
         interval_epochs:int = 20
         ) -> None:
         self.interval_epochs = interval_epochs
@@ -202,12 +211,19 @@ class IntervalCallback(object):
         }
         self.save_dir = save_dir
         self.__check_save_dir()
-        if len(self.logger.handlers) > 1:
-            self.start_ckpt_path = os.path.basename(self.logger.handlers[1].baseFilename).split('.')[0]
+
+        if filename != None:
+            self._interval_ckpt_path = filename
         else:
-            import time
-            self.start_ckpt_path = time.strftime(f"{self.model_name}-{dataset_name}-%Y-%m-%d-%H-%M-%S.log",
-                                                 time.localtime())
+            _file_name = None 
+            for handler in self.logger.handlers:
+                if type(handler) == logging.FileHandler:
+                    _file_name = os.path.basename(handler.baseFilename).split('.')[0]
+            if _file_name is None:
+                import time
+                _file_name = time.strftime(f"{self.model_name}-{dataset_name}-%Y-%m-%d-%H-%M-%S.log", time.localtime())
+            self._interval_ckpt_path = f"{_file_name}.ckpt"
+
         self.current_epoch = 0
 
     def __check_save_dir(self):
@@ -224,14 +240,17 @@ class IntervalCallback(object):
         return False
 
     def save_checkpoint(self, epoch):
-        save_path = os.path.join(self.save_dir, f"{epoch + 1}_epochs-{self.start_ckpt_path}.ckpt")
+        save_path = os.path.join(self.save_dir, f"{epoch + 1}_epochs-{self._interval_ckpt_path}.ckpt")
         self.current_epoch = epoch + 1
         torch.save(self.interval_ckpt, save_path)
         self.logger.info(f"Model at epoch {epoch + 1} is saved in {save_path}.")
 
     def get_checkpoint_path(self, nepoch=None):
         if nepoch == None:
-            return os.path.join(self.save_dir, f"{self.current_epoch + 1}_epochs-{self.start_ckpt_path}.ckpt")
+            if self.current_epoch == 0:
+                return None 
+            else:
+                return os.path.join(self.save_dir, f"{self.current_epoch}_epochs-{self._interval_ckpt_path}.ckpt")
         else:
             assert nepoch <= self.current_epoch and nepoch % self.interval_epochs == 0
-            return os.path.join(self.save_dir, f"{nepoch}_epochs-{self.start_ckpt_path}.ckpt")
+            return os.path.join(self.save_dir, f"{nepoch}_epochs-{self._interval_ckpt_path}.ckpt")

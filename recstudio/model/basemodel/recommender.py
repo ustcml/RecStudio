@@ -110,19 +110,26 @@ class Recommender(torch.nn.Module, abc.ABC):
         """
         # self.set_device(self.config['gpu'])
         self.logger = logging.getLogger('recstudio')
-        if len(self.logger.handlers) > 1:
-            tb_log_name = os.path.basename(self.logger.handlers[1].baseFilename).split('.')[0]
-        else:
-            import time
-            tb_log_name = time.strftime(f"{self.__class__.__name__}-{train_data.name}-%Y-%m-%d-%H-%M-%S.log",
-                                         time.localtime())
-        self.tensorboard_logger = SummaryWriter(f"tensorboard/{tb_log_name}")
-
         if config is not None:
             self.config.update(config)
 
         if kwargs is not None:
             self.config.update(kwargs)
+
+        # set tensorboard
+        tb_log_name = None
+        for handler in self.logger.handlers:
+            if type(handler) == logging.FileHandler:
+                tb_log_name = os.path.basename(handler.baseFilename).split('.')[0]
+
+        if tb_log_name is None:
+            import time
+            tb_log_name = time.strftime(f"{self.__class__.__name__}-{train_data.name}-%Y-%m-%d-%H-%M-%S.log",
+                            time.localtime())
+        if self.config['tensorboard_path'] is not None:
+            self.tensorboard_logger = SummaryWriter(os.path.join(self.config['tensorboard_path'], tb_log_name))
+        else:
+            self.tensorboard_logger = SummaryWriter(os.path.join('tensorboard', tb_log_name))
 
         self._init_model(train_data)
 
