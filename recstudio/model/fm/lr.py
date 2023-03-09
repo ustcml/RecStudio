@@ -20,4 +20,4 @@ class LR(BaseRanker):
         return BCEWithLogitLoss(threshold=self.rating_threshold)
 
     def score(self, batch):
-        return self.linear(batch)
+        return {'score' : self.linear(batch)}

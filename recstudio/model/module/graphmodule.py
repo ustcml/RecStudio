@@ -246,14 +246,15 @@ class EdgeDropout(torch.nn.Module):
         Returns:
             (torch.Tensor or dgl.DGLGraph): the graph after dropout in sparse COO or dgl.DGLGraph format.
         """
-        try:
-            import dgl
-        except ModuleNotFoundError:
-            raise ModuleNotFoundError("Package 'dgl' not found, please "
-                "refer to https://www.dgl.ai/pages/start.html to install.")
-
         if not self.training:
-            return X
+            if isinstance(X, torch.Tensor) and X.is_sparse and (not X.is_sparse_csr):
+                return X
+            elif 'dgl' in str(type(X)):
+                new_X = copy.deepcopy(X)
+                return new_X
+            else:
+                raise ValueError(f"EdgeDropout doesn't support graph with type {type(X)}")
+        
         if isinstance(X, torch.Tensor) and X.is_sparse and (not X.is_sparse_csr):
             X = X.coalesce()
             random_tensor = torch.rand(X._nnz(), device=X.device) + self.keep_prob
@@ -261,9 +262,16 @@ class EdgeDropout(torch.nn.Module):
             indices = X.indices()[:, random_tensor]
             values = X.values()[random_tensor] * (1.0 / self.keep_prob)
             return torch.sparse_coo_tensor(indices, values, X.shape, dtype=X.dtype)
-        elif isinstance(X, dgl.DGLGraph):
+        elif 'dgl' in str(type(X)):
+            try:
+                import dgl
+            except ModuleNotFoundError:
+                raise ModuleNotFoundError("Package 'dgl' not found, please "
+                    "refer to https://www.dgl.ai/pages/start.html to install.")
             if self.edge_dropout_dgl == None:
                 self.edge_dropout_dgl = dgl.DropEdge(p=1.0 - self.keep_prob)
             new_X = copy.deepcopy(X)
             new_X = self.edge_dropout_dgl(new_X)
             return new_X
+        else:
+            raise ValueError(f"EdgeDropout doesn't support graph with type {type(X)}")

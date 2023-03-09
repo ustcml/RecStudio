@@ -1,0 +1,12 @@
+fmeval: True
+val_metrics: [auc, logloss]
+test_metrics: [auc, logloss]
+kg_network_index: 1
+
+embed_dim: 64
+weight_decay: 1e-7
+
+n_iter: 2
+neighbor_sample_size: 4
+aggregator_type: sum 
+ls_weight: 1.0

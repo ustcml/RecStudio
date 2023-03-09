@@ -476,7 +476,7 @@ class MFDataset(Dataset):
         Args:
             idx(int, list): the indices of the feat or networks. The index of ``inter_feat`` is set to ``0`` by default
             and the index of networks(such as knowledge graph and social network) is started by ``1`` corresponding to the dataset configuration file i.e. ``datasetname.yaml``.
-            form(str): the form of the returned graph, can be 'coo', 'csr' or 'dgl'. Default: ``None``.
+            form(str): the form of the returned graph, can be 'coo', 'csr' or 'dgl'.
             value_fields(str, list): the value field in each graph. If value_field isn't ``None``, the values in this column will fill the adjacency matrix.
             row_offset(int, list): the offset of each row in corrresponding graph.
             col_offset(int, list): the offset of each column in corrresponding graph.
@@ -505,10 +505,10 @@ class MFDataset(Dataset):
 
         rows, cols, vals = [], [], []
         n, m, val_off = 0, 0, 0
-        for id, value_field, bidirectional, row_off, col_off in zip(
+        for feat_id, value_field, bidirectional, row_off, col_off in zip(
                 idx, value_fields, bidirectional, row_offset, col_offset):
             tmp_rows, tmp_cols, tmp_vals, val_off, tmp_n, tmp_m = self._get_one_graph(
-                id, value_field, row_off, col_off, val_off, bidirectional)
+                feat_id, value_field, row_off, col_off, val_off, bidirectional)
             rows.append(tmp_rows)
             cols.append(tmp_cols)
             vals.append(tmp_vals)
@@ -536,8 +536,10 @@ class MFDataset(Dataset):
             graph = dgl.graph((rows, cols), num_nodes=shape[0])
             graph.edata['value'] = vals
             return graph, val_off
+        else:
+            return ValueError(f'Graph form [{form}] is not supported.')
 
-    def _get_one_graph(self, id, value_field=None, row_offset=0, col_offset=0, val_offset=0, bidirectional=False):
+    def _get_one_graph(self, feat_id, value_field=None, row_offset=0, col_offset=0, val_offset=0, bidirectional=False):
         """
         Gets rows, cols and values in one graph.
         If several graphs are to be combined into one, offset should be added on the edge value in each graph to avoid conflict.
@@ -563,25 +565,25 @@ class MFDataset(Dataset):
             num_rows(int): number of source nodes.
             num_cols(int): number of destination nodes.
         """
-        if id == 0:
+        if feat_id == 0:
             source_field = self.fuid
             target_field = self.fiid
             feat = self.inter_feat[self.inter_feat_subset]
         else:
             if self.network_feat is not None:
-                if id - 1 < len(self.network_feat):
-                    feat = self.network_feat[id - 1]
+                if feat_id - 1 < len(self.network_feat):
+                    feat = self.network_feat[feat_id - 1]
                     if len(feat.fields) == 2:
                         source_field, target_field = feat.fields[:2]
                     elif len(feat.fields) == 3:
                         source_field, target_field = feat.fields[0], feat.fields[2]
                 else:
                     raise ValueError(
-                        f'idx [{id}] is larger than the number of network features [{len(self.network_feat)}] minus 1')
+                        f'idx [{feat_id}] is larger than the number of network features [{len(self.network_feat)}] minus 1')
             else:
                 raise ValueError(
-                    f'No network feature is input while idx [{id}] is larger than 1')
-        if id == 0:
+                    f'No network feature is input while idx [{feat_id}] is larger than 1')
+        if feat_id == 0:
             source = feat[source_field] + row_offset
             target = feat[target_field] + col_offset
         else:
@@ -595,7 +597,7 @@ class MFDataset(Dataset):
             cols = target
 
         if value_field is not None:
-            if id == 0 and value_field == 'inter':
+            if feat_id == 0 and value_field == 'inter':
                 if bidirectional:
                     vals = torch.tensor(
                         [val_offset + 1] * len(source) + [val_offset + 2] * len(source))
@@ -1486,7 +1488,7 @@ class TensorFrame(Dataset):
                 self.fields.remove(f)
                 del self.data[f]
 
-    def loader(self, batch_size, shuffle=False, num_workers=1, drop_last=False):
+    def loader(self, batch_size, shuffle=False, num_workers=1, drop_last=False, ddp=False):
         r"""Create dataloader.
 
         Args:
@@ -1505,6 +1507,9 @@ class TensorFrame(Dataset):
         output = DataLoader(self, sampler=sampler, batch_size=None,
                             shuffle=False, num_workers=num_workers,
                             persistent_workers=False)
+        # if ddp:
+        #     sampler = torch.utils.data.distributed.DistributedSampler(self, shuffle=shuffle, drop_last=drop_last)
+        #     output = DataLoader(self, sampler=sampler, batch_size=batch_size, num_workers=num_workers)
         return output
 
     def add_field(self, field, value):

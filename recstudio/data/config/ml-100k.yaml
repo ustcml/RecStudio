@@ -24,13 +24,14 @@ field_separator: "\t"
 min_user_inter: 0
 min_item_inter: 0
 field_max_len: ~
-rating_threshold: ~
-ranker_rating_threshold: 3
-drop_low_rating: ~
 max_seq_len: 20
 
+rating_threshold: ~
+drop_low_rating: ~
+ranker_rating_threshold: 4
+
 # network feature, including social network and knowledge graph, the first two fields are remapped the corresponding features
-network_feat_name: ~ #[[social.txt], [ml-100k.kg, ml-100k.link]]
+network_feat_name: ~ # [[social.txt], [ml-100k.kg, ml-100k.link]]
 # mapped_feat_field: [*u, *i]
 mapped_feat_field: [[*u, *u], [*i, ~, *i]]
 network_feat_field: [[[source_id:token, target_id:token]], [[head_id:token, relation_id:token, tail_id:token], [*i, entity_id:token]]]

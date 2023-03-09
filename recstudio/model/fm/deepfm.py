@@ -24,7 +24,7 @@ class DeepFM(BaseRanker):
         emb = self.embedding(batch)
         fm_score = self.fm(emb)
         mlp_score = self.mlp(emb.view(emb.size(0), -1)).squeeze(-1)
-        return lr_score + fm_score + mlp_score
+        return {'score' : lr_score + fm_score + mlp_score}
 
     def _get_loss_func(self):
         return BCEWithLogitLoss(self.rating_threshold)

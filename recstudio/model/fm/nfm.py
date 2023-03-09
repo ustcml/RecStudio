@@ -27,7 +27,7 @@ class NFM(BaseRanker):
         emb = self.embedding(batch)
         fm_emb = self.bn(self.fm(emb))
         mlp_score = self.mlp(fm_emb).squeeze(-1)
-        return linear_score + mlp_score
+        return {'score' : linear_score + mlp_score}
 
     def _get_loss_func(self):
         return BCEWithLogitLoss(self.rating_threshold)

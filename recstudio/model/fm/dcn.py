@@ -40,7 +40,7 @@ class DCN(BaseRanker):
         cross_out = self.cross_net(emb)
         deep_out = self.mlp(emb)
         score = self.fc(torch.cat([deep_out, cross_out], -1)).squeeze(-1)
-        return score
+        return {'score' : score}
 
     def _get_loss_func(self):
         return BCEWithLogitLoss(self.rating_threshold)

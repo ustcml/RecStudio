@@ -27,7 +27,7 @@ class WideDeep(BaseRanker):
         wide_score = self.linear(batch)
         emb = self.embedding(batch)
         deep_score = self.mlp(emb.view(emb.size(0), -1)).squeeze(-1)
-        return wide_score + deep_score
+        return {'score' : wide_score + deep_score}
 
     def _get_loss_func(self):
         return BCEWithLogitLoss(threshold=self.rating_threshold)

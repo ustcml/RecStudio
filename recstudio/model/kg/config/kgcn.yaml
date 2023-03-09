@@ -1,0 +1,10 @@
+fmeval: True
+val_metrics: [auc, logloss]
+test_metrics: [auc, logloss]
+
+embed_dim: 64
+weight_decay: 1e-7
+
+neighbor_sample_size: 4
+n_iter: 2
+aggregator_type: sum 

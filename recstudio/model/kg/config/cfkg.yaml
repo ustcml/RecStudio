@@ -1,0 +1,3 @@
+embed_dim: 64
+negative_count: 1
+margin: 1.0
