@@ -29,14 +29,14 @@ class EASE(basemodel.BaseRetriever):
         return {'user_item_matrix': train_data.get_graph(0, 'csr')[0]}
 
     def training_epoch(self, nepoch):
-        if self.config['gpu'] is not None:
+        if self.config['train']['gpu'] is not None:
             self.logger.warning("expecting EASE run on cpu while get gpu setting, automatically set gpu as None.")
-            self.config['gpu'] = None
+            self.config['train']['gpu'] = None
         data, iscombine = self.current_epoch_trainloaders(nepoch)
         R = data['user_item_matrix']
         G = R.T @ R
         diagIndices = np.diag_indices_from(G)
-        G[diagIndices] += self.config['lambda']
+        G[diagIndices] += self.config['train']['lambda']
         P = np.linalg.inv(G.todense())
         B = P / (-np.diag(P))
         B[diagIndices] = 0
@@ -56,6 +56,9 @@ class EASE(basemodel.BaseRetriever):
         return None
 
     def _get_item_encoder(self, train_data):
+        return None
+
+    def _get_sampler(self, train_data):
         return None
 
     def _get_optimizers(self):

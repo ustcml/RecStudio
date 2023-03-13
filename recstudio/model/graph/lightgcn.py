@@ -23,7 +23,7 @@ class LightGCN(basemodel.BaseRetriever):
         self.user_emb = torch.nn.Embedding(train_data.num_users, self.embed_dim, padding_idx=0)
         self.item_emb = torch.nn.Embedding(train_data.num_items, self.embed_dim, padding_idx=0)
         self.combiners = torch.nn.ModuleList()
-        for i in range(self.config['n_layers']):
+        for i in range(self.config['model']['n_layers']):
             self.combiners.append(graphmodule.LightGCNCombiner(self.embed_dim, self.embed_dim))
         self.LightGCNNet = graphmodule.LightGCNNet_dglnn(self.combiners)
         adj_size = train_data.num_users + train_data.num_items
@@ -69,7 +69,7 @@ class LightGCN(basemodel.BaseRetriever):
     def training_step(self, batch):
         output = self.forward(batch, isinstance(self.loss_fn, loss_func.FullScoreLoss), True, True)
         loss_value = self.loss_fn(batch[self.frating], **output['score']) \
-            + self.config['l2_reg_weight'] * loss_func.l2_reg_loss_fn(self.user_emb(batch[self.fuid]), self.item_emb(batch[self.fiid]), \
+            + self.config['model']['l2_reg_weight'] * loss_func.l2_reg_loss_fn(self.user_emb(batch[self.fuid]), self.item_emb(batch[self.fiid]), \
             self.item_emb(output['neg_id'].reshape(-1)))
         return loss_value
 

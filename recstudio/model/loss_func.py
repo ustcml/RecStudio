@@ -194,13 +194,11 @@ def l2_reg_loss_fn(*args):
 
 
 class BCEWithLogitLoss(PointwiseLoss):
-    def __init__(self, threshold: float=3.0, reduction: str='mean') -> None:
+    def __init__(self, reduction: str='mean') -> None:
         super().__init__()
-        self.threshold = threshold
         self.reduction = reduction
 
     def forward(self, label, pos_score):
-        label = (label > self.threshold).float()
         loss = torch.nn.functional.binary_cross_entropy_with_logits(
             pos_score, label, reduction=self.reduction)
         return loss

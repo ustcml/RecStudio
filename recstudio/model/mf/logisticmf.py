@@ -38,7 +38,7 @@ class LogisticMF(basemodel.BaseRetriever):
                 loss = (l1 - l2).mean()
                 return -loss
 
-        return LogitLoss(self.config['alpha'])
+        return LogitLoss(self.config['train']['alpha'])
 
 
     def _get_sampler(self, train_data):

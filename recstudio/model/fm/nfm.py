@@ -16,10 +16,11 @@ class NFM(BaseRanker):
         self.linear = ctr.LinearLayer(self.fields, train_data)
         self.fm = ctr.FMLayer()
         self.bn = torch.nn.BatchNorm1d(self.embed_dim)
-        self.mlp = MLPModule([self.embed_dim]+self.config['mlp_layer']+[1],
-                             activation_func=self.config['activation'],
-                             dropout=self.config['dropout'],
-                             batch_norm=self.config['batch_norm'],
+        model_config = self.config['model']
+        self.mlp = MLPModule([self.embed_dim]+model_config['mlp_layer']+[1],
+                             activation_func=model_config['activation'],
+                             dropout=model_config['dropout'],
+                             batch_norm=model_config['batch_norm'],
                              last_activation=False, last_bn=False)
 
     def score(self, batch):
@@ -30,4 +31,4 @@ class NFM(BaseRanker):
         return linear_score + mlp_score
 
     def _get_loss_func(self):
-        return BCEWithLogitLoss(self.rating_threshold)
+        return BCEWithLogitLoss()

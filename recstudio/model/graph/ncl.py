@@ -20,7 +20,8 @@ class NCL(basemodel.BaseRetriever):
         self.user_emb = torch.nn.Embedding(train_data.num_users, self.embed_dim, padding_idx=0)
         self.item_emb = torch.nn.Embedding(train_data.num_items, self.embed_dim, padding_idx=0)
         self.combiners = torch.nn.ModuleList()
-        for i in range(max(self.config['n_layers'], self.config['hyper_layers'] * 2)):
+        model_config = self.config['model']
+        for i in range(max(model_config['n_layers'], model_config['hyper_layers'] * 2)):
             self.combiners.append(graphmodule.LightGCNCombiner(self.embed_dim, self.embed_dim))
         self.LightGCNNet = graphmodule.LightGCNNet_dglnn(self.combiners)
 
@@ -29,7 +30,7 @@ class NCL(basemodel.BaseRetriever):
             col_offset=[train_data.num_users], bidirectional=[True], shape=(adj_size, adj_size))
 
         # augmentation model
-        self.augmentation_model = data_augmentation.NCLAugmentation(self.config, train_data)
+        self.augmentation_model = data_augmentation.NCLAugmentation(self.config['model'], train_data)
 
     def _get_dataset_class():
         return TripletDataset
@@ -71,15 +72,15 @@ class NCL(basemodel.BaseRetriever):
         return output
 
     def training_step(self, batch, nepoch):
+        model_config = self.config['model']
         output = self.forward(batch, isinstance(self.loss_fn, loss_func.FullScoreLoss), True)
         aug_output = self.augmentation_model(batch, output['all_embeddings_list'])
         loss = self.loss_fn(batch[self.frating], **output['score']) + \
-            self.config['l2_reg_weight'] * loss_func.l2_reg_loss_fn(self.user_emb(batch[self.fuid]), self.item_emb(batch[self.fiid]), \
+            model_config['l2_reg_weight'] * loss_func.l2_reg_loss_fn(self.user_emb(batch[self.fuid]), self.item_emb(batch[self.fiid]), \
                 self.item_emb(output['neg_id'].reshape(-1))) + \
-            self.config['ssl_reg'] * aug_output['structure_cl_loss']
-        if nepoch >= self.config['warm_up_epoch']:
-            loss = loss + \
-                self.config['proto_reg'] * aug_output['semantic_cl_loss']
+            model_config['ssl_reg'] * aug_output['structure_cl_loss']
+        if nepoch >= self.config['train']['warm_up_epoch']:
+            loss = loss + model_config['proto_reg'] * aug_output['semantic_cl_loss']
         return loss
 
     def _get_item_vector(self):
@@ -93,7 +94,7 @@ class NCL(basemodel.BaseRetriever):
         super()._update_item_vector()
 
     def training_epoch(self, nepoch):
-        if nepoch % self.config['num_m_epoch'] == 0:
+        if nepoch % self.config['train']['num_m_epoch'] == 0:
             self.logger.info('run e_step!')
             self.augmentation_model.e_step(self.user_emb, self.item_emb)
         return super().training_epoch(nepoch)

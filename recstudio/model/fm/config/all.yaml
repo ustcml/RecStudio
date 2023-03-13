@@ -1,4 +1,8 @@
-fmeval: True
+data:
+  fmeval: True
+  low_rating_thres: 0.0
+  binarized_rating_thres: 3.0
 
-val_metrics: [auc, logloss]
-test_metrics: [auc, logloss]
+eval:
+  val_metrics: [auc, logloss]
+  test_metrics: [auc, logloss]

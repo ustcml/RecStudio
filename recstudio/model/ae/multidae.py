@@ -36,14 +36,14 @@ class MultiDAEQueryEncoder(torch.nn.Module):
 
 class MultiDAE(BaseRetriever):
 
-    def add_model_specific_args(parent_parser):
-        parent_parser = Recommender.add_model_specific_args(parent_parser)
-        parent_parser.add_argument_group('MultiDAE')
-        parent_parser.add_argument("--dropout", type=int, default=0.5, help='dropout rate for MLP layers')
-        parent_parser.add_argument("--encoder_dims", type=int, nargs='+', default=64, help='MLP layer size for encoder')
-        parent_parser.add_argument("--decoder_dims", type=int, nargs='+', default=64, help='MLP layer size for decocer')
-        parent_parser.add_argument("--activation", type=str, default='relu', help='activation function for MLP layers')
-        return parent_parser
+    # def add_model_specific_args(parent_parser):
+    #     parent_parser = Recommender.add_model_specific_args(parent_parser)
+    #     parent_parser.add_argument_group('MultiDAE')
+    #     parent_parser.add_argument("--dropout", type=int, default=0.5, help='dropout rate for MLP layers')
+    #     parent_parser.add_argument("--encoder_dims", type=int, nargs='+', default=64, help='MLP layer size for encoder')
+    #     parent_parser.add_argument("--decoder_dims", type=int, nargs='+', default=64, help='MLP layer size for decocer')
+    #     parent_parser.add_argument("--activation", type=str, default='relu', help='activation function for MLP layers')
+    #     return parent_parser
 
     def _get_dataset_class():
         return UserDataset
@@ -52,9 +52,10 @@ class MultiDAE(BaseRetriever):
         return torch.nn.Embedding(train_data.num_items, self.embed_dim, 0)
 
     def _get_query_encoder(self, train_data):
+        model_config = self.config['model']
         return MultiDAEQueryEncoder(train_data.fiid, train_data.num_items,
-                                    self.embed_dim, self.config['dropout'], self.config['encoder_dims'],
-                                    self.config['decoder_dims'], self.config['activation'])
+                                    self.embed_dim, model_config['dropout'], model_config['encoder_dims'],
+                                    model_config['decoder_dims'], model_config['activation'])
 
     def _get_score_func(self):
         return InnerProductScorer()

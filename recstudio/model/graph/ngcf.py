@@ -19,9 +19,9 @@ class NGCF(basemodel.BaseRetriever):
     """
     def __init__(self, config):
         super().__init__(config)
-        self.layers = config['layer_size']
-        self.mess_dropout = config['mess_dropout']
-        self.node_dropout = config['node_dropout']
+        self.layers = config['model']['layer_size']
+        self.mess_dropout = config['model']['mess_dropout']
+        self.node_dropout = config['model']['node_dropout']
 
     def _init_model(self, train_data: TripletDataset):
         super()._init_model(train_data)
@@ -81,7 +81,7 @@ class NGCF(basemodel.BaseRetriever):
     def training_step(self, batch):
         output = self.forward(batch, isinstance(self.loss_fn, loss_func.FullScoreLoss), True)
         loss_value = self.loss_fn(batch[self.frating], **output['score']) \
-            + self.config['l2_reg_weight'] * loss_func.l2_reg_loss_fn(self.user_emb(batch[self.fuid]), self.item_emb(batch[self.fiid]), \
+            + self.config['model']['l2_reg_weight'] * loss_func.l2_reg_loss_fn(self.user_emb(batch[self.fuid]), self.item_emb(batch[self.fiid]), \
             self.item_emb(output['neg_id'].reshape(-1)))
         return loss_value
 

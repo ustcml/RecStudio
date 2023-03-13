@@ -28,4 +28,4 @@ class FM(BaseRanker):
         return fm_score + lr_score
 
     def _get_loss_func(self):
-        return loss_func.BCEWithLogitLoss(self.rating_threshold)
+        return loss_func.BCEWithLogitLoss()

@@ -24,10 +24,22 @@ item_feat_header: ~
 field_separator: "\t"
 min_user_inter: 0
 min_item_inter: 0
-field_max_len: ~
-rating_threshold: ~
-ranker_rating_threshold: ~
-drop_low_rating: ~
+field_max_len: 10
+low_rating_thres: ~   # low rating threshold, which is used for drop low rating interactions
+# drop_low_rating: True # if true, the interactions with rating lower than `rating_thres` would be dropped.
+
+# negative rating threshold, interactions with rating below than the threshold would be regarded as negative interactions.
+# Note that when `drop_low_rating` is True, only interactions with rating above `low_rating_thres` and below `negative_rating_thres`
+# would be regared as negative interactions.
+# The threshold value should be larger than `low_rating_thres`. If not, the threshold would be invalid, which means all interactions kept
+# would be regarded as positives.
+# negative_rating_thres: 0.0
+
+# `binarized_rating` controls whether to binarize the rating to 0/1 with the `rating_thres`.
+# If true, ratings above `rating_thres` would be mapped as 1 and ratings above `rating_thres` would be mapped as 0;
+# If false, the ratings would not be changed
+binarized_rating_thres: ~
+
 drop_dup: True
 max_seq_len: 20
 

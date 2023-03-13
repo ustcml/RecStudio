@@ -53,7 +53,6 @@ class EarlyStopping(object):
         self.model_name = model.__class__.__name__
         self.save_dir = save_dir
         self.filename = filename
-        self.__check_save_dir()
 
         if mode in ['min', 'max']:
             self.mode = mode
@@ -76,13 +75,15 @@ class EarlyStopping(object):
             _file_name = os.path.basename(self.logger.handlers[1].baseFilename).split('.')[0]
         else:
             import time
-            _file_name = time.strftime(f"{self.model_name}-{dataset_name}-%Y-%m-%d-%H-%M-%S.log", time.localtime())
-        self._best_ckpt_path = f"{_file_name}.ckpt"
+            _file_name = time.strftime(f"%Y-%m-%d-%H-%M-%S.log", time.localtime())
+        self._best_ckpt_path = f"{self.model_name}/{dataset_name}/{_file_name}.ckpt"
+        self.__check_save_dir()
 
     def __check_save_dir(self):
         if self.save_dir is not None:
-            if not os.path.exists(self.save_dir):
-                os.makedirs(self.save_dir)
+            dir = os.path.dirname(os.path.join(self.save_dir, self._best_ckpt_path))
+            if not os.path.exists(dir):
+                os.makedirs(dir)
 
     def __call__(self, model, epoch, metrics):
         if self.monitor not in metrics:
@@ -235,3 +236,6 @@ class IntervalCallback(object):
         else:
             assert nepoch <= self.current_epoch and nepoch % self.interval_epochs == 0
             return os.path.join(self.save_dir, f"{nepoch}_epochs-{self.start_ckpt_path}.ckpt")
+
+
+__all__ = ['EearlyStopping', 'SaveLastCallback', 'IntervalCallback']

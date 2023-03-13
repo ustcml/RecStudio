@@ -1,12 +1,16 @@
-embed_dim: 200
-dropout: 0.5
-encoder_dims: [64,32]
-decoder_dims: [32,64]
-activation: relu
+eval:
+  batch_size: 200
 
-learning_rate: 0.01
-weight_decay: 0.00001
-learner: adam
-epochs: 200
-batch_size: 256
-eval_batch_size: 200
+model:
+  embed_dim: 200
+  dropout: 0.5
+  encoder_dims: [64,32]
+  decoder_dims: [32,64]
+  activation: relu
+
+train:
+  batch_size: 256
+  epochs: 200
+  learner: adam
+  learning_rate: 0.01
+  weight_decay: 0.00001

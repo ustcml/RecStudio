@@ -1,4 +1,5 @@
-embed_dim: 10
-mlp_layer: [256, 256, 256]
-activation: 'tanh'
-dropout: 0.3
+model:
+  embed_dim: 10
+  mlp_layer: [256, 256, 256]
+  activation: 'tanh'
+  dropout: 0.3

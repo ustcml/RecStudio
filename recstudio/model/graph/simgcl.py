@@ -41,15 +41,15 @@ class SimGCL(basemodel.BaseRetriever):
         self.user_emb = torch.nn.Embedding(train_data.num_users, self.embed_dim, padding_idx=0)
         self.item_emb = torch.nn.Embedding(train_data.num_items, self.embed_dim, padding_idx=0)
         self.combiners = torch.nn.ModuleList()
-        for i in range(self.config['n_layers']):
+        for i in range(self.config['model']['n_layers']):
             self.combiners.append(graphmodule.LightGCNCombiner(self.embed_dim, self.embed_dim))
-        self.SimGCLNet = SimGCLNet(self.config['eps'], self.combiners)
+        self.SimGCLNet = SimGCLNet(self.config['model']['eps'], self.combiners)
         adj_size = train_data.num_users + train_data.num_items
         self.adj_mat, _ = train_data.get_graph([0], form='dgl', value_fields='inter', \
             col_offset=[train_data.num_users], bidirectional=[True], shape=(adj_size, adj_size))
 
         # contrastive learning
-        self.augmentation_model = data_augmentation.SimGCLAugmentation(self.config, train_data)
+        self.augmentation_model = data_augmentation.SimGCLAugmentation(self.config['model'], train_data)
 
     def _get_dataset_class():
         return TripletDataset
@@ -91,9 +91,12 @@ class SimGCL(basemodel.BaseRetriever):
     def training_step(self, batch):
         output = self.forward(batch, isinstance(self.loss_fn, loss_func.FullScoreLoss), True)
         cl_output = self.augmentation_model(batch, self.user_emb, self.item_emb, self.adj_mat, self.SimGCLNet)
-        loss = self.loss_fn(batch[self.frating], **output['score']) + cl_output['cl_loss'] + \
-            self.config['l2_reg_weight'] * loss_func.l2_reg_loss_fn(self.user_emb(batch[self.fuid]), self.item_emb(batch[self.fiid]), \
+        l2_reg_weight = loss_func.l2_reg_loss_fn(
+            self.user_emb(batch[self.fuid]),
+            self.item_emb(batch[self.fiid]),
             self.item_emb(output['neg_id'].reshape(-1)))
+        loss = self.loss_fn(batch[self.frating], **output['score']) + cl_output['cl_loss'] + \
+            self.config['model']['l2_reg_weight'] * l2_reg_weight
         return loss
 
     def _get_item_vector(self):

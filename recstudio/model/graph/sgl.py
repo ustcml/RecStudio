@@ -40,9 +40,9 @@ class SGL(basemodel.BaseRetriever):
         self.user_emb = torch.nn.Embedding(train_data.num_users, self.embed_dim, padding_idx=0)
         self.item_emb = torch.nn.Embedding(train_data.num_items, self.embed_dim, padding_idx=0)
         self.combiners = torch.nn.ModuleList()
-        for i in range(self.config['n_layers']):
+        for i in range(self.config['model']['n_layers']):
             self.combiners.append(graphmodule.LightGCNCombiner(self.embed_dim, self.embed_dim))
-        if self.config['aug_type'] == 'RW':
+        if self.config['model']['aug_type'] == 'RW':
             self.LightGCNNet = RandomWalkLightGCN(self.combiners)
         else:
             self.LightGCNNet = graphmodule.LightGCNNet_dglnn(self.combiners)
@@ -50,7 +50,7 @@ class SGL(basemodel.BaseRetriever):
         self.adj_mat, _ = train_data.get_graph([0], form='dgl', value_fields='inter', \
             col_offset=[train_data.num_users], bidirectional=[True], shape=(adj_size, adj_size))
         # augmentation model
-        self.augmentaion_model = data_augmentation.SGLAugmentation(self.config, train_data)
+        self.augmentaion_model = data_augmentation.SGLAugmentation(self.config['model'], train_data)
 
     def _get_dataset_class():
         return TripletDataset
@@ -91,12 +91,16 @@ class SGL(basemodel.BaseRetriever):
         return output
 
     def training_step(self, batch):
+        model_config = self.config['model']
         output = self.forward(batch, isinstance(self.loss_fn, loss_func.FullScoreLoss), return_neg_id=True)
         cl_output = self.augmentaion_model(batch, self.user_emb, self.item_emb, self.adj_mat, self.LightGCNNet)
+        l2_reg_loss = loss_func.l2_reg_loss_fn(
+            self.user_emb(batch[self.fuid]),
+            self.item_emb(batch[self.fiid]),
+            self.item_emb(output['neg_id'].reshape(-1)))
         loss_value = self.loss_fn(batch[self.frating], **output['score']) \
-            + self.config['l2_reg_weight'] * loss_func.l2_reg_loss_fn(self.user_emb(batch[self.fuid]), self.item_emb(batch[self.fiid]), \
-            self.item_emb(output['neg_id'].reshape(-1))) \
-            + self.config['ssl_reg'] * cl_output['cl_loss']
+            + model_config['l2_reg_weight'] * l2_reg_loss, \
+            + model_config['ssl_reg'] * cl_output['cl_loss']
         return loss_value
 
     def _get_item_vector(self):

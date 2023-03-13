@@ -1,13 +1,17 @@
-embed_dim: 128
-activation: dice
-attention_mlp: [128, 64]
-fc_mlp: [128, 64, 64]
-dropout: 0.3
-batch_norm: True
+eval:
+  batch_size: 32
+  test_metrics: [auc, logloss]
+  val_metrics: [auc, logloss]
 
-negative_count: 20
-batch_size: 256
-eval_batch_size: 32
+model:
+  activation: dice
+  attention_mlp: [128, 64]
+  batch_norm: True
+  dropout: 0.3
+  embed_dim: 128
+  fc_mlp: [128, 64, 64]
 
-test_metrics: [auc, logloss]
-val_metrics: [auc, logloss]
+train:
+  batch_size: 256
+  negative_count: 20
+

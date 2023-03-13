@@ -1,5 +1,6 @@
-embed_dim: 10
-mlp_layer: [128, 128, 128]
-dropout: 0.3
-batch_norm: True
-activation: sigmoid
+model:
+  embed_dim: 10
+  mlp_layer: [128, 128, 128]
+  dropout: 0.3
+  batch_norm: True
+  activation: sigmoid

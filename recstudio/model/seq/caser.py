@@ -64,14 +64,14 @@ class Caser(basemodel.BaseRetriever):
           as local features of the image using convolutional filters.
     """
 
-    def add_model_specific_args(parent_parser):
-        parent_parser = basemodel.Recommender.add_model_specific_args(parent_parser)
-        parent_parser.add_argument_group('Caser')
-        parent_parser.add_argument("--n_v", type=int, default=8, help='number of vertival CNN cells')
-        parent_parser.add_argument("--n_h", type=int, default=16, help='number of horizontal CNN cells')
-        parent_parser.add_argument("--dropout", type=float, default=0.5, help='dropout rate')
-        parent_parser.add_argument("--negative_count", type=int, default=3, help='negative sampling numbers')
-        return parent_parser
+    # def add_model_specific_args(parent_parser):
+    #     parent_parser = basemodel.Recommender.add_model_specific_args(parent_parser)
+    #     parent_parser.add_argument_group('Caser')
+    #     parent_parser.add_argument("--n_v", type=int, default=8, help='number of vertival CNN cells')
+    #     parent_parser.add_argument("--n_h", type=int, default=16, help='number of horizontal CNN cells')
+    #     parent_parser.add_argument("--dropout", type=float, default=0.5, help='dropout rate')
+    #     parent_parser.add_argument("--negative_count", type=int, default=3, help='negative sampling numbers')
+    #     return parent_parser
 
     def _get_dataset_class():
         r"""SeqDataset is used for Caser."""
@@ -85,10 +85,11 @@ class Caser(basemodel.BaseRetriever):
         return torch.nn.Embedding(train_data.num_items, self.embed_dim*2, padding_idx=0)
 
     def _get_query_encoder(self, train_data):
+        model_config = self.config['model']
         return CaserQueryEncoder(
             self.fiid, self.fuid, train_data.num_users, train_data.num_items,
-            self.embed_dim, train_data.config['max_seq_len'], self.config['n_v'],
-            self.config['n_h'], self.config['dropout']
+            self.embed_dim, train_data.config['max_seq_len'], model_config['n_v'],
+            model_config['n_h'], model_config['dropout']
         )
 
     def _get_score_func(self):

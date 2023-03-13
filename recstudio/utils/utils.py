@@ -6,16 +6,18 @@ import os
 import random
 import re
 from collections import OrderedDict
-from typing import Dict, List, Optional, Union
-from torch import TensorType
+from typing import *
+from torch import Tensor
+from pydantic.utils import deep_update
 
 import numpy as np
 import requests
 import torch
+import urllib
 import yaml
-from recstudio.utils.compress_file import extract_compressed_file
 from tqdm import tqdm
 from recstudio import LOG_DIR, DEFAULT_CACHE_DIR
+from recstudio.utils.compress_file import extract_compressed_file
 
 # LOG_DIR = r"./log/"
 # DEFAULT_CACHE_DIR = r"./.recstudio/"
@@ -89,17 +91,22 @@ def color_dict(dict_, keep=True):
     return start + ' [' + info + ']'
 
 
-def color_dict_normal(dict_, keep=True):
+def color_dict_normal(dict_, keep=True,):
     dict_ = OrderedDict(sorted(dict_.items()))
-    key_color = 'blue'
-    val_color = 'yellow'
+    color_set = ['green', 'blue', 'cyan', 'pink', 'white']
 
-    def color_kv(k, v, k_f, v_f):
-        info = (set_color(k_f, key_color, keep=keep) + '=' +
-                set_color(v_f, val_color, keep=keep)) % (k, v)
+    def color_kv(k, v, k_f, v_f, depth=1):
+        key_color = color_set[depth-1]
+        val_color = 'yellow'
+        if isinstance(v, dict):
+            v_info = ('\n'+'\t'*depth).join([color_kv(k_, v_, '%s', '%s', depth+1) for k_, v_ in v.items()])
+            info = (set_color(k_f, key_color, keep=keep) + ":\n"+ "\t"*depth + v_info) % (k)
+        else:
+            v = str(v)
+            info = (set_color(k_f, key_color, keep=keep) + '=' +
+                    set_color(v_f, val_color, keep=keep)) % (k, v)
         return info
-    info = '\n'.join([color_kv(k, str(v), '%s', '%s')
-                     for k, v in dict_.items()])
+    info = ('\n').join([color_kv(k, v, '%s', '%s') for k, v in dict_.items()])
     return info
 
 
@@ -111,6 +118,7 @@ def get_model(model_name: str):
 
     Returns:
         Recommender: model class
+        Dict: model configuration dict
     """
     model_submodule = ['ae', 'mf', 'seq', 'fm', 'graph', 'kg', 'debias']
 
@@ -123,8 +131,7 @@ def get_model(model_name: str):
             break
 
     if model_module is None:
-        raise ValueError(
-            f'`model_name` [{model_name}] is not the name of an existing model.')
+        raise ValueError(f'`model_name` [{model_name}] is not the name of an existing model.')
     model_class = getattr(model_module, model_name)
     dir = os.path.dirname(model_module.__file__)
     conf = dict()
@@ -133,7 +140,7 @@ def get_model(model_name: str):
     for name in ['all', model_file_name]:
         fname = os.path.join(dir, 'config', name+'.yaml')
         if os.path.isfile(fname):
-            conf.update(parser_yaml(fname))
+            conf = deep_update(conf, parser_yaml(fname))
     return model_class, conf
 
 
@@ -258,15 +265,29 @@ def download_dataset(url: str, name: str, save_dir: str):
             else:
                 zipped_file_name = url.split('/')[-1]
             dataset_file_path = os.path.join(save_dir, zipped_file_name)
-            response = requests.get(url, stream=True)
-            content_length = int(response.headers.get('content-length', 0))
-            with open(dataset_file_path, 'wb') as file, \
-                tqdm(desc='Downloading dataset',
-                     total=content_length, unit='iB',
-                     unit_scale=True, unit_divisor=1024) as bar:
-                for data in response.iter_content(chunk_size=1024):
-                    size = file.write(data)
-                    bar.update(size)
+            with urllib.request.urlopen(url) as response, open(dataset_file_path, 'wb') as out_file:
+                total_length = int(response.info().get('Content-Length'))
+
+                block_size=1024
+                t = tqdm(total=total_length, unit='iB', unit_scale=True)
+                while True:
+                    buffer = response.read(block_size)
+                    if not buffer:
+                        break
+                    t.update(len(buffer))
+                    out_file.write(buffer)
+
+                t.close()
+
+            # response = requests.get(url, stream=True)
+            # content_length = int(response.headers.get('content-length', 0))
+            # with open(dataset_file_path, 'wb') as file, \
+            #     tqdm(desc='Downloading dataset',
+            #          total=content_length, unit='iB',
+            #          unit_scale=True, unit_divisor=1024) as bar:
+            #     for data in response.iter_content(chunk_size=1024):
+            #         size = file.write(data)
+            #         bar.update(size)
             extract_compressed_file(dataset_file_path, save_dir)
             return save_dir
         except:
@@ -327,6 +348,7 @@ def get_dataset_default_config(dataset_name: str) -> Dict:
     logger = logging.getLogger('recstudio')
     dir = os.path.dirname(__file__)
     dataset_config_dir = os.path.join(dir, "../data/config")
+    default_config = parser_yaml(os.path.join(dataset_config_dir, 'all.yaml'))
     dataset_config_fname = os.path.join(dataset_config_dir, f"{dataset_name}.yaml")
     if os.path.exists(dataset_config_fname):
         config = parser_yaml(dataset_config_fname)
@@ -335,7 +357,8 @@ def get_dataset_default_config(dataset_name: str) -> Dict:
                        "Please make sure that all the configurations are setted in your provided file or the"
                        "configuration dict you've assigned.")
         config = {}
-    return config
+    default_config.update(config)
+    return default_config
 
 
 class RemoveColorFilter(logging.Filter):
@@ -347,7 +370,10 @@ class RemoveColorFilter(logging.Filter):
 
 
 def add_file_handler(logger: logging.Logger, file_path: str, formatter: logging.Formatter = None):
-    file_handler = logging.FileHandler(os.path.join(LOG_DIR, file_path))
+    log_path = os.path.join(LOG_DIR, file_path)
+    if not os.path.exists(os.path.dirname(log_path)):
+        os.makedirs(os.path.dirname(log_path))
+    file_handler = logging.FileHandler(log_path)
     file_handler.setLevel(logging.INFO)
     if formatter is None:
         formatter = logging.Formatter('[%(asctime)s] %(levelname)s %(message)s', "%Y-%m-%d %H:%M:%S")
@@ -356,10 +382,17 @@ def add_file_handler(logger: logging.Logger, file_path: str, formatter: logging.
     logger.addHandler(file_handler)
     return logger
 
+def close_logger(logger: logging.Logger):
+    handlers = logger.handlers[:]
+    for handler in handlers:
+        logger.removeHandler(handler)
+        handler.close()
 
-def get_logger(file_path: str = None):
+def get_logger(file_path: str = None) -> logging.Logger:
     FORMAT = '[%(asctime)s] %(levelname)s %(message)s'
     logger = logging.getLogger('recstudio')
+    # close all handlers if exists for next use
+    close_logger(logger)
 
     formatter = logging.Formatter(FORMAT, "%Y-%m-%d %H:%M:%S")
     logger.setLevel(logging.INFO)
@@ -401,17 +434,17 @@ def get_gpus(gpu_config: Union[int, list]):
         raise TypeError(f'expected `gpu_config` to be int or list, but got {type(gpu_config)}.')
 
 
-def mask_with_hist(dist: TensorType, hist: TensorType, fill_value: float=0, inplace: bool=False):
+def mask_with_hist(dist: Tensor, hist: Tensor, fill_value: float=0, inplace: bool=False) -> Tensor:
     r""" Mask probablities or scores in the dist with index in hist.
 
     Args:
-        dist(TensorType): distribution or scores of all or some items. shape: [B,N]
-        hist(TensorType): index in hist should be masked. shape: [B, L], type: torch.long
+        dist(Tensor): distribution or scores of all or some items. shape: [B,N]
+        hist(Tensor): index in hist should be masked. shape: [B, L], type: torch.long
         fill_value(Union[float, str]): the value to be filled into mask positions. Optional: [0, 'inf', '-inf']
         inplace(bool): whether to do inplace operation. Default: False
 
     Returns:
-        TensorType: masked distribution or scores. shape: [B, N]
+        Tensor: masked distribution or scores. shape: [B, N]
     """
     filled_values = dist.new_zeros(*hist.shape)
     ops = {
@@ -428,3 +461,24 @@ def mask_with_hist(dist: TensorType, hist: TensorType, fill_value: float=0, inpl
     else:
         dist.scatter_(dim=-1, index=hist, src=filled_values)
     return dist
+
+
+__all__ = [
+    'deep_update',
+    'DEFAULT_CACHE_DIR',
+    'set_color',
+    'parser_yaml',
+    'color_dict',
+    'color_dict_normal',
+    'get_model',
+    'md5',
+    'get_download_url_from_recstore',
+    'check_valid_dataset',
+    'download_dataset',
+    'seed_everything',
+    'get_dataset_default_config',
+    'RemoveColorFilter',
+    'get_logger',
+    'get_gpus',
+    'mask_with_hist'
+]

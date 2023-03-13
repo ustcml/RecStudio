@@ -1,4 +1,5 @@
 import sys
+from typing import *
 
 import torch
 import torch.nn.functional as F
@@ -169,7 +170,7 @@ def auc(pred, target, thres=None):
     """
     if thres is not None:
         target = target > thres
-    return M.auroc(pred, target)
+    return M.auroc(pred, target, task='binary')
 
 
 def f1(pred, target, k):
@@ -228,3 +229,27 @@ def get_global_metrics(metric):
     global_m = [(m, metric_dict[m])
                 for m in metric if m in global_metrics and m in metric_dict]
     return global_m
+
+
+def get_eval_metrics(metric_names: Union[List[str], str], cutoffs: Union[List[int], int], validation: bool=False) -> List[str]:
+    r""" Get metrics with cutoff for evaluation.
+
+    Args:
+        metrics_names(Union[List[str], str]): names of metrics which requires cutoff. Such as ["ndcg", "recall"].
+        cutoffs(Union[List[int], int]): cutoffs for those metric. Such as [5,10].
+        validation(bool): if validation, only the first element of cutoffs would be used.
+
+    Returns:
+        List[str]: metrics with cutoffs, such as ["ndcg@5", "ndcg@10", "recall@5", "recall@10"].
+    """
+    metric_names = metric_names if isinstance(metric_names, list) else [metric_names]
+    rank_metrics = [m[0] for m in get_rank_metrics(metric_names)]
+    pred_metrics = [m[0] for m in get_pred_metrics(metric_names)]
+    if cutoffs is not None:
+        cutoffs = cutoffs if isinstance(cutoffs, list) else [cutoffs]
+        if validation:
+            cutoffs = cutoffs[: 1]
+        res = [f"{m}@{cut}" if m in rank_metrics else m for cut in cutoffs for m in metric_names]
+    else:
+        res = pred_metrics
+    return res

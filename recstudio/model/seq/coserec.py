@@ -10,7 +10,7 @@ r"""
 CoSeRec
 #############
     Contrastive Self-supervised Sequential Recommendation with Robust Augmentation
-    Reference: 
+    Reference:
         https://doi.org/10.48550/arXiv.2108.06479
 """
 class CoSeRec(basemodel.BaseRetriever):
@@ -28,23 +28,23 @@ class CoSeRec(basemodel.BaseRetriever):
 
     def _init_model(self, train_data:dataset.SeqToSeqDataset):
         super()._init_model(train_data)
-        self.config['max_seq_len'] = train_data.config['max_seq_len']
         self.num_items = train_data.num_items
-        self.augmentation_model = data_augmentation.CoSeRecAugmentation(self.config, train_data)
-        
+        self.augmentation_model = data_augmentation.CoSeRecAugmentation(self.config['model'], train_data)
+
     def _get_dataset_class():
         return dataset.SeqToSeqDataset
 
     def _get_item_encoder(self, train_data):
-        return torch.nn.Embedding(train_data.num_items + 1, self.embed_dim, padding_idx=0) # the last is masking 
+        return torch.nn.Embedding(train_data.num_items + 1, self.embed_dim, padding_idx=0) # the last is masking
 
     def _get_query_encoder(self, train_data):
+        model_config = self.config['model']
         return SASRecQueryEncoder(
             fiid=self.fiid, embed_dim=self.embed_dim,
-            max_seq_len=train_data.config['max_seq_len'], n_head=self.config['head_num'],
-            hidden_size=self.config['hidden_size'], dropout=self.config['dropout_rate'],
-            activation=self.config['activation'], layer_norm_eps=self.config['layer_norm_eps'],
-            n_layer=self.config['layer_num'],
+            max_seq_len=train_data.config['max_seq_len'], n_head=model_config['head_num'],
+            hidden_size=model_config['hidden_size'], dropout=model_config['dropout_rate'],
+            activation=model_config['activation'], layer_norm_eps=model_config['layer_norm_eps'],
+            n_layer=model_config['layer_num'],
             training_pooling_type='origin',
             item_encoder=self.item_encoder
         )
@@ -62,10 +62,10 @@ class CoSeRec(basemodel.BaseRetriever):
         output = self.forward(batch, isinstance(self.loss_fn, loss_func.FullScoreLoss))
         cl_output = self.augmentation_model(batch, self.query_encoder)
         loss_value = self.loss_fn(batch[self.frating], **output['score']) + \
-            self.config['cl_weight'] * cl_output['cl_loss'] 
+            self.config['model']['cl_weight'] * cl_output['cl_loss']
         return loss_value
 
     def training_epoch(self, nepoch):
-        if nepoch + 1 >= self.config['augmentation_warm_up_epochs'] + 1:
+        if nepoch + 1 >= self.config['model']['augmentation_warm_up_epochs'] + 1:
             self.augmentation_model.update_online_model(nepoch, self.item_encoder)
         return super().training_epoch(nepoch)

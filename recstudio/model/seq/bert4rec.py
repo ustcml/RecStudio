@@ -2,7 +2,7 @@ import torch
 from recstudio.ann import sampler
 from recstudio.data import dataset
 from recstudio.model import basemodel, loss_func, scorer
-from recstudio.model.module import functional as recfn 
+from recstudio.model.module import functional as recfn
 from .sasrec import SASRecQueryEncoder
 
 
@@ -17,12 +17,13 @@ class BERT4Rec(basemodel.BaseRetriever):
         return dataset.SeqDataset
 
     def _get_query_encoder(self, train_data):
+        model_config = self.config['model']
         return SASRecQueryEncoder(
             fiid=self.fiid, embed_dim=self.embed_dim,
-            max_seq_len=train_data.config['max_seq_len'], n_head=self.config['head_num'],
-            hidden_size=self.config['hidden_size'], dropout=self.config['dropout'],
-            activation=self.config['activation'], layer_norm_eps=self.config['layer_norm_eps'],
-            n_layer=self.config['layer_num'],
+            max_seq_len=train_data.config['max_seq_len'], n_head=model_config['head_num'],
+            hidden_size=model_config['hidden_size'], dropout=model_config['dropout'],
+            activation=model_config['activation'], layer_norm_eps=model_config['layer_norm_eps'],
+            n_layer=model_config['layer_num'],
             training_pooling_type='mask',
             item_encoder=self.item_encoder,
             bidirectional=True,
@@ -48,7 +49,7 @@ class BERT4Rec(basemodel.BaseRetriever):
         padding_mask = item_seq == 0
         rand_prob = torch.rand_like(item_seq, dtype=torch.float)
         rand_prob.masked_fill_(padding_mask, 1.0)
-        masked_mask = rand_prob < self.config['mask_ratio']
+        masked_mask = rand_prob < self.config['train']['mask_ratio']
         masked_token = item_seq[masked_mask]
 
         item_seq[masked_mask] = self.mask_token

@@ -15,8 +15,9 @@ class DeepFM(BaseRanker):
         self.linear = ctr.LinearLayer(self.fields, train_data)
         self.fm = ctr.FMLayer(reduction='sum')
         self.embedding = ctr.Embeddings(self.fields, self.embed_dim, train_data)
-        self.mlp = MLPModule([self.embedding.num_features*self.embed_dim]+self.config['mlp_layer']+[1],
-                             self.config['activation'], self.config['dropout'],
+        model_config = self.config['model']
+        self.mlp = MLPModule([self.embedding.num_features*self.embed_dim]+model_config['mlp_layer']+[1],
+                             model_config['activation'], model_config['dropout'],
                              last_activation=False, last_bn=False)
 
     def score(self, batch):
@@ -27,4 +28,4 @@ class DeepFM(BaseRanker):
         return lr_score + fm_score + mlp_score
 
     def _get_loss_func(self):
-        return BCEWithLogitLoss(self.rating_threshold)
+        return BCEWithLogitLoss()

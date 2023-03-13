@@ -17,7 +17,7 @@ class LR(BaseRanker):
         self.linear = ctr.LinearLayer(self.fields, train_data)
 
     def _get_loss_func(self):
-        return BCEWithLogitLoss(threshold=self.rating_threshold)
+        return BCEWithLogitLoss()
 
     def score(self, batch):
         return self.linear(batch)
