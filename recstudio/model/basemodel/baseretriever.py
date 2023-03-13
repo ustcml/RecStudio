@@ -7,7 +7,7 @@ from ..scorer import *
 from . import Recommender
 from ..loss_func import FullScoreLoss
 from recstudio.ann.sampler import *
-from recstudio.data import AEDataset, SeqDataset
+from recstudio.data import UserDataset, SeqDataset
 
 
 class BaseRetriever(Recommender):
@@ -42,10 +42,8 @@ class BaseRetriever(Recommender):
         else:
             self.sampler = None
 
-        self.use_index = self.config['ann'] is not None and \
-            (not config['item_bias'] or
-                (isinstance(self.score_func, InnerProductScorer) or
-                 isinstance(self.score_func, EuclideanScorer)))
+        self.use_index = self.config['train']['ann'] is not None and (not config['model']['item_bias'] or
+                (isinstance(self.score_func, InnerProductScorer) or isinstance(self.score_func, EuclideanScorer)))
 
     def _set_data_field(self, data):
         data.use_field = set([data.fuid, data.fiid, data.frating])
@@ -56,7 +54,7 @@ class BaseRetriever(Recommender):
     def _init_model(self, train_data, drop_unused_field=True):
         super()._init_model(train_data, drop_unused_field)
         self.query_fields = set(train_data.user_feat.fields).intersection(train_data.use_field)
-        if isinstance(train_data, AEDataset) or isinstance(train_data, SeqDataset):
+        if isinstance(train_data, UserDataset) or isinstance(train_data, SeqDataset):
             self.query_fields = self.query_fields | set(["in_"+f for f in self.item_fields])
             if isinstance(train_data, SeqDataset):
                 self.query_fields = self.query_fields | set(['seqlen'])
@@ -124,17 +122,17 @@ class BaseRetriever(Recommender):
         if len(self.item_fields) == 1 and isinstance(self.item_encoder, torch.nn.Embedding):
             return self.item_encoder.weight[1:]
         else:
-            # TODO: the batch_size should be configured
             device = next(self.parameters()).device
             output = [self.item_encoder(self._get_item_feat(self._to_device(batch, device)))
-                      for batch in self.item_feat.loader(batch_size=1024)]
+                      for batch in self.item_feat.loader(batch_size=self.config['train'].get('item_batch_size', 1024))]
             output = torch.cat(output, dim=0)
             return output[1:]
 
     def _update_item_vector(self):  # TODO: update frequency setting
         item_vector = self._get_item_vector()
         if not hasattr(self, "item_vector"):
-            self.register_buffer('item_vector', item_vector.detach().clone() if isinstance(item_vector, torch.Tensor) else item_vector.copy())
+            self.register_buffer('item_vector', item_vector.detach().clone() if isinstance(item_vector, torch.Tensor) \
+                else item_vector.copy())
         else:
             self.item_vector = item_vector
 
@@ -160,8 +158,8 @@ class BaseRetriever(Recommender):
                                  "`sampler` is not none.")
 
             (log_pos_prob, neg_item_idx, log_neg_prob), query = self.sampling(batch=batch, num_neg=self.neg_count,
-                                                                              excluding_hist=self.config.get('excluding_hist', False),
-                                                                              method=self.config.get('sampling_method', 'none'), return_query=True)
+                                                                              excluding_hist=self.config['train'].get('excluding_hist', False),
+                                                                              method=self.config['train'].get('sampling_method', 'none'), return_query=True)
             pos_score = self.score_func(query, pos_item_vec)
             if batch[self.fiid].dim() > 1:
                 pos_score[batch[self.fiid] == 0] = -float('inf')  # padding
@@ -272,7 +270,7 @@ class BaseRetriever(Recommender):
         else:
             raise TypeError("num_neg only support int and List/Tuple type.")
 
-        if method in ("none", "top", "sir", "dns", "toprand", "brute", "top&rand"):
+        if method in ("none", "sir", "dns", "toprand", "brute", "top&rand"):
 
             if method == 'none':
                 assert self.sampler is not None, "excepted sampler of retriever to be Sampler, but get None."
@@ -302,14 +300,14 @@ class BaseRetriever(Recommender):
                 query = self.query_encoder(self._get_query_feat(batch)) if query is None else query
 
                 item_vectors = self.item_vector
-                if ('split_num' in self.config) and (self.config['split_num'] is not None):
+                if ('item_batch_size' in self.config['train']) and (self.config['train']['item_batch_size'] is not None):
                     # if the items are enormous, the scores of all items should be split into steps to calculate.
-                    item_vectors = torch.tensor_split(self.item_vector, self.config['split_num'], dim=0)
+                    item_vectors = torch.split(self.item_vector, self.config['train']['item_batch_size'], dim=0)
                     all_score = []
                     for vec in item_vectors:
                         score = self.score_func(query, vec) / t
                         all_score.append(score)
-                    all_score = torch.cat(all_score, dim=0)
+                    all_score = torch.cat(all_score, dim=1)
                 else:
                     all_score = self.score_func(query, item_vectors) / t
                 all_prob = torch.softmax(all_score, dim=-1)
@@ -374,7 +372,6 @@ class BaseRetriever(Recommender):
         raise NotImplementedError("build_index  for ranker not implemented.")
 
     def topk(self, batch, k, user_h=None, return_query=False):
-        # TODO: complete topk with retriever
         query = self.query_encoder(self._get_query_feat(batch))
         more = user_h.size(1) if user_h is not None else 0
         if self.use_index:
@@ -407,18 +404,18 @@ class BaseRetriever(Recommender):
         return loss_value
 
     def validation_step(self, batch):
-        eval_metric = self.config['val_metrics']
-        cutoff = self.config['cutoff'][0] if isinstance(self.config['cutoff'], list) else self.config['cutoff']
+        eval_metric = self.config['eval']['val_metrics']
+        cutoff = self.config['eval']['cutoff'][0] if isinstance(self.config['eval']['cutoff'], list) else self.config['eval']['cutoff']
         return self._test_step(batch, eval_metric, [cutoff])
 
     def test_step(self, batch):
-        eval_metric = self.config['test_metrics']
-        cutoffs = self.config['cutoff'] if isinstance(self.config['cutoff'], list) else [self.config['cutoff']]
+        eval_metric = self.config['eval']['test_metrics']
+        cutoffs = self.config['eval']['cutoff'] if isinstance(self.config['eval']['cutoff'], list) else [self.config['eva']['cutoff']]
         return self._test_step(batch, eval_metric, cutoffs)
 
     def _test_step(self, batch, metric, cutoffs):
         rank_m = eval.get_rank_metrics(metric)
-        topk = self.config['topk']
+        topk = self.config['eval']['topk']
         bs = batch[self.frating].size(0)
         assert len(rank_m) > 0
         score, topk_items = self.topk(batch, topk, batch['user_hist'])
@@ -431,4 +428,4 @@ class BaseRetriever(Recommender):
         else:
             label = batch[self.fiid].view(-1, 1) == topk_items
             pos_rating = batch[self.frating].view(-1, 1)
-        return [func(label, pos_rating, cutoff) for cutoff in cutoffs for name, func in rank_m], bs
+        return {f"{name}@{cutoff}": func(label, pos_rating, cutoff) for cutoff in cutoffs for name, func in rank_m}, bs

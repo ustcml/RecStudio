@@ -1,4 +1,5 @@
-knn: 100
-epochs: 1
-gpu: ~
-similarity: cosine #| jaccard
+train:
+  epochs: 1
+  gpu: ~
+  knn: 100
+  similarity: cosine #| jaccard

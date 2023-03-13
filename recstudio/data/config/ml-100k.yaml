@@ -24,9 +24,7 @@ field_separator: "\t"
 min_user_inter: 0
 min_item_inter: 0
 field_max_len: ~
-rating_threshold: ~
-ranker_rating_threshold: 3
-drop_low_rating: ~
+low_rating_thres: 3.0
 max_seq_len: 20
 
 # network feature, including social network and knowledge graph, the first two fields are remapped the corresponding features

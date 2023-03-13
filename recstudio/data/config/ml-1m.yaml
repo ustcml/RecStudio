@@ -27,9 +27,7 @@ field_separator: "::"
 min_user_inter: 5
 min_item_inter: 5
 field_max_len: ~
-rating_threshold: 3
-ranker_rating_threshold: 3
-drop_low_rating: True
+low_rating_thres: 3.0
 max_seq_len: 20
 
 # network feature, including social network and knowledge graph, the first two fields are remapped the corresponding features
@@ -39,4 +37,4 @@ network_feat_field: [[[source_id:token, target_id:token]], [[head_id:token, tail
 network_feat_header: [~, ~]
 
 
-save_cache: True # whether to save processed dataset to cache.
+save_cache: False # whether to save processed dataset to cache.

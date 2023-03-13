@@ -1,6 +1,9 @@
-embed_dim: 64
-n_v: 8
-n_h: 16
-dropout: 0.4
-negative_count: 1
-weight_decay: 1e-5
+model:
+  embed_dim: 64
+  n_v: 8
+  n_h: 16
+  dropout: 0.4
+
+train:
+  negative_count: 1
+  weight_decay: 1e-5

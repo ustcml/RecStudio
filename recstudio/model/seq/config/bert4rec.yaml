@@ -1,11 +1,13 @@
-embed_dim: 64
-hidden_size: 128
-layer_num: 2
-head_num: 2
-dropout: 0.2
-activation: 'gelu'
-negative_count: 1
-layer_norm_eps: 1e-12
+model:
+  activation: 'gelu'
+  dropout: 0.2
+  embed_dim: 64
+  head_num: 2
+  hidden_size: 128
+  layer_num: 2
+  layer_norm_eps: 1e-12
 
-mask_ratio: 0.2
-weight_decay: 1e-5
+train:
+  mask_ratio: 0.2
+  negative_count: 1
+  weight_decay: 1e-5

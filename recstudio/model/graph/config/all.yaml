@@ -1,9 +1,12 @@
-embed_dim: 64
-negative_count: 1
+data:
+  split_ratio: [0.8, 0.1, 0.1]
 
-epochs: 1000
-learning_rate: 0.001
-eval_batch_size: 128
-early_stop_patience: 100
-split_ratio: [0.8, 0.1, 0.1]
-cutoff: [20, 10, 5]
+train:
+  early_stop_patience: 100
+  epochs: 1000
+  learning_rate: 0.001
+  negative_count: 1
+
+eval:
+  batch_size: 128
+  cutoff: [20, 10, 5]

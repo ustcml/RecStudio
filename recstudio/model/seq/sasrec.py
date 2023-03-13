@@ -14,7 +14,7 @@ class SASRecQueryEncoder(torch.nn.Module):
         self.item_encoder = item_encoder
         self.bidirectional = bidirectional
         self.training_pooling_type = training_pooling_type
-        self.eval_pooling_type = eval_pooling_type 
+        self.eval_pooling_type = eval_pooling_type
         self.position_emb = torch.nn.Embedding(max_seq_len, embed_dim)
         transformer_encoder = torch.nn.TransformerEncoderLayer(
             d_model=embed_dim,
@@ -82,27 +82,28 @@ class SASRec(basemodel.BaseRetriever):
         - ``layer_norm_eps``: The layer norm epsilon in transformer. Default: ``1e-12``.
     """
 
-    def add_model_specific_args(parent_parser):
-        parent_parser = basemodel.Recommender.add_model_specific_args(parent_parser)
-        parent_parser.add_argument_group('SASRec')
-        parent_parser.add_argument("--hidden_size", type=int, default=128, help='hidden size of feedforward')
-        parent_parser.add_argument("--layer_num", type=int, default=2, help='layer num of transformers')
-        parent_parser.add_argument("--head_num", type=int, default=2, help='head num of multi-head attention')
-        parent_parser.add_argument("--dropout_rate", type=float, default=0.5, help='dropout rate')
-        parent_parser.add_argument("--negative_count", type=int, default=1, help='negative sampling numbers')
-        return parent_parser
+    # def add_model_specific_args(parent_parser):
+    #     parent_parser = basemodel.Recommender.add_model_specific_args(parent_parser)
+    #     parent_parser.add_argument_group('SASRec')
+    #     parent_parser.add_argument("--hidden_size", type=int, default=128, help='hidden size of feedforward')
+    #     parent_parser.add_argument("--layer_num", type=int, default=2, help='layer num of transformers')
+    #     parent_parser.add_argument("--head_num", type=int, default=2, help='head num of multi-head attention')
+    #     parent_parser.add_argument("--dropout_rate", type=float, default=0.5, help='dropout rate')
+    #     parent_parser.add_argument("--negative_count", type=int, default=1, help='negative sampling numbers')
+    #     return parent_parser
 
     def _get_dataset_class():
         r"""SeqDataset is used for SASRec."""
         return dataset.SeqDataset
 
     def _get_query_encoder(self, train_data):
+        model_config = self.config['model']
         return SASRecQueryEncoder(
             fiid=self.fiid, embed_dim=self.embed_dim,
-            max_seq_len=train_data.config['max_seq_len'], n_head=self.config['head_num'],
-            hidden_size=self.config['hidden_size'], dropout=self.config['dropout_rate'],
-            activation=self.config['activation'], layer_norm_eps=self.config['layer_norm_eps'],
-            n_layer=self.config['layer_num'],
+            max_seq_len=train_data.config['max_seq_len'], n_head=model_config['head_num'],
+            hidden_size=model_config['hidden_size'], dropout=model_config['dropout_rate'],
+            activation=model_config['activation'], layer_norm_eps=model_config['layer_norm_eps'],
+            n_layer=model_config['layer_num'],
             item_encoder=self.item_encoder
         )
 

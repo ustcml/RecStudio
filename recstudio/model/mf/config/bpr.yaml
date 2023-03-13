@@ -1,2 +1,3 @@
-negative_count: 1
-excluding_hist: False
+train:
+    negative_count: 1
+    excluding_hist: False

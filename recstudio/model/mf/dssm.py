@@ -1,7 +1,7 @@
 from collections import OrderedDict
 
 import torch
-from recstudio.data import MFDataset
+from recstudio.data import TripletDataset
 
 from .. import basemodel, loss_func, scorer
 from ..module import LambdaLayer, MLPModule, ctr
@@ -23,7 +23,7 @@ class DSSM(basemodel.BaseRetriever):
         data.use_field = data.field
 
     def _get_dataset_class():
-        return MFDataset
+        return TripletDataset
 
     def _get_query_encoder(self, train_data):
         if len(self.query_fields) == 1 and list(self.query_fields)[0] == self.fuid:
@@ -35,10 +35,11 @@ class DSSM(basemodel.BaseRetriever):
                 data=train_data,
                 embed_dim=self.embed_dim)
             mlp_input_dim = embedding.num_features * self.embed_dim
+        model_config = self.config['model']
         mlp = MLPModule(
-            [mlp_input_dim] + self.config['mlp_layer'],
-            dropout=self.config['dropout'], activation_func=self.config['activation'],
-            batch_norm=self.config['batch_norm'])
+            [mlp_input_dim] + model_config['mlp_layer'],
+            dropout=model_config['dropout'], activation_func=model_config['activation'],
+            batch_norm=model_config['batch_norm'])
         return torch.nn.Sequential(
             OrderedDict(
                 {'embedding': embedding,
@@ -59,11 +60,12 @@ class DSSM(basemodel.BaseRetriever):
             mlp_input_dim = embedding.num_features * self.embed_dim
             flatten_layer = LambdaLayer(lambda x: x.view(*x.shape[: -2], -1))
 
+        model_config = self.config['model']
         mlp = MLPModule(
-            [mlp_input_dim] + self.config['mlp_layer'],
-            activation_func=self.config['activation'],
-            dropout=self.config['dropout'],
-            batch_norm=self.config['batch_norm'])
+            [mlp_input_dim] + model_config['mlp_layer'],
+            activation_func = model_config['activation'],
+            dropout = model_config['dropout'],
+            batch_norm = model_config['batch_norm'])
         return torch.nn.Sequential(
             OrderedDict(
                 {'embedding': embedding,

@@ -54,8 +54,8 @@ class HGN(basemodel.BaseRetriever):
         return dataset.SeqDataset
 
     def _get_query_encoder(self, train_data):
-        return HGNQueryEncoder(self.fuid, self.fiid, train_data.num_users, self.embed_dim,
-                               train_data.config['max_seq_len'], self.item_encoder, self.config['pooling_type'])
+        return HGNQueryEncoder(self.fuid, self.fiid, train_data.num_users, self.embed_dim, train_data.config['max_seq_len'],
+                               self.item_encoder, self.config['model']['pooling_type'])
 
     def _get_scorer_func(self):
         return scorer.InnerProductScorer()
