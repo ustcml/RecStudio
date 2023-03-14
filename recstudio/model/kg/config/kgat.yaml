@@ -1,0 +1,13 @@
+train:
+  batch_size: 2048
+  negative_count: 1
+  weight_decay: 1e-6
+
+
+model:
+  embed_dim: 64
+  alg_type: bi
+  pro_embed_dim: 64
+  layer_size: [64, 16]
+  mess_dropout: [0.1, 0.1]
+  n_fold: 100

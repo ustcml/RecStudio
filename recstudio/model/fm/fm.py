@@ -25,7 +25,7 @@ class FM(BaseRanker):
     def score(self, batch):
         fm_score = self.fm(batch)
         lr_score = self.linear(batch)
-        return fm_score + lr_score
+        return {'score' : fm_score + lr_score}
 
     def _get_loss_func(self):
         return loss_func.BCEWithLogitLoss()

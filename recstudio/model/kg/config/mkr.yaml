@@ -1,0 +1,13 @@
+
+train:
+  negative_count: 1
+  weight_decay: 1e-6
+
+model:
+# learning_rate_kg: 0.001
+  embed_dim: 64
+  kge_interval: 3
+  use_inner_product: True
+  dropout: 0.0
+  L: 1
+  H: 1

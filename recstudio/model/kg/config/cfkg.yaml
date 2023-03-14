@@ -1,0 +1,7 @@
+
+train:
+  negative_count: 1
+
+model:
+  embed_dim: 64
+  margin: 1.0

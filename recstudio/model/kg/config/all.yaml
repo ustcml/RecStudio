@@ -1,0 +1,2 @@
+data:
+  kg_network_index: 1  # the index of the knowledge graph network in the dataset configuration file. 

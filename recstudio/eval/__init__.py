@@ -170,6 +170,7 @@ def auc(pred, target, thres=None):
     """
     if thres is not None:
         target = target > thres
+    target = target.type(torch.long)
     return M.auroc(pred, target, task='binary')
 
 

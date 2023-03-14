@@ -1,0 +1,18 @@
+
+data:
+  fmeval: True
+  low_rating_thres: 0.0
+  binarized_rating_thres: 3.0
+
+eval:
+  val_metrics: [auc, logloss]
+  test_metrics: [auc, logloss]
+
+train:
+  embed_dim: 64
+  weight_decay: 1e-7
+
+model:
+  neighbor_sample_size: 4
+  n_iter: 2
+  aggregator_type: sum 

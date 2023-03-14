@@ -1,0 +1,9 @@
+
+train:
+  negative_count: 1
+  weight_decay: 0.000001
+
+model: 
+  embed_dim: 150
+  pro_embed_dim: 150
+  normalize: True

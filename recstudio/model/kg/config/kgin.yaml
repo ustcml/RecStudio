@@ -1,0 +1,15 @@
+train:
+  negative_count: 1
+  learning_rate: 0.0001
+
+model:
+  embed_dim: 64
+  num_factors: 4
+  l2_reg: 1e-5
+  sim_regularity: 1e-4
+  intents_indep: distance 
+  num_layers: 2
+
+  # dropout
+  node_dropout: 0.2
+  mess_dropout: 0.1

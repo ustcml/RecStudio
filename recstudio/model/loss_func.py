@@ -143,7 +143,7 @@ class HingeLoss(PairwiseLoss):
         self.margin = margin
         self.n_items = num_items
 
-    def forward(self, label, pos_score, log_pos_prob, neg_score, neg_prob):
+    def forward(self, label, pos_score, log_pos_prob, neg_score, log_neg_prob):
         loss = torch.maximum(torch.max(neg_score, dim=-1).values - pos_score +
                              self.margin, torch.tensor([0]).type_as(pos_score))
         if self.n_items is not None:

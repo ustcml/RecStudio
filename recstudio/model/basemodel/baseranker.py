@@ -74,27 +74,25 @@ class BaseRanker(Recommender):
     def forward(self, batch):
         # calculate scores
         if self.retriever is None:
-            score = self.score(batch)
-            if isinstance(score, Dict):
-                score = score['score']['pos_score']
-            return {'pos_score': score, 'label': batch[self.frating]}
+            output = self.score(batch)
+            return {'pos_score': output['score'], 'label': batch[self.frating]}, output
         else:
             # only positive samples in batch
             assert self.neg_count is not None, 'expecting neg_count is not None.'
-            pos_score = self.score(batch).view(-1, 1)
+            pos_output = self.score(batch)
             pos_prob, neg_item_idx, neg_prob = self.retriever.sampling(
                 batch, self.neg_count, method=self.config['train']['sampling_method'])
-            #
-            neg_score = self.score_multi(batch, neg_item_idx)
-            return {'pos_score': pos_score, 'log_pos_prob': pos_prob, 'neg_score': neg_score,
-                    'log_neg_prob': neg_prob, 'label': batch[self.frating]}
+            # 
+            neg_output = self.score_multi(batch, neg_item_idx) # neg_item_idx: [batch_size, neg], score: [batch_size * neg]
+            return {'pos_score': pos_output['score'], 'log_pos_prob': pos_prob, 'neg_score': neg_output['score'].view(-1, self.neg_count),
+                    'log_neg_prob': neg_prob, 'label': batch[self.frating]}, (pos_output, neg_output)
 
     def score_multi(self, batch, item_ids=None):
         # score for a batch or a batch with different items for each context
         if item_ids is not None:
             neg_batch = self._generate_multi_item_batch(batch, item_ids)
-            num_neg = item_ids.size(-1)
-            return self.score(neg_batch).view(-1, num_neg)
+            num_neg = item_ids.size(-1) 
+            return self.score(neg_batch)
         else:
             return self.score(batch)
 
@@ -107,8 +105,8 @@ class BaseRanker(Recommender):
         raise NotImplementedError("build_index for ranker not implemented now.")
 
     def training_step(self, batch):
-        y_h = self.forward(batch)
-        loss = self.loss_fn(**y_h)
+        y_h, output = self.forward(batch)
+        loss = self.loss_fn(**y_h) # + loss using output
         return loss
 
     def validation_step(self, batch):
@@ -135,7 +133,7 @@ class BaseRanker(Recommender):
             raise NotImplementedError("`topk` function not supported for ranker without retriever.")
         else:
             score_re, topk_items_re = retriever.topk(batch, retriever.config['eval']['topk'], user_hist)
-            score = self.score_multi(batch, topk_items_re)
+            score = self.score_multi(batch, topk_items_re)['score'].view(topk_items_re.shape[0], -1) # [batch, topk]
             assert topk <= retriever.config['eval']['topk'], '`topk` of ranker must be smaller than the retriever.'
             scores, _idx = torch.topk(score, topk, dim=-1)
             topk_items = torch.gather(topk_items_re, -1, _idx)
@@ -153,7 +151,7 @@ class BaseRanker(Recommender):
         # TODO: discuss in which cases pred_metrics should be calculated. According to whether there are neg labels in dataset?
         # When there are neg labels in dataset, should rank_metrics be considered?
         if self.retriever is None:
-            result = self.forward(batch)
+            result, _ = self.forward(batch)
             global_m = eval.get_global_metrics(metric)
             metrics = {}
             for n, f in pred_m:

@@ -635,6 +635,7 @@ class Recommender(torch.nn.Module, abc.ABC):
                     output_list.append(outputs)
         return output_list
 
+    @torch.no_grad()
     def validation_epoch(self, nepoch, dataloader):
         if hasattr(self, '_update_item_vector'):
             self._update_item_vector()
@@ -651,6 +652,7 @@ class Recommender(torch.nn.Module, abc.ABC):
 
         return output_list
 
+    @torch.no_grad()
     def test_epoch(self, dataloader):
         if hasattr(self, '_update_item_vector'):
             self._update_item_vector()
