@@ -12,7 +12,7 @@
   <br>
 </p>
 
-RecStudio is a unified, highly-modularized and recommendation-efficient recommendation library based on PyTorch. All the algorithms are 
+RecStudio is a unified, highly-modularized and recommendation-efficient recommendation library based on PyTorch. All the algorithms are
 categorized as follows according to recommendation tasks.
 - General Recommendation
 - Sequential Recommendation
@@ -36,8 +36,8 @@ For the dataset structure, the datasets are divided into five categories:
 
 |Dataset    |Application   | Examples  |
 |-----------|-----------|----------|
-|MFDataset|Dataset for providing user-item-rating triplet|BPR, NCF, CML et al.|
-|AEDataset|Dataset for AutoEncoder-based ItemTowerRecommender|MultiVAE, RecVAE, et al.|
+|TripletDataset|Dataset for providing user-item-rating triplet|BPR, NCF, CML et al.|
+|UserDataset|Dataset for AutoEncoder-based ItemTowerRecommender|MultiVAE, RecVAE, et al.|
 |SeqDataset|Dataset for Sequential recommenders with Causal Prediction|GRU4Rec, SASRec, et al.|
 |Seq2SeqDataset|Dataset for Sequential recommenders with Masked Prediction|Bert4Rec, et al.|
 |ALSDataset|Dataset for recommenders optimized by alternating least square |WRMF, et al.|
@@ -60,13 +60,13 @@ team. Static samplers consist of `Uniform Sampler` and `Popularity Sampler`. The
 
 In RecStudio, loss functions are categorized into three types:
     - `FullScoreLoss`: Calculating scores on the whole items, such as `SoftmaxLoss`.
-    - `PairwiseLoss`: Calculating scores on positive and negative items, such as `BPRLoss`, 
+    - `PairwiseLoss`: Calculating scores on positive and negative items, such as `BPRLoss`,
     `BinaryCrossEntropyLoss`, et al.
     - `PointwiseLoss`: Calculating scores for a single (user, item) interaction, such as `HingeLoss`.
 
-Score functions are used to model users' preference on items. Various common score functions are 
+Score functions are used to model users' preference on items. Various common score functions are
 implemented in RecStudio, such as `InnerProduct`, `EuclideanDistance`, `CosineDistance`, `MLPScorer`,
-et al. 
+et al.
 
 | Loss | Math Type | Sampling Distribution | Calculation Complexity | Sampling Complexity | Convergence Speed | Related Metrics |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -90,7 +90,7 @@ et al.
 
 - **General Dataset Structure** A unified dataset config based on atomic data files and automatic data cache
 are supported in RecStudio.
-- **Modular Model Structure** By organizing the whole recommender into different modules, loss functions, scoring 
+- **Modular Model Structure** By organizing the whole recommender into different modules, loss functions, scoring
 functions, samplers and ANNs, you can customize your model like building blocks.
 - **GPU Acceleration** The whole operation from model training to model evaluation could be easily moved to
 on GPUs and distributed GPUs for running.
@@ -145,13 +145,13 @@ use_fields=['user_id', 'item_id', 'rating']
 [2022-04-11 14:30:30] INFO (pytorch_lightning.utilities.distributed/MainThread) TPU available: False, using: 0 TPU cores
 [2022-04-11 14:30:30] INFO (pytorch_lightning.utilities.distributed/MainThread) IPU available: False, using: 0 IPUs
 [2022-04-11 14:30:30] INFO (pytorch_lightning.utilities.distributed/MainThread) The following callbacks returned in `LightningModule.configure_callbacks` will override existing callbacks passed to Trainer: ModelCheckpoint
-[2022-04-11 14:30:30] INFO (pytorch_lightning.core.lightning/MainThread) 
+[2022-04-11 14:30:30] INFO (pytorch_lightning.core.lightning/MainThread)
   | Name         | Type               | Params
 ----------------------------------------------------
-0 | loss_fn      | BPRLoss            | 0     
-1 | score_func   | InnerProductScorer | 0     
-2 | item_encoder | Embedding          | 107 K 
-3 | sampler      | UniformSampler     | 0     
+0 | loss_fn      | BPRLoss            | 0
+1 | score_func   | InnerProductScorer | 0
+2 | item_encoder | Embedding          | 107 K
+3 | sampler      | UniformSampler     | 0
 4 | user_encoder | Embedding          | 60.4 K
 ----------------------------------------------------
 168 K     Trainable params
@@ -173,7 +173,7 @@ use_fields=['user_id', 'item_id', 'rating']
 
 If you want to change models or datasets, command line is ready for you.
 ```bash
-python run.py -m=NCF -d=ml-1m 
+python run.py -m=NCF -d=ml-1m
 ```
 
 - Supported command line arguments:
@@ -207,8 +207,8 @@ python run.py -m=NCF -d=ml-1m
   |--split_mode|str|split methods for the dataset|user_entry|['user','entry','user_entry']|
 
 Here are some details of some unclear arguments.
-  > 1. `mode`: in `light` mode and `detail` mode, the output will displayed on the terminal, while 
-  the latter provide more detailed info. `tune` mode will use Neural Network Intelligence(NNI) to show 
+  > 1. `mode`: in `light` mode and `detail` mode, the output will displayed on the terminal, while
+  the latter provide more detailed info. `tune` mode will use Neural Network Intelligence(NNI) to show
   a beautiful visual interface. You can run `tune.sh` with a config file like `config.yaml`. For
   more details about NNI, please refer to [NNI Documentation](https://nni.readthedocs.io/zh/stable/).
   > 2. `sampler`: `uniform` stands for UniformSampler is used. `popularity` stands for sampling according
@@ -218,7 +218,7 @@ Here are some details of some unclear arguments.
   [PRIS](https://dl.acm.org/doi/10.1145/3366423.3380187) for more details.
   > 3. `split_mode`: `user` means splitting all users into train/valid/test datasets, users in
   those datasets are disjoint. `entry` means spliting all the interactions in those three dataset.
-  `user_entry` means spliting interaction of each user into three parts. 
+  `user_entry` means spliting interaction of each user into three parts.
 
 
 Also, you can install RecStudio from PyPi:

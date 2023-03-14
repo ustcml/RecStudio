@@ -24,6 +24,7 @@ class NPE(basemodel.BaseRetriever):
         return dataset.SeqDataset
 
     def _get_query_encoder(self, train_data):
+        dropout_rate = self.config['model']['dropout_rate']
         return torch.nn.Sequential(
             module.HStackLayer(
                 torch.nn.Sequential(
@@ -31,13 +32,13 @@ class NPE(basemodel.BaseRetriever):
                     self.item_encoder[0],
                     module.LambdaLayer(lambda x: torch.sum(x, dim=1)),
                     torch.nn.ReLU(),
-                    torch.nn.Dropout(p=self.config['dropout_rate'])
+                    torch.nn.Dropout(p=dropout_rate)
                 ),
                 torch.nn.Sequential(
                     module.LambdaLayer(lambda x: x[self.fuid]),
                     torch.nn.Embedding(train_data.num_users, self.embed_dim, 0),
                     torch.nn.ReLU(),
-                    torch.nn.Dropout(p=self.config['dropout_rate'])
+                    torch.nn.Dropout(p=dropout_rate)
                 )
             ),
             module.LambdaLayer(lambda x: x[0]+x[1])

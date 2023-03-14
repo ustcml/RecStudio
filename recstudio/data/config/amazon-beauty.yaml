@@ -18,14 +18,11 @@ item_feat_name: ~
 item_feat_field: ~
 item_feat_header: ~
 
-use_fields: ~  # TODO:
 field_separator: ","
 min_user_inter: 5
 min_item_inter: 5
 field_max_len: ~
-rating_threshold: ~
-ranker_rating_threshold: 3
-drop_low_rating: ~
+low_rating_threshold: 3.0
 max_seq_len: 50
 
 # network feature, including social network and knowledge graph, the first two fields are remapped the corresponding features

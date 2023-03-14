@@ -15,7 +15,7 @@ class LogisticMF(basemodel.BaseRetriever):
 
 
     def _get_dataset_class():
-        return dataset.MFDataset
+        return dataset.TripletDataset
 
     def _get_item_encoder(self, train_data):
         return torch.nn.Embedding(train_data.num_items, self.embed_dim, padding_idx=0)
@@ -38,7 +38,7 @@ class LogisticMF(basemodel.BaseRetriever):
                 loss = (l1 - l2).mean()
                 return -loss
 
-        return LogitLoss(self.config['alpha'])
+        return LogitLoss(self.config['train']['alpha'])
 
 
     def _get_sampler(self, train_data):

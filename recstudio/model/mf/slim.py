@@ -19,12 +19,13 @@ class SLIM(EASE):
         return parent_parser
 
     def training_epoch(self, nepoch):
+        train_config = self.config['train']
         data, iscombine = self.current_epoch_trainloaders(nepoch)
         X = data['user_item_matrix'].tolil()
         model = ElasticNet(
-            alpha=self.config.get('alpha'),
-            l1_ratio=self.config.get('l1_ratio'),
-            positive=self.config.get('positive_only'),
+            alpha=train_config.get('alpha', 1),
+            l1_ratio=train_config.get('l1_ratio', 0.1),
+            positive=train_config.get('positive_only', True),
             fit_intercept=False,
             copy_X=False,
             precompute=True,

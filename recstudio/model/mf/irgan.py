@@ -59,22 +59,24 @@ class IRGAN(basemodel.BaseRetriever):
     def _get_sampler(self, train_data):
         return sampler.RetrieverSampler(
             train_data.num_items, method='brute',
-            retriever=self.generator, t=self.config['T_dis'])
+            retriever=self.generator, t=self.config['model']['T_dis'])
 
     def _get_optimizers(self):
+        config = self.config['train']
         opt_d = optim.Adam(
             self._dis_parameters(),
-            lr=self.config['learning_rate_dis'],
-            weight_decay=self.config['weight_decay_dis'])
+            lr=config['learning_rate_dis'],
+            weight_decay=config['weight_decay_dis'])
         opt_g = optim.Adam(
             self.generator.parameters(),
-            lr=self.config['learning_rate_gen'],
-            weight_decay=self.config['weight_decay_gen'])
+            lr=config['learning_rate_gen'],
+            weight_decay=config['weight_decay_gen'])
         return [{'optimizer': opt_d}, {'optimizer': opt_g}]
 
     def current_epoch_optimizers(self, nepoch):
-        epochs_per_cycle = self.config['every_n_epoch_gen'] + self.config['every_n_epoch_dis']
-        if (nepoch % epochs_per_cycle) < self.config['every_n_epoch_dis']:
+        config = self.config['train']
+        epochs_per_cycle = config['every_n_epoch_gen'] + config['every_n_epoch_dis']
+        if (nepoch % epochs_per_cycle) < config['every_n_epoch_dis']:
             return self.optimizers[:1]
         else:
             return self.optimizers[1:]
@@ -92,8 +94,9 @@ class IRGAN(basemodel.BaseRetriever):
                 yield param
 
     def training_step(self, batch, nepoch):
-        epochs_per_cycle = self.config['every_n_epoch_gen'] + self.config['every_n_epoch_dis']
-        if (nepoch % epochs_per_cycle) < self.config['every_n_epoch_dis']:
+        config = self.config['train']
+        epochs_per_cycle = config['every_n_epoch_gen'] + config['every_n_epoch_dis']
+        if (nepoch % epochs_per_cycle) < config['every_n_epoch_dis']:
             loss = super().training_step(batch)
             return {'loss': loss, 'd_loss': loss.detach()}
         else:
@@ -130,14 +133,14 @@ class Generator(basemodel.BaseRetriever):
         return loss
 
     def forward(self, query, num_neg, pos_items):
-        logit = self.score_func(query, self._get_item_vector()) / self.config['T_gen']
+        logit = self.score_func(query, self._get_item_vector()) / self.config['model']['T_gen']
         prob = F.pad(logit.softmax(dim=-1), (1, 0))
 
         mask = (pos_items > 0).int()
         num_pos = mask.sum(dim=-1, keepdim=True)
-        prob_with_imp_sampling = prob * (1 - self.config['sample_lambda'])
+        prob_with_imp_sampling = prob * (1 - self.config['model']['sample_lambda'])
         prob_with_imp_sampling.scatter_(1, pos_items, prob_with_imp_sampling.gather(
-            1, pos_items) + self.config['sample_lambda'] / num_pos)
+            1, pos_items) + self.config['model']['sample_lambda'] / num_pos)
         prob_with_imp_sampling[:, 0] = 0.0
         neg_items = torch.multinomial(
             prob_with_imp_sampling, num_neg * pos_items.size(-1),

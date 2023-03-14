@@ -7,7 +7,7 @@ import sys
 sys.path.append(".")
 
 
-ml_1m_data = dataset.MFDataset(name='ml-100k')
+ml_1m_data = dataset.TripletDataset(name='ml-100k')
 trn, val, tst = ml_1m_data.build(split_ratio=[0.7, 0.2, 0.1])
 
 bpr = BaseRetriever(

@@ -1,4 +1,5 @@
-embed_dim: 64
-negative_count: 1
-pooling_type: mean
-negative_count: 1
+model:
+  pooling_type: mean
+
+train:
+  negative_count: 1

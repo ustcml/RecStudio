@@ -66,12 +66,13 @@ class NARM(basemodel.BaseRetriever):
         return dataset.SeqDataset
 
     def _get_query_encoder(self, train_data):
+        model_config = self.config['model']
         return NARMQueryEncoder(
             fiid=self.fiid,
-            embed_dim=self.config['embed_dim'],
-            hidden_size=self.config['hidden_size'],
-            layer_num=self.config['layer_num'],
-            dropout_rate=self.config['dropout_rate'],
+            embed_dim=self.embed_dim,
+            hidden_size=model_config['hidden_size'],
+            layer_num=model_config['layer_num'],
+            dropout_rate=model_config['dropout_rate'],
             item_encoder=self.item_encoder
         )
 

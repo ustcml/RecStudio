@@ -44,7 +44,7 @@ class CML(basemodel.BaseRetriever):
                     return torch.mean(loss * torch.log(rank + 1))
                 else:
                     return torch.mean(loss)
-        return CMLoss(self.config['margin'], self.config['use_rank_weight'], train_data.num_items)
+        return CMLoss(self.config['model']['margin'], self.config['model']['use_rank_weight'], train_data.num_items)
 
 
     def _get_sampler(self, train_data):
