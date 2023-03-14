@@ -34,7 +34,7 @@ class CFKG(basemodel.BaseRetriever):
     in the original paper, they are all sampled from user-item knowledge graph.
     """
     def __init__(self, config):
-        self.kg_index = config['kg_network_index']
+        self.kg_index = config['data']['kg_network_index']
         super().__init__(config)
 
     def _init_model(self, train_data):
@@ -51,19 +51,17 @@ class CFKG(basemodel.BaseRetriever):
 
 
     def _get_dataset_class():
-        return dataset.MFDataset
+        return dataset.TripletDataset
     
-    def _set_data_field(self, data : dataset.MFDataset):
+    def _set_data_field(self, data : dataset.TripletDataset):
         fhid = data.get_network_field(self.kg_index, 0, 0)
         ftid = data.get_network_field(self.kg_index, 0, 1)
         frid = data.get_network_field(self.kg_index, 0, 2)
         data.use_field = set([data.fuid, data.fiid, data.frating, fhid, frid, ftid])
 
-    def _get_train_loaders(self, train_data: dataset.MFDataset):
-        rec_loader = train_data.train_loader(batch_size = self.config['batch_size'], shuffle = True, \
-            num_workers = self.config['num_workers'], drop_last = False)
-        kg_loader = train_data.network_feat[self.config['kg_network_index']].loader(batch_size = self.config['batch_size'], shuffle = True, \
-            num_workers = self.config['num_workers'], drop_last = False)
+    def _get_train_loaders(self, train_data: dataset.TripletDataset):
+        rec_loader = train_data.train_loader(batch_size = self.config['train']['batch_size'], shuffle = True, drop_last = False)
+        kg_loader = train_data.network_feat[self.kg_index].loader(batch_size = self.config['train']['batch_size'], shuffle = True, drop_last = False)
         return [rec_loader, kg_loader]
     
     def current_epoch_trainloaders(self, nepoch):
@@ -73,12 +71,12 @@ class CFKG(basemodel.BaseRetriever):
         return scorer.NormScorer(p=2)
 
     def _get_loss_func(self):
-        return loss_func.HingeLoss(self.config['margin'])
+        return loss_func.HingeLoss(self.config['model']['margin'])
 
-    def _get_item_encoder(self, train_data : dataset.MFDataset):
+    def _get_item_encoder(self, train_data : dataset.TripletDataset):
         return torch.nn.Embedding(train_data.num_values(train_data.get_network_field(self.kg_index, 0, 0)), self.embed_dim, padding_idx=0)
 
-    def _get_query_encoder(self, train_data : dataset.MFDataset):
+    def _get_query_encoder(self, train_data : dataset.TripletDataset):
         return CFKGQueryEncoder(train_data, self.embed_dim, self.rel_emb, self.fuid)
 
     def _get_neg_emb(self, query, pos_id):

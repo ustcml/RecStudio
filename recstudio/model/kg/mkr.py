@@ -18,9 +18,9 @@ class MKR_kg_scorer(scorer.InnerProductScorer):
 class MKRKGTower(basemodel.BaseRetriever):
     def __init__(self, config):
         super().__init__(config)
-        self.L = config['L']
-        self.H = config['H']
-        self.kg_network_index = config['kg_network_index']
+        self.L = config['model']['L']
+        self.H = config['model']['H']
+        self.kg_network_index = config['data']['kg_network_index']
         self.item_emb = None
         self.featInterLayers = None
 
@@ -98,12 +98,12 @@ class MKR(basemodel.BaseRetriever):
     which automatically share latent features and learn high-order interactions between items in recommender systems and entities in the knowledge graph.
     """
     def __init__(self, config):
-        self.use_inner_product = config['use_inner_product']
-        self.L = config['L']
-        self.H = config['H']
-        self.dropout = config['dropout']
-        self.kge_interval = config['kge_interval']
-        self.kg_network_index = config['kg_network_index']
+        self.use_inner_product = config['model']['use_inner_product']
+        self.L = config['model']['L']
+        self.H = config['model']['H']
+        self.dropout = config['model']['dropout']
+        self.kge_interval = config['model']['kge_interval']
+        self.kg_network_index = config['data']['kg_network_index']
         super().__init__(config)
 
     def _init_model(self, train_data):
@@ -120,7 +120,7 @@ class MKR(basemodel.BaseRetriever):
         super()._init_model(train_data)
 
     def _get_dataset_class():
-        return dataset.MFDataset
+        return dataset.TripletDataset
     
     def _set_data_field(self, data):
         fhid = data.get_network_field(self.kg_network_index, 0, 0)
@@ -134,11 +134,11 @@ class MKR(basemodel.BaseRetriever):
         else:
             return self.trainloaders[0], False
 
-    def _get_train_loaders(self, train_data : dataset.MFDataset):
-        rec_loader = train_data.train_loader(batch_size = self.config['batch_size'], shuffle = True, \
-            num_workers = self.config['num_workers'], drop_last = False)
-        kg_loader = train_data.network_feat[self.kg_network_index].loader(batch_size = self.config['batch_size'], shuffle = True, \
-            num_workers = self.config['num_workers'], drop_last = False)
+    def _get_train_loaders(self, train_data : dataset.TripletDataset):
+        rec_loader = train_data.train_loader(batch_size = self.config['train']['batch_size'], shuffle = True, 
+                                            drop_last = False)
+        kg_loader = train_data.network_feat[self.kg_network_index].loader(batch_size = self.config['train']['batch_size'], shuffle = True,
+                                                                        drop_last = False)
         return [rec_loader, kg_loader]
 
     def _get_loss_func(self):

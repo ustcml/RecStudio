@@ -19,15 +19,15 @@ class RippleNet(basemodel.BaseRanker):
     for tail entities in the corresponding triplet. And then user's representation in the h-th layer is be calculated with the weighted average of tail entity embeddings. 
     """
     def __init__(self, config):
-        self.kg_index = config['kg_network_index']
-        self.n_hop = config['n_hop']
-        self.n_memory = config['n_memory']
-        self.item_update_mode  = config['item_update_mode']
-        self.using_all_hops = config['using_all_hops']
-        self.kge_weight = config['kge_weight']
+        self.kg_index = config['data']['kg_network_index']
+        self.n_hop = config['model']['n_hop']
+        self.n_memory = config['model']['n_memory']
+        self.item_update_mode  = config['model']['item_update_mode']
+        self.using_all_hops = config['model']['using_all_hops']
+        self.kge_weight = config['model']['kge_weight']
         super().__init__(config)
     
-    def _init_model(self, train_data: dataset.MFDataset):
+    def _init_model(self, train_data: dataset.TripletDataset):
         super()._init_model(train_data)
         
         # rec field
@@ -57,7 +57,7 @@ class RippleNet(basemodel.BaseRanker):
             self.transform_matrix = nn.Linear(self.embed_dim, self.embed_dim, bias=False)
         
     def _get_dataset_class():
-        return dataset.MFDataset
+        return dataset.TripletDataset
     
     def _set_data_field(self, data):
         fhid = data.get_network_field(self.kg_index, 0, 0)
@@ -71,7 +71,7 @@ class RippleNet(basemodel.BaseRanker):
     def _construct_user_hist(self, inter_feat):
         user_history_dict = collections.defaultdict(list)
         for i in range(len(inter_feat[self.fuid])):
-            if inter_feat[self.frating][i] > 3: 
+            if inter_feat[self.frating][i] > 0: 
                 user = inter_feat[self.fuid][i].item()
                 item = inter_feat[self.fiid][i].item()
                 user_history_dict[user].append(item)

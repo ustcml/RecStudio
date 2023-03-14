@@ -106,11 +106,11 @@ class KGCN(basemodel.BaseRanker):
     This way we transform the knowledge graph into a user-specific weighted graph and then apply a graph neural network to compute personalized item embeddings.
     """
     def __init__(self, config):
-        self.kg_index = config['kg_network_index']
-        self.n_iter = config['n_iter']
-        self.neighbor_sample_size = config['neighbor_sample_size']
+        self.kg_index = config['data']['kg_network_index']
+        self.n_iter = config['model']['n_iter']
+        self.neighbor_sample_size = config['model']['neighbor_sample_size']
         self.n_neighbor = self.neighbor_sample_size
-        self.aggregator_type = config['aggregator_type']
+        self.aggregator_type = config['model']['aggregator_type']
         super().__init__(config)
 
     def _init_model(self, train_data):
@@ -125,13 +125,13 @@ class KGCN(basemodel.BaseRanker):
         self.ent_emb = nn.Embedding(self.num_entities, self.embed_dim, padding_idx=0)
         self.rel_emb = nn.Embedding(train_data.num_values(self.frid), self.embed_dim, padding_idx=0)     
         
-        self.item_encoder = KGCNItemEncoder(self.ent_emb, self.rel_emb, self.config)
+        self.item_encoder = KGCNItemEncoder(self.ent_emb, self.rel_emb, self.config['model'])
         self.score_func = scorer.InnerProductScorer()
         
         super()._init_model(train_data)
         
     def _get_dataset_class():
-        return dataset.MFDataset
+        return dataset.TripletDataset
     
     def _set_data_field(self, data):
         fhid = data.get_network_field(self.kg_index, 0, 0)

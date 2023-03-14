@@ -16,9 +16,9 @@ class TransModel(basemodel.Recommender):
     """
     def __init__(self, config):
         super().__init__(config)
-        self.kg_index = config['kg_network_index']
-        self.margin = config.setdefault('margin', 2)
-        self.normalize = config.setdefault('normalize', False)
+        self.kg_index = config['data']['kg_network_index']
+        self.margin = config['model'].setdefault('margin', 2)
+        self.normalize = config['model'].setdefault('normalize', False)
         self.corrupt_head = False
         self.score_func = self._get_score_func()
         
@@ -46,7 +46,7 @@ class TransModel(basemodel.Recommender):
         return scorer.NormScorer(2)
     
     def _get_loss_func(self):
-        return loss_func.HingeLoss(self.config.setdefault('margin', 2))
+        return loss_func.HingeLoss(self.config['model'].setdefault('margin', 2))
 
     def projection_trans(self, entities, relations):
         """
@@ -107,7 +107,7 @@ class TransModel(basemodel.Recommender):
 
 class TransETower(TransModel):
     def __init__(self, config):
-        self.p = config.setdefault('p', 2)
+        self.p = config['model'].setdefault('p', 2)
         super().__init__(config)
 
     def _init_model(self, train_data):
@@ -153,7 +153,7 @@ class TransHTower(TransModel):
 class TransRTower(TransModel):
     def __init__(self, config):
         super().__init__(config)
-        self.pro_embed_dim = self.config['pro_embed_dim']
+        self.pro_embed_dim = self.config['model']['pro_embed_dim']
         
     def _init_model(self, train_data):
         super()._init_model(train_data)
@@ -174,7 +174,7 @@ class TransRTower(TransModel):
 class TransDTower(TransModel):
     def __init__(self, config):
         super().__init__(config)
-        self.pro_embed_dim = self.config['pro_embed_dim']
+        self.pro_embed_dim = self.config['model']['pro_embed_dim']
 
     def _init_model(self, train_data):
         super()._init_model(train_data)

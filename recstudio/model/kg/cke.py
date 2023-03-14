@@ -25,7 +25,7 @@ class CKE(basemodel.BaseRetriever):
     """
     def __init__(self, config):
         super().__init__(config)
-        self.kg_index = config['kg_network_index']
+        self.kg_index = config['data']['kg_network_index']
 
     def _init_model(self, train_data):
         self.item_emb = torch.nn.Embedding(train_data.num_items, self.embed_dim, padding_idx=0)
@@ -35,7 +35,7 @@ class CKE(basemodel.BaseRetriever):
         super()._init_model(train_data)
 
     def _get_dataset_class():
-        return dataset.MFDataset
+        return dataset.TripletDataset
 
     def _set_data_field(self, data):
         self.fhid = data.get_network_field(self.kg_index, 0, 0)
@@ -43,11 +43,9 @@ class CKE(basemodel.BaseRetriever):
         self.ftid = data.get_network_field(self.kg_index, 0, 2)
         data.use_field = set([data.fuid, data.fiid, data.frating, self.fhid, self.frid, self.ftid])
 
-    def _get_train_loaders(self, train_data: dataset.MFDataset) -> List:
-        rec_loader = train_data.train_loader(batch_size = self.config['batch_size'], shuffle = True, \
-            num_workers = self.config['num_workers'], drop_last = False)
-        kg_loader = train_data.network_feat[self.config['kg_network_index']].loader(batch_size = self.config['batch_size'], shuffle = True, \
-            num_workers = self.config['num_workers'], drop_last = False)
+    def _get_train_loaders(self, train_data: dataset.TripletDataset) -> List:
+        rec_loader = train_data.train_loader(batch_size = self.config['train']['batch_size'], shuffle = True, drop_last = False)
+        kg_loader = train_data.network_feat[self.kg_index].loader(batch_size = self.config['train']['batch_size'], shuffle = True, drop_last = False)
         return [rec_loader, kg_loader]
     
     def current_epoch_trainloaders(self, nepoch) -> List:

@@ -74,13 +74,13 @@ class KGAT(basemodel.BaseRetriever):
     """
     def __init__(self, config : dict):
         super().__init__(config)
-        self.kg_index = config['kg_network_index']
-        self.alg_type = config['alg_type']
-        self.mess_dropout = config['mess_dropout']
-        self.weight_size_list = [self.embed_dim] + config['layer_size']
-        self.n_fold = config.setdefault('n_fold')
+        self.kg_index = config['data']['kg_network_index']
+        self.alg_type = config['model']['alg_type']
+        self.mess_dropout = config['model']['mess_dropout']
+        self.weight_size_list = [self.embed_dim] + config['model']['layer_size']
+        self.n_fold = config['model'].setdefault('n_fold')
 
-    def _init_model(self, train_data:dataset.MFDataset):
+    def _init_model(self, train_data:dataset.TripletDataset):
 
         self.fhid = train_data.get_network_field(self.kg_index, 0, 0)
         self.frid = train_data.get_network_field(self.kg_index, 0, 1)
@@ -112,7 +112,7 @@ class KGAT(basemodel.BaseRetriever):
         super()._init_model(train_data)
 
     def _get_dataset_class():
-        return dataset.MFDataset
+        return dataset.TripletDataset
     
     def _set_data_field(self, data):
         fhid = data.get_network_field(self.kg_index, 0, 0)
@@ -120,11 +120,9 @@ class KGAT(basemodel.BaseRetriever):
         ftid = data.get_network_field(self.kg_index, 0, 2)
         data.use_field = {data.fuid, data.fiid, data.frating, fhid, frid, ftid}
 
-    def _get_train_loaders(self, train_data: dataset.MFDataset) -> List:
-        rec_loader = train_data.train_loader(batch_size = self.config['batch_size'], shuffle = True, \
-            num_workers = self.config['num_workers'], drop_last = False)
-        kg_loader = train_data.network_feat[self.kg_index].loader(batch_size = self.config['batch_size'], shuffle = True, \
-            num_workers = self.config['num_workers'], drop_last = False)
+    def _get_train_loaders(self, train_data: dataset.TripletDataset) -> List:
+        rec_loader = train_data.train_loader(batch_size = self.config['train']['batch_size'], shuffle = True, drop_last = False)
+        kg_loader = train_data.network_feat[self.kg_index].loader(batch_size = self.config['train']['batch_size'], shuffle = True, drop_last = False)
         return [rec_loader, kg_loader]
     
     def current_epoch_trainloaders(self, nepoch) -> List:

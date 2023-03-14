@@ -8,7 +8,7 @@ import dgl
 import dgl.function as fn 
 from recstudio.ann import sampler
 from recstudio.model import basemodel, scorer, loss_func
-from recstudio.data.dataset import MFDataset
+from recstudio.data.dataset import TripletDataset
 from recstudio.model.module import graphmodule
 
 class KGINAggregator(torch.nn.Module):
@@ -45,21 +45,21 @@ class KGINGraphConv(torch.nn.Module):
         self.num_entities = num_entities
         self.num_relations = num_relations
 
-        self.num_layers = self.config['num_layers']
-        self.embed_dim = self.config['embed_dim']
-        self.num_factors = self.config['num_factors']     
-        self.intents_indep = self.config['intents_indep']
+        self.num_layers = self.config['model']['num_layers']
+        self.embed_dim = self.config['model']['embed_dim']
+        self.num_factors = self.config['model']['num_factors']     
+        self.intents_indep = self.config['model']['intents_indep']
         self.temperature = 0.2
 
         self.convs = nn.ModuleList()
         for i in range(self.num_layers):
             self.convs.append(KGINAggregator())
 
-        self.disen_weight_att = nn.init.xavier_normal(torch.empty(self.config['num_factors'], self.num_relations))
+        self.disen_weight_att = nn.init.xavier_normal(torch.empty(self.config['model']['num_factors'], self.num_relations))
         self.disen_weight_att = nn.parameter.Parameter(self.disen_weight_att) # [num_factors, num_relations]
 
-        self.node_dropout = graphmodule.EdgeDropout(self.config['node_dropout']) if (self.config['node_dropout'] is not None) else None 
-        self.mess_dropout = torch.nn.Dropout(self.config['mess_dropout']) if (self.config['mess_dropout'] is not None) else None 
+        self.node_dropout = graphmodule.EdgeDropout(self.config['model']['node_dropout']) if (self.config['model']['node_dropout'] is not None) else None 
+        self.mess_dropout = torch.nn.Dropout(self.config['model']['mess_dropout']) if (self.config['model']['mess_dropout'] is not None) else None 
 
     def _cul_cor(self):
         
@@ -96,9 +96,9 @@ class KGINGraphConv(torch.nn.Module):
             loss = loss_func(logits, labels)
             return loss 
         
-        if self.config['intents_indep'] == 'mi':
+        if self.config['model']['intents_indep'] == 'mi':
             return MutualInformation()
-        elif self.config['intents_indep'] == 'cosine':
+        elif self.config['model']['intents_indep'] == 'cosine':
             return CosineSimilarity()
         else:
             cor = 0
@@ -138,9 +138,9 @@ class KGIN(basemodel.BaseRetriever):
     
     def __init__(self, config: Dict = None, **kwargs):
         super().__init__(config, **kwargs)
-        self.kg_index = self.config['kg_network_index']
+        self.kg_index = self.config['data']['kg_network_index']
 
-    def _init_model(self, train_data: MFDataset):
+    def _init_model(self, train_data: TripletDataset):
 
         # dataset property
         self.fhid = train_data.get_network_field(self.kg_index, 0, 0)
@@ -150,7 +150,7 @@ class KGIN(basemodel.BaseRetriever):
         self.num_users = train_data.num_users
         self.num_items = train_data.num_items 
         self.num_entities = train_data.num_values(self.fhid)
-        self.num_factors = self.config['num_factors']
+        self.num_factors = self.config['model']['num_factors']
 
         # graph
         self.interact_mat = self.get_bi_norm_adj_mat(train_data) # [num_users, num_items]
@@ -167,7 +167,7 @@ class KGIN(basemodel.BaseRetriever):
         # graph convolution module
         self.gcn = KGINGraphConv(self.config, self.num_users, self.num_entities, self.num_relations)
 
-    def get_bi_norm_adj_mat(self, train_data: MFDataset):
+    def get_bi_norm_adj_mat(self, train_data: TripletDataset):
         """
         Get a binary normlized adjacency matrix as the author did in source code.
         Get the binary normlized adjacency matrix following the formula:
@@ -196,7 +196,7 @@ class KGIN(basemodel.BaseRetriever):
         return norm_adj
 
     def _get_dataset_class():
-        return MFDataset
+        return TripletDataset
     
     def _set_data_field(self, data):
         fhid = data.get_network_field(self.kg_index, 0, 0)
@@ -238,8 +238,8 @@ class KGIN(basemodel.BaseRetriever):
 
     def training_step(self, batch):
         output = self.forward(batch)
-        loss = self.loss_fn(None, **output['score']) + self.config['l2_reg'] * loss_func.l2_reg_loss_fn(output['query'], output['item']) \
-            + self.config['sim_regularity'] * output['indents_indep_loss']  
+        loss = self.loss_fn(None, **output['score']) + self.config['model']['l2_reg'] * loss_func.l2_reg_loss_fn(output['query'], output['item']) \
+            + self.config['model']['sim_regularity'] * output['indents_indep_loss']  
         return loss
 
     def _get_item_vector(self):

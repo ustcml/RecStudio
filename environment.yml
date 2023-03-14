@@ -129,5 +129,7 @@ dependencies:
   - zstd=1.5.2=ha4553b6_0
   - pip:
     - nvidia-ml-py3==7.352.0
-    - torchmetrics==0.10.2
+    - torchmetrics==0.11.4
+    - pydantic==1.10.6
+    - tabulate==0.9.0
 prefix: /amax/home/haoran/miniconda3/envs/recstudio

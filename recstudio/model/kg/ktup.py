@@ -31,11 +31,11 @@ class KTUP(basemodel.BaseRetriever):
     and a translation-based scorer is used to calculate the score between a user-item pair.
     """
     def __init__(self, config):
-        self.kg_index = config['kg_network_index']
-        self.train_rec_step = config['train_rec_step']
-        self.train_kg_step = config['train_kg_step']
-        self.L1_flag = config['L1_flag']
-        self.use_st_gumbel = config['use_st_gumbel']
+        self.kg_index = config['data']['kg_network_index']
+        self.train_rec_step = config['model']['train_rec_step']
+        self.train_kg_step = config['model']['train_kg_step']
+        self.L1_flag = config['model']['L1_flag']
+        self.use_st_gumbel = config['model']['use_st_gumbel']
         super().__init__(config)
 
     def _init_model(self, train_data):
@@ -62,7 +62,7 @@ class KTUP(basemodel.BaseRetriever):
         self.TransHTower.norm_emb.weight.data = F.normalize(self.TransHTower.norm_emb.weight.data, p=2, dim=-1)
 
     def _get_dataset_class():
-        return dataset.MFDataset
+        return dataset.TripletDataset
     
     def _set_data_field(self, data):
         fhid = data.get_network_field(self.kg_index, 0, 0)
@@ -71,10 +71,8 @@ class KTUP(basemodel.BaseRetriever):
         data.use_field = set([data.fuid, data.fiid, data.frating, fhid, frid, ftid])
 
     def _get_train_loaders(self, train_data, ddp=False) -> List:
-        rec_loader = train_data.train_loader(batch_size = self.config['batch_size'], shuffle = True, \
-            num_workers = self.config['num_workers'], drop_last = False)
-        kg_loader = train_data.network_feat[self.config['kg_network_index']].loader(batch_size = self.config['batch_size'], shuffle = True, \
-            num_workers = self.config['num_workers'], drop_last = False)
+        rec_loader = train_data.train_loader(batch_size = self.config['train']['batch_size'], shuffle = True, drop_last = False)
+        kg_loader = train_data.network_feat[self.kg_index].loader(batch_size = self.config['train']['batch_size'], shuffle = True, drop_last = False)
         return [rec_loader, kg_loader]
 
     def current_epoch_trainloaders(self, nepoch) -> Tuple:

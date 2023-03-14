@@ -109,12 +109,12 @@ class KGNNLS(basemodel.BaseRanker):
     KGNNLS is built upon KGCN. To alleviate the over-fit problem in KGCN, a regularization on edge weights is added into KGNNLS based on label smoothness assumption. 
     """
     def __init__(self, config):
-        self.kg_index = config['kg_network_index']
-        self.n_iter = config['n_iter']
-        self.neighbor_sample_size = config['neighbor_sample_size']
+        self.kg_index = config['data']['kg_network_index']
+        self.n_iter = config['model']['n_iter']
+        self.neighbor_sample_size = config['model']['neighbor_sample_size']
         self.n_neighbor = self.neighbor_sample_size
-        self.aggregator_type = config['aggregator_type']
-        self.ls_weight = config['ls_weight']
+        self.aggregator_type = config['model']['aggregator_type']
+        self.ls_weight = config['model']['ls_weight']
         super().__init__(config)
 
     def _init_model(self, train_data):
@@ -130,7 +130,7 @@ class KGNNLS(basemodel.BaseRanker):
         self.ent_emb = nn.Embedding(train_data.num_values(self.fhid), self.embed_dim, padding_idx=0)
         self.rel_emb = nn.Embedding(train_data.num_values(self.frid), self.embed_dim, padding_idx=0)   
 
-        self.item_encoder = KGNNLSItemEncoder(self.ent_emb, self.rel_emb, self.config)
+        self.item_encoder = KGNNLSItemEncoder(self.ent_emb, self.rel_emb, self.config['model'])
         self.score_func = scorer.InnerProductScorer()
 
         super()._init_model(train_data)
@@ -138,7 +138,7 @@ class KGNNLS(basemodel.BaseRanker):
         self.interaction_table, self.offset = self.get_interaction_table(train_data)  
          
     def _get_dataset_class():
-        return dataset.MFDataset
+        return dataset.TripletDataset
     
     def _set_data_field(self, data):
         fhid = data.get_network_field(self.kg_index, 0, 0)
@@ -209,7 +209,7 @@ class KGNNLS(basemodel.BaseRanker):
         The value of a positive pair is 1.0 and the value of a negative pair is 0.0. 
         
         Args:
-            train_data(MFDataset): to get inter_feat
+            train_data(TripletDataset): to get inter_feat
         Returns:
             interaction_table(dict): key: an integer representing a user-item pair. value: 1.0 or 0.0.
             offset(int): the offset used in the tranformation.  
@@ -217,7 +217,7 @@ class KGNNLS(basemodel.BaseRanker):
         inter_feat = train_data.inter_feat
         users = inter_feat.get_col(self.fuid)[train_data.inter_feat_subset].int()
         items = inter_feat.get_col(self.fiid)[train_data.inter_feat_subset].int()
-        values = (inter_feat.get_col(self.frating)[train_data.inter_feat_subset] > self.rating_threshold).int()
+        values = (inter_feat.get_col(self.frating)[train_data.inter_feat_subset] > self.config['data']['binarized_rating_thres']).int()
         offset = len(str(self.num_entities))
         offset = 10 ** offset 
         keys = (users * offset + items).int().tolist()
