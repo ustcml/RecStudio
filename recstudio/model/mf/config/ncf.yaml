@@ -1,7 +1,9 @@
-activation: relu
-mlp_hidden_size: [128, 64]
-dropout: 0.1
-score_mode: fusion
+model:
+  activation: relu
+  dropout: 0.1
+  mlp_hidden_size: [128, 64]
+  score_mode: fusion
 
-negative_count: 1
-excluding_hist: False
+train:
+  excluding_hist: False
+  negative_count: 1

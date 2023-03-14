@@ -1,1 +1,2 @@
-embed_dim: 64
+model:
+  embed_dim: 64

@@ -1,55 +1,75 @@
-# for training all models
-learning_rate: 0.001
-weight_decay: 0
-learner: adam
-scheduler: ~
-grad_clip_norm: ~
-epochs: 1000
-batch_size: 1024
-num_workers: 0 # please do not use this parameter, slowing down the training process
-gpu: 1
-num_threads: 10
-accelerator: gpu
-seed: 2022
+# This is a configuration file for all models, which could be regarded as an example of
+# configuration file.
 
-# used for training tower-based model
-#ann: {index: 'IVFx,Flat', parameter: ~}  ## 1 HNSWx,Flat; 2 Flat; 3 IVFx,Flat ## {nprobe: 1}  {efSearch: 1}
-ann: ~
+# All the configuration parameters are divided into four groups: data, model, train and eval.
+#   - data: data group contains some parameters related to dataset construction. For example,
+#           `fm_eval` controls whether a sample is one interaction or all interactions for one user
+#           in evaluation.
+#   - model: model group contains some parameters related to the model size (or model architechture).
+#   - train: train group contains parameters for the training procedure, such as epochs, learning rate.
+#   - eval: eval group contains parameters for the evaluation procedure (validation and test), such as
+#           batch size.
 
-sampling_method: none #[none, dns, brute, sir, toprand, top&rand, dns&rand]
-# sampler: ~  # [uniform, popularity, midx_uni, midx_pop, cluster_uni, cluster_pop, retriever_ipts, retriever_dns]
-# negative_count: 1
-# sampling_method: ~
-# sampling_temperature: 1.0
-# excluding_hist: False
-init_method: xavier_normal
-init_range: ~
 
-# the sampler is configured for dataset
-dataset_sampler: ~
-dataset_neg_count: ~
+data:   # params related to dataset
+    binarized_rating_thres: ~ # whether to binarized rating
+    fm_eval: False    # whether to set fm_eval to organize the batch data as one interactions per sample.
 
-negative_count: ~ # negative sample number in training procedure
-excluding_hist: False
+    # the sampler for dataset, only uniform sampler is supported now.
+    neg_count: 0
+    sampler: ~ # [uniform]
+    shuffle: True
+    split_mode: user_entry    # [user, entry, user_entry]
+    split_ratio: [0.8,0.1,0.1]  # list or int type, list type for split by ratio, int type for leave one out
 
-embed_dim: 64
-item_bias: False
 
-# `split_num` is set when the number of items are enormous, which will cause out-of-memory
-# problem. The `split_num` represents that the item vectors should be cut into several parts
-# to calculate scores step by step.
-split_num: ~
+model:
+    embed_dim: 64       # embedding dimension for embedding layers, usually for item and user embeddings
+    item_bias: False    # whether to add item bias
 
-# used for evaluating tower-based model
-eval_batch_size: 128
-val_n_epoch: 1
-split_ratio: [0.8,0.1,0.1]
-test_metrics: [recall, precision, map, ndcg, mrr, hit]
-val_metrics: [ndcg, recall]
-topk: 100
-cutoff: [10, 20, 5]
-early_stop_mode: max
-early_stop_patience: 10
 
-save_path: './saved/'
-tensorboard_path: './tensorboard'
+train:
+    accelerator: gpu    # [cpu, gpu, dp]
+
+    # ann: {index: 'IVFx,Flat', parameter: ~}  ## 1 HNSWx,Flat; 2 Flat; 3 IVFx,Flat ## {nprobe: 1}  {efSearch: 1}
+    ann: ~
+    batch_size: 512
+
+    early_stop_mode: max
+    early_stop_patience: 10
+
+    epochs: 1000
+    gpu: 1
+    grad_clip_norm: ~
+    init_method: xavier_normal  # [xavier_normal, normal]
+    item_batch_size: 1024  # batch size for items to get all item features or get full item scores.
+    learner: adam
+    learning_rate: 0.001
+    num_threads: 10
+
+    # negative sampler configuration in training procedure
+    # `method` describes the retrieving method used to retrieve negative items with a retriever.
+    sampling_method: none    # [none, sir, dns, toprand, top&rand, brute]
+
+    # `sampler` describes the negative sampler used to train models.
+    sampler: uniform    # [uniform, pop, midx-uni, midx-pop, cluster-uni, cluster-pop]
+
+    negative_count: 0   # number of negative items to be sampled
+    excluding_hist: False   # whether to exclude user history in negative sampling
+
+    # learning rate scheduler, refer to https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
+    scheduler: ~    # [onplateau, exponential]
+
+    seed: 2022  # random seed, usually 42 is a magic number
+    weight_decay: 0      # weight decay for the optimizer
+    tensorboard_path: ~
+
+
+eval:
+    batch_size: 128
+    cutoff: [5, 10, 20]
+    val_metrics: [ndcg, recall]
+    val_n_epoch: 1
+    test_metrics: [recall, precision, map, ndcg, mrr, hit]
+    topk: 100
+    save_path: './saved/'

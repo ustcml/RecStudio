@@ -1,6 +1,8 @@
-negative_count: 5
-exculing_hist: False
+train:
+  learning_rate: 0.01
+  negative_count: 5
+  exculing_hist: False
 
-margin: 1
-use_rank_weight: ~
-learning_rate: 0.01
+model:
+  margin: 1
+  use_rank_weight: ~

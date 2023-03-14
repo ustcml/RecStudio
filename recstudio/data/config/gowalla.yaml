@@ -21,12 +21,10 @@ item_feat_header: ~
 use_fields: ~
 field_separator: "\t"
 seq_separator: " "
-min_user_inter: 10
-min_item_inter: 10
+min_user_inter: 5
+min_item_inter: 5
 field_max_len: ~
-rating_threshold: ~
-ranker_rating_threshold: 0
-drop_low_rating: ~
+low_rating_threshold: ~
 max_seq_len: 20
 
 # network feature, including social network and knowledge graph, the first two fields are remapped the corresponding features

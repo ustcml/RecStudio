@@ -1,3 +1,5 @@
-embed_dim: 64
-negative_count: 1
-dropout_rate: 0.3
+model:
+  dropout_rate: 0.3
+
+train:
+  negative_count: 1

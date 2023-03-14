@@ -14,6 +14,7 @@ class ItemKNN(EASE):
 
 
     def training_epoch(self, nepoch):
+        config = self.config['train']
         data, iscombine = self.current_epoch_trainloaders(nepoch)
         R = data['user_item_matrix']
         item_norm = np.sqrt(R.multiply(R).sum(0).A.ravel())
@@ -29,13 +30,13 @@ class ItemKNN(EASE):
             if G.indptr[col] < G.indptr[col+1]:
                 score = G.data[G.indptr[col]:G.indptr[col+1]]
                 rows = G.indices[G.indptr[col]:G.indptr[col+1]]
-                if self.config['similarity'] == 'cosine':
+                if config['similarity'] == 'cosine':
                     score = score / (item_norm[rows] * item_norm[col] + 1e-6)
-                elif self.config['similarity'] == 'jaccard':
+                elif config['similarity'] == 'jaccard':
                     score = score / (item_nz[rows] + item_nz[col] - score + 1e-6)
                 else:
                     raise ValueError('unsupported similarity metric')
-                topk = self.config['knn']
+                topk = config['knn']
                 if G.indptr[col] < G.indptr[col+1] - topk:
                     idx = np.argpartition(score, -topk)[-topk:]
                     rows_ = rows[idx]

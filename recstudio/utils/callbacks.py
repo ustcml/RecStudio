@@ -53,7 +53,6 @@ class EarlyStopping(object):
         self.model_name = model.__class__.__name__
         self.save_dir = save_dir
         self.filename = filename
-        self.__check_save_dir()
 
         if mode in ['min', 'max']:
             self.mode = mode
@@ -76,19 +75,22 @@ class EarlyStopping(object):
         if filename != None:
             self._best_ckpt_path = filename
         else:
-            _file_name = None 
+            _file_name = None
             for handler in self.logger.handlers:
                 if type(handler) == logging.FileHandler:
                     _file_name = os.path.basename(handler.baseFilename).split('.')[0]
             if _file_name is None:
                 import time
-                _file_name = time.strftime(f"{self.model_name}-{dataset_name}-%Y-%m-%d-%H-%M-%S.log", time.localtime())
-            self._best_ckpt_path = f"{_file_name}.ckpt"
+                _file_name = time.strftime(f"{self.model_name}/{dataset_name}/%Y-%m-%d-%H-%M-%S.log", time.localtime())
+            self._best_ckpt_path = f"{self.model_name}/{dataset_name}/{_file_name}.ckpt"
+        self.__check_save_dir()
+
 
     def __check_save_dir(self):
         if self.save_dir is not None:
-            if not os.path.exists(self.save_dir):
-                os.makedirs(self.save_dir)
+            dir = os.path.dirname(os.path.join(self.save_dir, self._best_ckpt_path))
+            if not os.path.exists(dir):
+                os.makedirs(dir)
 
     def __call__(self, model, epoch, metrics):
         if self.monitor not in metrics:
@@ -160,7 +162,7 @@ class SaveLastCallback(object):
         if filename != None:
             self._last_ckpt_path = filename
         else:
-            _file_name = None 
+            _file_name = None
             for handler in self.logger.handlers:
                 if type(handler) == logging.FileHandler:
                     _file_name = os.path.basename(handler.baseFilename).split('.')[0]
@@ -215,7 +217,7 @@ class IntervalCallback(object):
         if filename != None:
             self._interval_ckpt_path = filename
         else:
-            _file_name = None 
+            _file_name = None
             for handler in self.logger.handlers:
                 if type(handler) == logging.FileHandler:
                     _file_name = os.path.basename(handler.baseFilename).split('.')[0]
@@ -248,9 +250,11 @@ class IntervalCallback(object):
     def get_checkpoint_path(self, nepoch=None):
         if nepoch == None:
             if self.current_epoch == 0:
-                return None 
+                return None
             else:
                 return os.path.join(self.save_dir, f"{self.current_epoch}_epochs-{self._interval_ckpt_path}.ckpt")
         else:
             assert nepoch <= self.current_epoch and nepoch % self.interval_epochs == 0
             return os.path.join(self.save_dir, f"{nepoch}_epochs-{self._interval_ckpt_path}.ckpt")
+
+__all__ = ['EearlyStopping', 'SaveLastCallback', 'IntervalCallback']

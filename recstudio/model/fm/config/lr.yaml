@@ -1,1 +1,2 @@
-embed_dim: 1
+model:
+  embed_dim: 1

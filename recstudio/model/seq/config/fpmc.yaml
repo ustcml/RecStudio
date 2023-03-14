@@ -1,2 +1,2 @@
-embed_dim: 64
-negative_count: 1
+train:
+  negative_count: 1

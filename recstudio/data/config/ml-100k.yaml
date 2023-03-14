@@ -24,11 +24,8 @@ field_separator: "\t"
 min_user_inter: 0
 min_item_inter: 0
 field_max_len: ~
+low_rating_thres: 3.0
 max_seq_len: 20
-
-rating_threshold: ~
-drop_low_rating: ~
-ranker_rating_threshold: 4
 
 # network feature, including social network and knowledge graph, the first two fields are remapped the corresponding features
 network_feat_name: ~ # [[social.txt], [ml-100k.kg, ml-100k.link]]

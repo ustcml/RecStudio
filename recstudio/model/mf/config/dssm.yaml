@@ -1,8 +1,12 @@
-embed_dim: 64
-mlp_layer: [128, 128, 128]
-activation: tanh
-dropout: 0.3
-batch_norm: False
-negative_count: 1
+model:
+  embed_dim: 64
+  mlp_layer: [128, 128, 128]
+  activation: tanh
+  dropout: 0.3
+  batch_norm: False
 
-cutoff: [10, 20, 50]
+train:
+  negative_count: 1
+
+eval:
+  cutoff: [10, 20, 50]

@@ -38,7 +38,6 @@ class BaseRanker(Recommender):
     #
 
     def _init_model(self, train_data, drop_unused_field=True):
-        self.rating_threshold = train_data.config.get('ranker_rating_threshold', 0)
         super()._init_model(train_data, drop_unused_field)
         self.fiid = train_data.fiid
         self.fuid = train_data.fuid
@@ -82,7 +81,7 @@ class BaseRanker(Recommender):
             assert self.neg_count is not None, 'expecting neg_count is not None.'
             pos_output = self.score(batch)
             pos_prob, neg_item_idx, neg_prob = self.retriever.sampling(
-                batch, self.neg_count, method=self.config['retrieve_method'])
+                batch, self.neg_count, method=self.config['train']['sampling_method'])
             # 
             neg_output = self.score_multi(batch, neg_item_idx) # neg_item_idx: [batch_size, neg], score: [batch_size * neg]
             return {'pos_score': pos_output['score'], 'log_pos_prob': pos_prob, 'neg_score': neg_output['score'].view(-1, self.neg_count),
@@ -111,30 +110,31 @@ class BaseRanker(Recommender):
         return loss
 
     def validation_step(self, batch):
-        eval_metric = self.config['val_metrics']
-        if self.config['cutoff'] is not None:
-            cutoffs = self.config['cutoff'] if isinstance(self.config['cutoff'], List) \
-                else [self.config['cutoff']]
+        eval_metric = self.config['eval']['val_metrics']
+        if self.config['eval']['cutoff'] is not None:
+            cutoffs = self.config['eval']['cutoff'] if isinstance(self.config['eval']['cutoff'], List) \
+                else [self.config['eval']['cutoff']]
         else:
             cutoffs = None
         return self._test_step(batch, eval_metric, cutoffs)
 
     def test_step(self, batch):
-        eval_metric = self.config['test_metrics']
-        if self.config['cutoff'] is not None:
-            cutoffs = self.config['cutoff'] if isinstance(self.config['cutoff'], List) \
-                else [self.config['cutoff']]
+        eval_metric = self.config['eval']['test_metrics']
+        if self.config['eval']['cutoff'] is not None:
+            cutoffs = self.config['eval']['cutoff'] if isinstance(self.config['eval']['cutoff'], List) \
+                else [self.config['eval']['cutoff']]
         else:
             cutoffs = None
         return self._test_step(batch, eval_metric, cutoffs)
 
     def topk(self, batch, topk, user_hist=None, return_candidates=False):
-        if (self.retriever is None):
+        retriever = self.retriever
+        if (retriever is None):
             raise NotImplementedError("`topk` function not supported for ranker without retriever.")
         else:
-            score_re, topk_items_re = self.retriever.topk(batch, self.retriever.config['topk'], user_hist)
+            score_re, topk_items_re = retriever.topk(batch, retriever.config['eval']['topk'], user_hist)
             score = self.score_multi(batch, topk_items_re)['score'].view(topk_items_re.shape[0], -1) # [batch, topk]
-            assert topk <= self.retriever.config['topk'], '`topk` of ranker must be smaller than the retriever.'
+            assert topk <= retriever.config['eval']['topk'], '`topk` of ranker must be smaller than the retriever.'
             scores, _idx = torch.topk(score, topk, dim=-1)
             topk_items = torch.gather(topk_items_re, -1, _idx)
             if return_candidates:
@@ -156,10 +156,7 @@ class BaseRanker(Recommender):
             metrics = {}
             for n, f in pred_m:
                 if not n in global_m:
-                    if 'thres' in inspect.signature(f).parameters:
-                        metrics[n] = f(result['pos_score'], result['label'], self.rating_threshold)
-                    else:
-                        metrics[n] = f(result['pos_score'], result['label'])
+                    metrics[n] = f(result['pos_score'], result['label'])
             if len(global_m) > 0:
                 # gather scores and labels for global metrics like AUC.
                 metrics['score'] = result['pos_score'].detach()
@@ -167,7 +164,7 @@ class BaseRanker(Recommender):
         else:
             # pair-wise, support topk-based metrics, like [NDCG, Recall, Precision, MRR, MAP, MR, et al.]
             # The case is suitable for the scene where there are only positives in dataset.
-            topk = self.config['topk']
+            topk = self.config['eval']['topk']
             score, topk_items = self.topk(batch, topk, batch['user_hist'])
             if batch[self.fiid].dim() > 1:
                 target, _ = batch[self.fiid].sort()
@@ -203,7 +200,7 @@ class BaseRanker(Recommender):
         if len(global_m) > 0:
             for m, f in global_m:
                 if 'thres' in inspect.signature(f).parameters:
-                    out[m] = f(scores, labels, self.rating_threshold)
+                    out[m] = f(scores, labels)
                 else:
                     out[m] = f(scores, labels)
         return out

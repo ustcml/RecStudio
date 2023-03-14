@@ -11,7 +11,7 @@ ml_100k_dataset = dataset.SeqDataset(name='ml-100k', default_config=True)
 dataset_config = {
     'use_fields': ['item_id'],
     'max_seq_len': 50
-} 
+}
 
 ml_100k_dataset = ml_100k_dataset.SeqDataset(name='ml-100k', default_config=False, config=dataset_config, config_path=None)
 
@@ -51,20 +51,20 @@ class SASRecQueryEncoder(torch.nn.Module):
 
 
     def forward(self, batch):
-        # for SeqDataset and AEDataset, 
+        # for SeqDataset and UserDataset,
         # user interaction list will be named as 'in_'+item_fields name
-        user_hist = batch['in_'+'item_id']  
+        user_hist = batch['in_'+'item_id']
         positions = torch.arange(user_hist.size(1), dtype=torch.long, device=user_hist.device)
         positions = positions.unsqueeze(0).expand_as(user_hist)
         position_embs = self.position_emb(positions)
         seq_embs = self.item_encoder(user_hist)
 
-        mask4padding = user_hist==0 
+        mask4padding = user_hist==0
         L = user_hist.size(-1)
         attention_mask = ~torch.tril(torch.ones((L, L), dtype=torch.bool, device=user_hist.device))
         transformer_out = self.transformer_layer(
-            src=self.dropout(seq_embs+position_embs), 
-            mask=attention_mask, 
+            src=self.dropout(seq_embs+position_embs),
+            mask=attention_mask,
             src_key_padding_mask=mask4padding)
 
         # For SeqDataset, we have seqlen filed in batch
@@ -73,7 +73,7 @@ class SASRecQueryEncoder(torch.nn.Module):
 
 item_encoder = torch.nn.Embedding(trn.num_items, 64, 0)
 query_encoder = SASRecQueryEncoder(
-    embed_dim=64, max_seq_len=trn.max_seq_len, 
+    embed_dim=64, max_seq_len=trn.max_seq_len,
     n_head=4, hidden_size=128, dropout=0.5, activation='gelu',
     n_layer=2, item_encoder=item_encoder
 )
@@ -83,7 +83,7 @@ sasrec_score_func = scorer.InnerProductScorer()
 
 
 ## Finally, contruct sampler and loss function
-## in order to avoid sampling the padding item with index 0, 
+## in order to avoid sampling the padding item with index 0,
 # so we set num_items as trn.num_items-1
 sasrec_sampler = sampler.UniformSampler(num_items=trn.num_items-1, scorer_fn=score_func)
 sasrec_loss_func = loss_func.BinaryCrossEntropyLoss()
@@ -99,7 +99,7 @@ SASRecModel = basemodel.BaseRetriever(
 )
 
 
-# Step4: Trainig: 
+# Step4: Trainig:
 ## config: optimizer, learning_rate, neg_count, et al.
 training_config = {
     'learner': 'Adam',
