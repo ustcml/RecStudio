@@ -1,0 +1,9 @@
+backbone:
+  RelMF:
+    class: PMF
+
+train:
+  eta: 0.5
+
+data:
+  neg_count: 5

@@ -1,0 +1,28 @@
+train:
+  c: 0
+  alpha: 1e-3
+  beta: 1e-3
+
+data:
+    binarized_rating_thres: 3
+    low_rating_thres: 3
+    neg_count: 1
+
+backbone:
+  matching: 
+    class: PMF
+    loss_reduction: mean
+
+user_module: 
+  mlp_layers: [64, 32, 1]
+  activation_func: relu
+  bias: True
+  batch_norm: False
+  dropout: 0.0
+  
+item_module:
+  mlp_layers: [64, 32, 1]
+  activation_func: relu
+  bias: True
+  batch_norm: False
+  dropout: 0.0

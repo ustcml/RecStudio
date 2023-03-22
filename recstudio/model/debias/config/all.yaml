@@ -1,0 +1,13 @@
+# data:
+#   mcar_sampling_ratio: ~
+#   split_ratio: [0.8,0.1,0.1]      # to split MNAR 
+#   mcar_split_ratio: ~             # a list of 3 floats for split by ratio; corresponds to mcar for trn/val/tst
+
+train:
+  co_sampling: True
+
+  eta: 1.0
+  truncation: 0.2
+  eps: 1e-6
+
+  

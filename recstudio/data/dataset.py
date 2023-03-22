@@ -102,7 +102,10 @@ class TripletDataset(Dataset):
         self.field2maxlen = self.config['field_max_len'] or {}
         self.fuid = self.config['user_id_field'].split(':')[0]
         self.fiid = self.config['item_id_field'].split(':')[0]
-        self.ftime = self.config['time_field'].split(':')[0]
+        if self.config['time_field'] is not None:
+            self.ftime = self.config['time_field'].split(':')[0]
+        else:
+            self.ftime = None
         if self.config['rating_field'] is not None:
             self.frating = self.config['rating_field'].split(':')[0]
         else:
@@ -160,8 +163,7 @@ class TripletDataset(Dataset):
     def _load_all_data(self, data_dir, field_sep):
         r"""Load features for user, item, interaction and network."""
         # load interaction features
-        inter_feat_path = os.path.join(
-            data_dir, self.config['inter_feat_name'])
+        inter_feat_path = os.path.join(data_dir, self.config['inter_feat_name'])
         self.inter_feat = self._load_feat(
             inter_feat_path, self.config['inter_feat_header'], field_sep, self.config['inter_feat_field'])
         self.inter_feat = self.inter_feat.dropna(how="any")
@@ -186,9 +188,9 @@ class TripletDataset(Dataset):
             self.user_feat.reset_index(inplace=True)
             self._fill_nan(self.user_feat)
 
+        # load item features
         self.item_feat = None
         if self.config['item_feat_name'] is not None:
-            # load item features
             item_feat = []
             for _, item_feat_col in zip(self.config['item_feat_name'], self.config['item_feat_field']):
                 item_feat_path = os.path.join(data_dir, _)
@@ -225,6 +227,14 @@ class TripletDataset(Dataset):
                     net_name, net_field = name[0], fields[0]
                     self.network_feat[i] = self._load_feat(
                         os.path.join(data_dir, net_name), self.config['network_feat_header'][i][0], field_sep, net_field)
+                    
+        # load missing-completely-at-random interaction features
+        if self.config['mcar_feat_name'] is not None:
+            mcar_feat_path = os.path.join(data_dir, self.config['mcar_feat_name'])
+            self.mcar_feat = self._load_feat(
+                mcar_feat_path, self.config['mcar_feat_header'], field_sep, self.config['mcar_feat_field'])
+            self.mcar_feat = self.mcar_feat.dropna(how="any")
+                
 
     def _fill_nan(self, feat, mapped=False):
         r"""Fill the missing data in the original data.
@@ -309,6 +319,11 @@ class TripletDataset(Dataset):
         if self.config['network_feat_name'] is not None:
             feat_list.extend(self.network_feat)
         # return list(feat for feat in feat_list if feat is not None)
+
+        if hasattr(self, 'mcar_feat'):
+            feat_list.append(self.mcar_feat)
+        if hasattr(self, 'mcar_feat_for_train'):
+            feat_list.append(self.mcar_feat_for_train)
         return feat_list
 
     def _map_all_ids(self):
@@ -617,11 +632,14 @@ class TripletDataset(Dataset):
         m = len(data_count)
         if not user_mode:
             splits = np.outer(data_count, ratio).astype(np.int32)
-            splits[:, 0] = data_count - splits[:, 1:].sum(axis=1)
-            for i in range(1, len(ratio)):
-                idx = (splits[:, -i] == 0) & (splits[:, 0] > 1)
-                splits[idx, -i] += 1
-                splits[idx, 0] -= 1
+            major = np.argmax(ratio)
+            minors = [i for i, _ in enumerate(ratio) if i != major]
+            splits[:, major] = data_count - splits[:, minors].sum(axis=1)
+            for i in minors:
+                if ratio[i] != 0:
+                    idx = (splits[:, i] == 0) & (splits[:, major] > 1)
+                    splits[idx, i] += 1
+                    splits[idx, major] -= 1
         else:
             idx = np.random.permutation(m)
             sp_ = (m * np.array(ratio)).astype(np.int32)
@@ -686,6 +704,37 @@ class TripletDataset(Dataset):
         cumsum = np.hstack([[0], cumsum])
         splits = cumsum.reshape(-1, 1) + splits
         return splits, data_count.index if m > 1 else None
+
+    def _inverse_popularity_mcar_sampling(self, mcar_ratio_or_num):
+        """
+        Sample missing-completely-at-random data by inverse popularity.
+        """
+        user_count = self.inter_feat[self.fuid].groupby(
+                self.inter_feat[self.fuid], sort=False).count()
+        if isinstance(mcar_ratio_or_num, int):
+            splits, _ = self._split_by_leave_one_out(mcar_ratio_or_num, user_count, True)
+        elif isinstance(mcar_ratio_or_num, float):
+            splits, _ = self._split_by_ratio(
+                [1 - mcar_ratio_or_num, mcar_ratio_or_num], user_count, False)           
+        mcar_count = splits[:, -1] - splits[:, 1]
+
+        item_freq = torch.from_numpy(self.inter_feat[self.fiid].groupby(
+                        self.inter_feat[self.fiid]).count().to_numpy())
+        weight = torch.hstack([torch.tensor(0.), 1 / item_freq])
+        all_mcar_idx = []
+        for u, sub_inter_feat in list(self.inter_feat.groupby(self.inter_feat[self.fuid])):
+            iid_idx = sub_inter_feat[self.fiid].index
+            iid = sub_inter_feat[self.fiid].values
+            mcar_idx = iid_idx[torch.multinomial(weight[iid], mcar_count[u - 1])]
+            if isinstance(mcar_idx, np.int64):
+                mcar_idx = np.array([mcar_idx])
+            all_mcar_idx.append(mcar_idx)
+        all_mcar_idx = np.concatenate(all_mcar_idx)
+        self.mcar_feat = self.inter_feat.loc[all_mcar_idx].copy()
+        self.inter_feat.drop(index=all_mcar_idx, inplace=True)
+        self.mcar_feat.reset_index(drop=True, inplace=True) 
+        self.inter_feat.reset_index(drop=True, inplace=True)        
+
 
     def _get_data_idx(self, splits):
         r""" Return data index for train/valid/test dataset.
@@ -753,7 +802,7 @@ class TripletDataset(Dataset):
             user_hist = self.user_hist[data[self.fuid]][:, 0:user_count]
         else:
             user_hist = data['user_hist']
-        neg_id = uniform_sampling(data[self.frating].size(0), self.num_items,
+        neg_id = uniform_neg_sampling(data[self.frating].size(0), self.num_items,
                                     self.neg_count, user_hist).long()   # [B, neg]
         neg_id = neg_id.transpose(0,1).contiguous().view(-1)    # [neg*B]
         neg_item_feat = self.item_feat[neg_id]
@@ -778,7 +827,7 @@ class TripletDataset(Dataset):
             dict: A dict contains different feature.
         """
         data = self._get_pos_data(index)
-        if self.eval_mode and 'user_hist' not in data:
+        if (self.eval_mode and 'user_hist' not in data):
             user_count = self.user_count[data[self.fuid]].max()
             data['user_hist'] = self.user_hist[data[self.fuid]][:, 0:user_count]
         else:
@@ -825,6 +874,7 @@ class TripletDataset(Dataset):
             shuffle: bool = True,
             split_mode: str = 'user_entry',
             split_ratio: List = [0.8, 0.1, 0.1],
+            mcar_sampling_ratio: float = 0,
             **kwargs
         ):
         """Build dataset.
@@ -844,10 +894,11 @@ class TripletDataset(Dataset):
         """
         self.fmeval = fmeval
         self.split_mode = split_mode
+        self.mcar_sampling_ratio = mcar_sampling_ratio
         self._init_sampler(sampler, neg_count)
-        return self._build(split_ratio, shuffle, split_mode, False, binarized_rating_thres)
+        return self._build(split_ratio, shuffle, split_mode, False, binarized_rating_thres, mcar_sampling_ratio)
 
-    def _build(self, ratio_or_num, shuffle, split_mode, rep, binarized_rating_thres=None):
+    def _build(self, ratio_or_num, shuffle, split_mode, rep, binarized_rating_thres=None, mcar_sampling_ratio=0):
         # for general recommendation, only support non-repetive recommendation
         # keep first data, sorted by time or not, split by user or not
         if binarized_rating_thres is not None:
@@ -858,6 +909,10 @@ class TripletDataset(Dataset):
         if self.drop_dup and (not rep):   # drop duplicated interactions
             self.inter_feat = self.inter_feat[self.first_item_idx]
 
+        # in need of mcar_feat but not given in data
+        if not hasattr(self, 'mcar_feat') and mcar_sampling_ratio:
+            self._inverse_popularity_mcar_sampling(mcar_sampling_ratio)
+        
         if (split_mode == 'user_entry') or (split_mode == 'user'):
             if self.ftime in self.inter_feat:
                 self.inter_feat.sort_values(by=[self.fuid, self.ftime], inplace=True)
@@ -915,22 +970,48 @@ class TripletDataset(Dataset):
                 splits = (splits, uids.view(-1, 1))
             else:
                 splits = (splits.numpy(), uids)
-
-
+        
+        mcar_split_ratio = self.config['mcar_split_ratio']
+        if hasattr(self, 'mcar_feat') and mcar_split_ratio:
+            mcar_datasets = self._build_for_mcar(mcar_split_ratio, shuffle, rep)
+            
         self.dataframe2tensors()
         datasets = [self._copy(_) for _ in self._get_data_idx(splits)]
-        user_hist, user_count = datasets[0].get_hist(True)
+        trn_uh, trn_uc = datasets[0].get_hist(True)
+        
+        if hasattr(self, 'mcar_feat') and mcar_split_ratio:
+            if self.config['mcar_split_ratio'][0] != 0:
+                datasets[0].mcar_feat_for_train = mcar_datasets[0].inter_feat
+                self.mcar_for_train_index = mcar_datasets[0].data_index
+                mcar_trn_uh, mcar_trn_uc = mcar_datasets[0].get_hist(True)
+                trn_uh = torch.cat((trn_uh, mcar_trn_uh), dim=-1).sort(dim=-1, descending=True).values
+                trn_uc = trn_uc + mcar_trn_uc
+            for i, r in enumerate(ratio_or_num[1:]):
+                if r == 0:
+                    assert mcar_split_ratio[i+1] > 0
+                    datasets[i+1] = mcar_datasets[i+1]  
+                else:
+                    assert mcar_split_ratio[i+1] == 0
+            
         for d in datasets[:2]:
-            d.user_hist = user_hist
-            d.user_count = user_count
+            d.user_hist = trn_uh
+            d.user_count = trn_uc
         if len(datasets) > 2:
             assert len(datasets) == 3
-            uh, uc = datasets[1].get_hist(True)
-            uh = torch.cat((user_hist, uh), dim=-1).sort(dim=-1, descending=True).values
-            uc = uc + user_count
-            datasets[-1].user_hist = uh
-            datasets[-1].user_count = uc
+            val_uh, val_uc = datasets[1].get_hist(True)
+            datasets[-1].user_hist = torch.cat((trn_uh, val_uh), dim=-1).sort(dim=-1, descending=True).values
+            datasets[-1].user_count = trn_uc + val_uc
+            
         return datasets
+
+    def _build_for_mcar(self, mcar_split_ratio, shuffle, rep):
+        mcar_d = copy.copy(self)
+        mcar_d.inter_feat = self.mcar_feat
+        del mcar_d.mcar_feat
+        del mcar_d.first_item_idx
+        datasets = mcar_d._build(mcar_split_ratio, shuffle, 'user_entry', rep)
+        return datasets    
+                            
 
     def dataframe2tensors(self):
         r"""Convert the data type from TensorFrame to Tensor
@@ -942,6 +1023,8 @@ class TripletDataset(Dataset):
             for i in range(len(self.network_feat)):
                 self.network_feat[i] = TensorFrame.fromPandasDF(
                     self.network_feat[i], self)
+        if hasattr(self, 'mcar_feat'):
+            self.mcar_feat = TensorFrame.fromPandasDF(self.mcar_feat, self)
 
     def train_loader(self, batch_size, shuffle=True, num_workers=0, drop_last=False, ddp=False):
         r"""Return a dataloader for training.
@@ -1033,6 +1116,8 @@ class TripletDataset(Dataset):
 
             torch.Tensor: length of the history sequence.
         """
+        if len(self.data_index) == 0:
+            return torch.tensor([]), 0
         user_array = self.inter_feat.get_col(self.fuid)[self.inter_feat_subset]
         item_array = self.inter_feat.get_col(self.fiid)[self.inter_feat_subset]
         sorted, index = torch.sort(user_array if isUser else item_array)
@@ -1395,7 +1480,60 @@ class SeqToSeqDataset(SeqDataset):
                             persistent_workers=False)
         return output
 
-
+class DICEDataset(TripletDataset):
+    def _get_neg_data(self, data: Dict):
+        if 'user_hist' not in data:
+            user_count = self.user_count[data[self.fuid]].max()
+            user_hist = self.user_hist[data[self.fuid]][:, 0:user_count]
+        else:
+            user_hist = data['user_hist']
+        neg_items, mask = popular_sampling_with_margin(
+                        data[self.frating].size(0),
+                        self.neg_count,
+                        data[self.fiid],
+                        user_hist,
+                        self.item_freq,
+                        self.config['margin_up'],
+                        self.config['margin_down'],
+                        self.config['pool']
+                    )
+        if self.config['adaptive']:
+            self.config['margin_up'] = self.config['margin_up'] * self.config['margin_decay']
+            self.config['margin_down'] = self.config['margin_up'] * self.config['margin_decay']
+        data['mask'] = mask
+        data['neg_items'] = neg_items
+        return data
+    
+class UBPRDataset(TripletDataset):
+    def _get_neg_data(self, data: Dict):
+        """sample mixed pos and neg items"""
+        if 'user_hist' not in data:
+            user_count = self.user_count[data[self.fuid]].max()
+            user_hist = self.user_hist[data[self.fuid]][:, 0:user_count]
+        else:
+            user_hist = data['user_hist']
+        if self.config['sample_type'] == 'mixed':
+            sampled_id, sampled_label = uniform_sampling(
+                                            data[self.frating].size(0),
+                                            self.num_items,
+                                            self.neg_count,
+                                            user_hist
+                                        )
+        elif self.config['sample_type'] == 'neg only':
+            sampled_id = uniform_neg_sampling(
+                            data[self.frating].size(0),
+                            self.num_items,
+                            self.neg_count,
+                            user_hist
+                        )
+            sampled_label = torch.zeros_like(sampled_id)
+        else:
+            raise ValueError(f'sample_type should be `mixed` or `neg only`.')
+        data['sampled_items'] = sampled_id
+        data['sampled_labels'] = sampled_label
+        return data
+    
+    
 class TensorFrame(Dataset):
     r"""The main data structure used to save interaction data in RecStudio dataset.
 
@@ -1671,13 +1809,36 @@ class CombinedLoaders(object):
         return self
 
     def __next__(self):
-        batch = next(self.loaders[0])
+        batch = next(self.loaders[0])      
         for i, l in enumerate(self.loaders[1:]):
             try:
                 batch.update(next(l))
             except StopIteration:
                 self.loaders[i+1] = iter(self.loaders[i+1])
                 batch.update(next(self.loaders[i+1]))
+        return batch
+
+class ConcatedLoaders(object):
+    """
+    Multiple dataloaders. Each dataloader's batch is concated and returned.
+    the keys of loaders are natural numbers starting at 0
+    """
+    def __init__(self, loaders):
+        self.loaders = loaders
+
+    def __iter__(self):
+        self.iters = []
+        for l in self.loaders:
+            self.iters.append(iter(l))
+        return self
+
+    def __next__(self):
+        batch = next(self.iters[0])
+        batch['Loader'] = torch.zeros_like(list(batch.values())[0])
+        for i, l in enumerate(self.iters[1:]):
+            for k, v in next(l).items():
+                batch[k] = torch.cat((batch[k], v))
+            batch['Loader'] = torch.cat((batch['Loader'], (i+1)*torch.ones_like(v)))
         return batch
 
 
@@ -1760,7 +1921,7 @@ class DistributedSamplerWrapper(DistributedSampler):
         return iter(itemgetter(*indexes_of_indexes)(subsampler_indexes))
 
 
-def uniform_sampling(
+def uniform_neg_sampling(
         num_queries: int,
         num_items: int,
         num_neg: int,
@@ -1795,3 +1956,79 @@ def uniform_sampling(
                 isin_id = torch.tensor(
                     [id for id in isin_id if neg_idx[id] in user_hist[id // num_neg]], device=device)
         return neg_idx
+    
+    
+def popular_sampling_with_margin(
+    num_queries: int,
+    num_neg: int,
+    pos_items: torch.Tensor,
+    user_hist: torch.Tensor,
+    pop: torch.Tensor,
+    margin_up: float,
+    margin_down: float,
+    pool: float
+    ):
+    device = user_hist.device
+    neg_items = torch.full((num_queries, num_neg), -1, device=device)
+    neg_items = neg_items.reshape(num_queries, -1)  #  B x Neg
+    
+    pop_items = (pop > (pop[pos_items] + margin_up).unsqueeze(-1).expand(-1, len(pop))).float()
+    unpop_items = (pop < (pop[pos_items] - margin_down).unsqueeze(-1).expand(-1, len(pop))).float()
+    
+    _idx = torch.arange(user_hist.size(0), device=device).view(-1, 1).expand_as(user_hist)
+    pop_items[_idx, user_hist] = 0.0
+    unpop_items[_idx, user_hist] = 0.0
+    
+    # To avoid probabiliy = 0
+    pop_items[:, 0] = torch.where(pop_items.sum(-1) > 0, pop_items[:, 0], torch.ones(num_queries, device=device))
+    unpop_items[:, 0] = torch.where(unpop_items.sum(-1) > 0, unpop_items[:, 0], torch.ones(num_queries, device=device))
+    
+    pop_neg_items = torch.multinomial(pop_items, num_neg, replacement=True)
+    unpop_neg_items = torch.multinomial(unpop_items, num_neg, replacement=True)
+    mixed_neg_items = torch.hstack([pop_neg_items[:, :num_neg//2], unpop_neg_items[:, num_neg//2:]])
+    
+    num_pop_items = torch.sum(pop_items, dim=-1, keepdim=True)
+    num_unpop_items = torch.sum(unpop_items, dim=-1, keepdim=True)
+    neg_items = torch.where(
+                    torch.tile(num_pop_items < pool, [1, num_neg]), 
+                    unpop_neg_items, 
+                    torch.where(
+                        torch.tile(num_unpop_items < pool, [1, num_neg]), 
+                        pop_neg_items, 
+                        mixed_neg_items
+                    )
+                )
+    mask = torch.where(
+                    torch.tile(num_pop_items < pool, [1, num_neg]), 
+                    torch.full(neg_items.shape, False, device=device), 
+                    torch.where(
+                        torch.tile(num_unpop_items < pool, [1, num_neg]), 
+                        torch.full(neg_items.shape, True, device=device), 
+                        torch.hstack([
+                            torch.full((num_queries, num_neg//2), True, device=device),
+                            torch.full((num_queries, num_neg - num_neg//2), False, device=device),
+                        ])
+                    )
+                )
+    return neg_items, mask      
+
+
+def uniform_sampling(
+        num_queries: int,
+        num_items: int,
+        num_neg: int,
+        user_hist: torch.Tensor = None
+    ):
+    device = user_hist.device
+    id = torch.randint(0, num_items - 1, (num_queries, num_neg), device=device)
+    id_weight = torch.zeros(num_queries, num_items, device=device).scatter_(
+                    1, id, torch.ones(num_queries, num_neg, device=device))
+    
+    _idx = torch.arange(user_hist.size(0), device=device).view(-1, 1)
+    hist_weight = torch.zeros(size=(num_queries, num_items), device=device)
+    hist_weight[_idx, user_hist] = 1
+    
+    pos_id_weight = torch.logical_and(id_weight, hist_weight)
+    label = pos_id_weight[_idx, id].float()
+    
+    return id + 1, label

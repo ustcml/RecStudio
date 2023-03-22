@@ -1,0 +1,14 @@
+backbone:
+  IPS:
+    class: PMF
+    loss_reduction: none
+    train:
+      learning_rate: 0.01
+
+train:
+  eta: 1.0
+
+data:
+  neg_count: 1
+
+  

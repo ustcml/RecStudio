@@ -19,9 +19,10 @@ data:   # params related to dataset
     neg_count: 0
     sampler: ~ # [uniform]
     shuffle: True
-    split_mode: user_entry    # [user, entry, user_entry]
-    split_ratio: [0.8,0.1,0.1]  # list or int type, list type for split by ratio, int type for leave one out
-
+    split_mode: user_entry      # [user, entry, user_entry]
+    mcar_sampling_ratio: ~
+    split_ratio: [0.8,0.1,0.1]      # list or int type, list type for split by ratio, int type for leave one out; to split MNAR 
+    mcar_split_ratio: ~             # a list of 3 floats for split by ratio; corresponds to mcar for trn/val/tst
 
 model:
     embed_dim: 64       # embedding dimension for embedding layers, usually for item and user embeddings
@@ -29,7 +30,7 @@ model:
 
 
 train:
-    accelerator: gpu    # [cpu, gpu, dp]
+    accelerator: cpu    # [cpu, gpu, dp]
 
     # ann: {index: 'IVFx,Flat', parameter: ~}  ## 1 HNSWx,Flat; 2 Flat; 3 IVFx,Flat ## {nprobe: 1}  {efSearch: 1}
     ann: ~
@@ -38,7 +39,7 @@ train:
     early_stop_mode: max
     early_stop_patience: 10
 
-    epochs: 1000
+    epochs: 50
     gpu: 1
     grad_clip_norm: ~
     init_method: xavier_normal  # [xavier_normal, normal]

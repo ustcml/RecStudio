@@ -239,6 +239,7 @@ class Recommender(torch.nn.Module, abc.ABC):
         Returns:
             list or dict or Dataloader : the train loaders used in the current epoch
             bool : whether to combine the train loaders or use them alternately in one epoch.
+            bool : whether to concat the train loaders in one epoch.
         """
         # use nepoch to config current trainloaders
         combine = False

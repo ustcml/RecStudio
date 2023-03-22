@@ -1,0 +1,47 @@
+url: https://rec.ustc.edu.cn/share/b097d230-c7e1-11ed-997a-bba57c4b600a
+user_id_field: &u user_id:token # TODO: comments for &u and *u
+item_id_field: &i item_id:token
+rating_field: &r rating:float
+time_field: ~ 
+time_format: ~
+
+
+inter_feat_name: coat.mnar
+inter_feat_field: [*u, *i, *r]
+inter_feat_header: 0
+
+user_feat_name: [coat.user]
+user_feat_field: [[*u, ugender(men):token, ugender(women):token, age(20-30):token, age(30-40):token, age(40-50):token, age(50-60):token, age(over 60):token, age(under 20):token, location(rural):token, location(suburban):token, location(urban):token, fashioninterest(moderately):token, fashioninterest(not at all):token, fashioninterest(very):token]]
+user_feat_header: 0
+
+
+item_feat_name: [coat.item]
+item_feat_field: [[*i, igender(men):token, igender(women):token, jackettype(bomber):token, jackettype(cropped):token, jackettype(field):token, jackettype(fleece):token, jackettype(insulated):token, jackettype(motorcycle):token, jackettype(other):token, jackettype(packable):token, jackettype(parkas):token, jackettype(pea):token, jackettype(rain):token, jackettype(shells):token, jackettype(track):token, jackettype(trench):token, jackettype(vests):token, jackettype(waterproof):token, color(beige):token, color(black):token, color(blue):token, color(brown):token, color(gray):token, color(green):token, color(multi):token, color(navy):token, color(olive):token, color(other):token, color(pink):token, color(purple):token, color(red):token, onfrontpage(yes):token, onfrontpage(no):token]]
+item_feat_header: 0
+
+
+field_separator: "\t"
+min_user_inter: 5
+min_item_inter: 5
+field_max_len: ~
+low_rating_thres: 3.0
+max_seq_len: 20
+
+# network feature, including social network and knowledge graph, the first two fields are remapped the corresponding features
+network_feat_name: ~ 
+mapped_feat_field: ~
+network_feat_field: ~
+network_feat_header: ~
+
+# interactions that are missing completely at random
+mcar_feat_name: coat.mcar
+mcar_feat_field: [*u, *i, *r]
+mcar_feat_header: 0
+
+# propensities of each (u, i) pair
+# propensity_feat_name: coat.propensities
+# propensity_feat_field: [*u, *i, propensity:float]
+# propensity_feat_header: 0
+
+
+save_cache: True # whether to save processed dataset to cache.

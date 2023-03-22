@@ -1,33 +1,42 @@
-url: http://snap.stanford.edu/data/amazon/productGraph/categoryFiles/ratings_Beauty.csv
+url: https://rec.ustc.edu.cn/share/e8e98ae0-c700-11ed-b3cf-cb390cf64bc2
 user_id_field: &u user_id:token # TODO: comments for &u and *u
 item_id_field: &i item_id:token
 rating_field: &r rating:float
-time_field: &t timestamp:float
+time_field: ~
 time_format: ~
 
-encoding_method: utf-8
-inter_feat_name: ratings_Beauty.csv
-inter_feat_field: [*u, *i, *r, *t]
-inter_feat_header: ~
+
+inter_feat_name: yahooR3.inter
+inter_feat_field: [*u, *i, *r]
+inter_feat_header: 0
 
 user_feat_name: ~
 user_feat_field: ~
 user_feat_header: ~
 
+
 item_feat_name: ~
 item_feat_field: ~
 item_feat_header: ~
+
 
 field_separator: ","
 min_user_inter: 5
 min_item_inter: 5
 field_max_len: ~
 low_rating_thres: 3.0
-max_seq_len: 50
+max_seq_len: 20
 
 # network feature, including social network and knowledge graph, the first two fields are remapped the corresponding features
-network_feat_name: ~ #[[social.txt], [ml-100k.kg, ml-100k.link]]
-mapped_feat_field: [*u, *i]
-network_feat_field: [[[source_id:token, target_id:token]], [[head_id:token, tail_id:token, relation_id:token], [*i, entity_id:token]]]
+network_feat_name: ~ 
+mapped_feat_field: ~
+network_feat_field: ~
+network_feat_header: ~
+
+# interactions that are missing completely at random
+mcar_feat_name: yahooR3.mcar
+mcar_feat_field: [*u, *i, *r]
+mcar_feat_header: 0
+
 
 save_cache: True # whether to save processed dataset to cache.
