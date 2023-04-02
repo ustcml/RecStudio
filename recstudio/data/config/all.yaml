@@ -54,7 +54,8 @@ network_feat_header: [0, 0]
 # Binarizer(), KBinsDiscretizer(encode="ordinal")
 # Normalizer()
 # KernelCenterer()
-# QuantileTransformer(), PolynomialFeatures(), SplineTransformer()
+# QuantileTransformer(), SplineTransformer()
+# Customized: LogTransformer(), or use FunctionTransformer(...)
 float_field_preprocess: ~ # [float_field:MinMaxScaler(), ...]
 
 save_cache: False # whether to save processed dataset to cache.

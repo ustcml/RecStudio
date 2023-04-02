@@ -331,22 +331,25 @@ class TripletDataset(Dataset):
                 'KernelCenterer': KernelCenterer,
                 'QuantileTransformer': QuantileTransformer,
                 'PowerTransformer': PowerTransformer,
-                'PolynomialFeatures': PolynomialFeatures,
-                'SplineTransformer': SplineTransformer
+                'SplineTransformer': SplineTransformer,
+                'FunctionTransfomer': FunctionTransformer
             }
-            preprocessor = re.findall(r'([a-zA-z]+)\(.*\)', preprocessor_str)[0]
-            preprocessor = preprocessor_dict[preprocessor]
-            args = re.findall(r'([a-z_]+)=(\d+\.?\d*|"[A-Za-z]+"|True|False|\(\d+\.?\d* \d+\.?\d*\))', preprocessor_str)
-            if len(args) > 0:
-                kwargs = {}
-                for k, v in args:
-                    if '(' not in v:
-                        kwargs[k] = ast.literal_eval(v) 
-                    else:
-                        kwargs[k] = ast.literal_eval(v.replace(' ', ',')) 
-                p = preprocessor(**kwargs)
+            if preprocessor_str == 'LogTransformer()':
+                p = FunctionTransformer(np.log1p)
             else:
-                p = preprocessor()
+                preprocessor = re.findall(r'([a-zA-z]+)\(.*\)', preprocessor_str)[0]
+                preprocessor = preprocessor_dict[preprocessor]
+                args = re.findall(r'([a-z_]+)=(\d+\.?\d*|"[A-Za-z]+"|True|False|\(\d+\.?\d* \d+\.?\d*\))', preprocessor_str)
+                if len(args) > 0:
+                    kwargs = {}
+                    for k, v in args:
+                        if '(' not in v:
+                            kwargs[k] = ast.literal_eval(v) 
+                        else:
+                            kwargs[k] = ast.literal_eval(v.replace(' ', ',')) 
+                    p = preprocessor(**kwargs)
+                else:
+                    p = preprocessor()
             # p = eval(preprocessor_str)
             col = col.to_numpy().reshape(-1, 1)
             col = p.fit_transform(col)
