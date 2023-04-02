@@ -49,4 +49,12 @@ mapped_feat_field: [*u, *i]
 network_feat_field: [[[source_id:token, target_id:token]], [[head_id:token, tail_id:token, relation_id:token], [*i, entity_id:token]]]
 network_feat_header: [0, 0]
 
+# sklearn.preprocessing (Arguments supportable; args are sepped with blankspace; same with tuple)
+# MinMaxScaler(), StandardScaler(), RobustScaler(), MaxAbsScaler()
+# Binarizer(), KBinsDiscretizer(encode="ordinal")
+# Normalizer()
+# KernelCenterer()
+# QuantileTransformer(), PolynomialFeatures(), SplineTransformer()
+float_field_preprocess: ~ # [float_field:MinMaxScaler(), ...]
+
 save_cache: False # whether to save processed dataset to cache.
