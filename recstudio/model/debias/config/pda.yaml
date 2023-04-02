@@ -1,0 +1,18 @@
+backbone:
+  PDA:
+    class: BPR
+    loss_reduction: mean
+
+
+data:
+  negative_count: 1
+  # split_mode: time
+  # time_slot: 9
+
+
+train:
+  eta: 0.02
+  popularity: global    # global/local
+
+eval:
+  method: PDA    # PD/PDA

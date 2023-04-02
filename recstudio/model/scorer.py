@@ -17,13 +17,20 @@ class InnerProductScorer(torch.nn.Module):
         return output
 
 class CosineScorer(InnerProductScorer):
+    def __init__(self, reduction=None):
+        super().__init__()
+        self.reduction = reduction
     def forward(self, query, items):
         output = super().forward(query, items)
         output /= torch.norm(items, dim=-1)
         output /= torch.norm(query, dim=-1,
             keepdim=(query.dim()!=items.dim() or query.size(0)!=items.size(0)))
-        return output
-
+        if self.reduction == 'mean':
+            return output.mean()
+        elif self.reduction == 'sum':
+            return output.sum()
+        else:
+            return output
 
 class EuclideanScorer(InnerProductScorer):
     def forward(self, query, items):

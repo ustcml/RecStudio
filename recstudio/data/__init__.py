@@ -1,4 +1,4 @@
-from recstudio.data.dataset import TripletDataset, SeqDataset, UserDataset, FullSeqDataset
+from recstudio.data.dataset import TripletDataset, SeqDataset, UserDataset, FullSeqDataset, DICEDataset, UBPRDataset
 from recstudio.data.advance_dataset import ALSDataset
 
 import os

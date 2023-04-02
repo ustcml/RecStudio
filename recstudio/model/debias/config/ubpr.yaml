@@ -1,0 +1,11 @@
+backbone:
+  UBPR:
+    class: BPR
+    loss_reduction: none
+
+train:
+  eta: 1
+
+data:
+  neg_count: 2
+  sample_type: neg only # mixed

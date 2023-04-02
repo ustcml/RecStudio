@@ -1,0 +1,26 @@
+backbone:
+  control:
+    class: PMF
+    loss_reduction: mean
+    train:
+      batch_size: 256
+
+  treatment:
+    class: PMF
+    loss_reduction: mean
+    train:
+      batch_size: 256
+
+eval:
+  method: control
+
+data:
+  mcar_sampling_ratio: 0.1
+  split_ratio: [0.8,0.1,0.1]
+  mcar_split_ratio: [0.1,0,0]
+  binarized_rating_thres: 3
+  neg_count: 1
+
+train:
+  discrepancy: l2  # l1/l2
+  dis_penalty: 1.0

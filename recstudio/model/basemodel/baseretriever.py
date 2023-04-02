@@ -2,6 +2,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import inspect
 import recstudio.eval as eval
 import torch
+from torch import Tensor
 import torch.nn.functional as F
 from ..scorer import *
 from . import Recommender
@@ -146,20 +147,24 @@ class BaseRetriever(Recommender):
             return_query: bool = False,
             return_item: bool = False,
             return_neg_item: bool = False,
-            return_neg_id: bool = False
+            return_neg_id: bool = False,
+            query: Tensor = None, 
+            neg_item_idx: Tensor = None, 
+            log_pos_prob: Tensor = None,
+            log_neg_prob: Tensor = None
         ):
         # query_vec, pos_item_vec, neg_item_vec,
         output = {}
         pos_items = self._get_item_feat(batch)
         pos_item_vec = self.item_encoder(pos_items)
         if self.sampler is not None:
-            if self.neg_count is None:
+            if not self.neg_count:
                 raise ValueError("`negative_count` value is required when "
                                  "`sampler` is not none.")
-
-            (log_pos_prob, neg_item_idx, log_neg_prob), query = self.sampling(batch=batch, num_neg=self.neg_count,
-                                                                              excluding_hist=self.config['train'].get('excluding_hist', False),
-                                                                              method=self.config['train'].get('sampling_method', 'none'), return_query=True)
+            if neg_item_idx is None:
+                (log_pos_prob, neg_item_idx, log_neg_prob), query = self.sampling(batch=batch, num_neg=self.neg_count,
+                                                                                excluding_hist=self.config['train'].get('excluding_hist', False),
+                                                                                method=self.config['train'].get('sampling_method', 'none'), return_query=True)
             pos_score = self.score_func(query, pos_item_vec)
             if batch[self.fiid].dim() > 1:
                 pos_score[batch[self.fiid] == 0] = -float('inf')  # padding

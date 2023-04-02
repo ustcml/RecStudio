@@ -8,3 +8,4 @@ from .ncf import NCF
 from .slim import SLIM
 from .wrmf import WRMF
 from .dssm import DSSM
+from .pmf import PMF
