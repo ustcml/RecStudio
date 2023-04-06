@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import torchmetrics.functional as M
 
 
-def recall(pred, target, k):
+def recall(pred, target, k_or_thres):
     r"""Calculating recall.
 
     Recall value is defined as below:
@@ -15,20 +15,25 @@ def recall(pred, target, k):
         Recall= \frac{TP}{TP+FN}
 
     Args:
-        pred(torch.BoolTensor): [B, num_items]. The prediction result of the model with bool type values.
+        pred(torch.BoolTensor): [B, num_items] or [B]. The prediction result of the model with bool type values.
             If the value in the j-th column is `True`, the j-th highest item predicted by model is right.
 
-        target(torch.FloatTensor): [B, num_target]. The ground truth.
+        target(torch.FloatTensor): [B, num_target] or [B]. The ground truth.
 
     Returns:
         torch.FloatTensor: a 0-dimensional tensor.
     """
-    count = (target > 0).sum(-1)
-    output = pred[:, :k].sum(dim=-1).float() / count
-    return output.mean()
+    if pred.dim() > 1:
+        k = k_or_thres
+        count = (target > 0).sum(-1)
+        output = pred[:, :k].sum(dim=-1).float() / count
+        return output.mean()
+    else:
+        thres = k_or_thres
+        return M.recall(pred, target, task='binary', threshold=thres)
 
 
-def precision(pred, target, k):
+def precision(pred, target, k_or_thres):
     r"""Calculate the precision.
 
     Precision are defined as:
@@ -37,16 +42,43 @@ def precision(pred, target, k):
         Precision = \frac{TP}{TP+FP}
 
     Args:
-        pred(torch.BoolTensor): [B, num_items]. The prediction result of the model with bool type values.
+        pred(torch.BoolTensor): [B, num_items] or [B]. The prediction result of the model with bool type values.
             If the value in the j-th column is `True`, the j-th highest item predicted by model is right.
 
-        target(torch.FloatTensor): [B, num_target]. The ground truth.
+        target(torch.FloatTensor): [B, num_target] or [B]. The ground truth.
 
     Returns:
         torch.FloatTensor: a 0-dimensional tensor.
     """
-    output = pred[:, :k].sum(dim=-1).float() / k
-    return output.mean()
+    if pred.dim() > 1:
+        k = k_or_thres
+        output = pred[:, :k].sum(dim=-1).float() / k
+        return output.mean()
+    else:
+        thres = k_or_thres
+        return M.precision(pred, target, task='binary', threshold=thres)
+
+
+def f1(pred, target, k_or_thres):
+    r"""Calculate the F1.
+
+    Args:
+        pred(torch.BoolTensor): [B, num_items] or [B]. The prediction result of the model with bool type values.
+            If the value in the j-th column is `True`, the j-th highest item predicted by model is right.
+
+        target(torch.FloatTensor): [B, num_target] or [B]. The ground truth.
+
+    Returns:
+        torch.FloatTensor: a 0-dimensional tensor.
+    """
+    if pred.dim() > 1:
+        k = k_or_thres
+        count = (target > 0).sum(-1)
+        output = 2 * pred[:, :k].sum(dim=-1).float() / (count + k)
+        return output.mean()
+    else:
+        thres = k_or_thres
+        return M.f1_score(pred, target, task='binary', threshold=thres)
 
 
 def map(pred, target, k):
@@ -133,7 +165,7 @@ def hits(pred, target, k):
     return torch.any(pred[:, :k] > 0, dim=-1).float().mean()
 
 
-def logloss(pred, target, thres=None):
+def logloss(pred, target):
     r"""Calculate the log loss (log cross entropy).
 
     Args:
@@ -142,19 +174,16 @@ def logloss(pred, target, thres=None):
 
         target(torch.FloatTensor): [B, num_target]. The ground truth.
 
-        thres(float): threshold for rating dataset. Scores below the thres will be marked as 0, otherwise 1.
-
     Returns:
         torch.FloatTensor: a 0-dimensional tensor.
     """
-    if thres is not None:
-        target = target > thres
     if pred.dim() == target.dim():
         return F.binary_cross_entropy_with_logits(pred, target.float())
     else:
         return F.cross_entropy(pred, target)
 
-def auc(pred, target, thres=None):
+
+def auc(pred, target):
     r"""Calculate the global AUC.
 
     Args:
@@ -163,32 +192,28 @@ def auc(pred, target, thres=None):
 
         target(torch.FloatTensor): [B, num_target]. The ground truth.
 
-        thres(float): threshold for rating dataset. Scores below the thres will be marked as 0, otherwise 1.
-
     Returns:
         torch.FloatTensor: a 0-dimensional tensor.
     """
-    if thres is not None:
-        target = target > thres
     target = target.type(torch.long)
     return M.auroc(pred, target, task='binary')
 
 
-def f1(pred, target, k):
-    r"""Calculate the F1.
+def accuracy(pred, target, thres=0.5):
+    r"""Calculate the accuracy.
 
     Args:
-        pred(torch.BoolTensor): [B, num_items]. The prediction result of the model with bool type values.
+        pred(torch.BoolTensor): [Batch_size]. The prediction result of the model with bool type values.
             If the value in the j-th column is `True`, the j-th highest item predicted by model is right.
 
-        target(torch.FloatTensor): [B, num_target]. The ground truth.
+        target(torch.FloatTensor): [Batch_size]. The ground truth.
+
+        thres(float): Predictions below the thres will be marked as 0, otherwise 1.
 
     Returns:
         torch.FloatTensor: a 0-dimensional tensor.
     """
-    count = (target > 0).sum(-1)
-    output = 2 * pred[:, :k].sum(dim=-1).float() / (count + k)
-    return output.mean()
+    return M.accuracy(pred, target, task='binary', threshold=thres)
 
 
 metric_dict = {
@@ -198,17 +223,19 @@ metric_dict = {
     'map': map,
     'hit': hits,
     'mrr': mrr,
+    'f1': f1,
     'mse': M.mean_squared_error,
     'mae': M.mean_absolute_error,
     'auc': auc,
-    'logloss': logloss
+    'logloss': logloss,
+    'accuracy': accuracy
 }
 
 
 def get_rank_metrics(metric):
     if not isinstance(metric, list):
         metric = [metric]
-    topk_metrics = {'ndcg', 'precision', 'recall', 'map', 'mrr', 'hit'}
+    topk_metrics = {'ndcg', 'precision', 'recall', 'map', 'mrr', 'hit', 'f1'}
     rank_m = [(m, metric_dict[m])
               for m in metric if m in topk_metrics and m in metric_dict]
     return rank_m
@@ -217,7 +244,8 @@ def get_rank_metrics(metric):
 def get_pred_metrics(metric):
     if not isinstance(metric, list):
         metric = [metric]
-    pred_metrics = {'mae', 'mse', 'auc', 'logloss'}
+    pred_metrics = {'mae', 'mse', 'auc', 'logloss', 'accuracy', 
+                    'precision', 'recall', 'f1'}
     pred_m = [(m, metric_dict[m])
               for m in metric if m in pred_metrics and m in metric_dict]
     return pred_m

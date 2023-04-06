@@ -378,12 +378,6 @@ class AttentionLayer(torch.nn.Module):
                 self.attn_layer(query, key, value, key_padding_mask,
                                 True, attn_mask, average_attn_weights)
 
-        elif self.attention_type == 'scaled-dot-product':
-            product = query @ key.transpose(1, 2)
-            attn_output_weight = torch.softmax(
-                product / torch.sqrt(query.size(-1)), dim=-1)
-            attn_output = attn_output_weight @ value
-
         if need_weight:
             return attn_output, attn_output_weight
         else:
@@ -449,3 +443,14 @@ class VStackLayer(torch.nn.Sequential):
             else:
                 input = module(input)
         return input
+
+
+class KMaxPoolingLayer(torch.nn.Module):
+    def __init__(self, k, dim):
+        super().__init__()
+        self.k = k
+        self.dim = dim
+
+    def forward(self, input):
+        output = torch.topk(input, self.k, self.dim, sorted=True)[0]
+        return output

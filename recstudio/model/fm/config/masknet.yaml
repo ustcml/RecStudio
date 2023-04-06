@@ -1,0 +1,10 @@
+model:
+  parallel: True
+  num_blocks: 3
+  block_dim: 50
+  reduction_ratio: 1
+  hidden_layer_norm: False
+  mlp_layer: [512, 128]
+  activation: relu
+  dropout: 0.5
+  learning_rate: 1e-4

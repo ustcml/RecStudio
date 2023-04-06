@@ -6,6 +6,13 @@ from ..module import ctr, MLPModule
 
 
 class DeepFM(BaseRanker):
+    
+    def add_model_specific_args(parent_parser):
+        parent_parser.add_argument_group("DeepFM")
+        parent_parser.add_argument("--mlp_layer", type=int, nargs='+', default=[256,256,256], help="the MLP layer size")
+        parent_parser.add_argument("--activation", type=str, default='tanh', help="activation function")
+        parent_parser.add_argument("--dropout", type=float, default=0.3, help="dropout probablity")
+        return parent_parser
 
     def _get_dataset_class():
         return TripletDataset

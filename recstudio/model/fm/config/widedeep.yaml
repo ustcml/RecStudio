@@ -2,5 +2,5 @@ model:
   batch_norm: True
   embed_dim: 10
   mlp_layer: [256, 256, 256]
-  activation: 'relu'
+  activation: relu
   dropout: 0.3

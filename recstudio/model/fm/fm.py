@@ -3,7 +3,7 @@ from collections import OrderedDict
 from recstudio.data.dataset import TripletDataset
 from .. import loss_func
 from ..basemodel import BaseRanker
-from ..module import ctr, LambdaLayer, HStackLayer
+from ..module import ctr
 
 
 class FM(BaseRanker):

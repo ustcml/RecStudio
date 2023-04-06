@@ -1,0 +1,7 @@
+model:
+  product_type: inner
+  mlp_layer: [128, 64]
+  activation: relu
+  dropout: 0.5
+  batch_norm: False
+  stack_dim: ~

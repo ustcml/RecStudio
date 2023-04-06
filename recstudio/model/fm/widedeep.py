@@ -1,13 +1,18 @@
-import torch
-from collections import OrderedDict
 from recstudio.data.dataset import TripletDataset
-
 from ..basemodel import BaseRanker
 from ..loss_func import BCEWithLogitLoss
-from ..module import ctr, LambdaLayer, MLPModule, HStackLayer
+from ..module import ctr, MLPModule
 
 
 class WideDeep(BaseRanker):
+    
+    def add_model_specific_args(parent_parser):
+        parent_parser.add_argument_group("WideDeep")
+        parent_parser.add_argument("--mlp_layer", type=int, nargs='+', default=[256,256,256], help="the MLP layer size")
+        parent_parser.add_argument("--activation", type=str, default='relu', help="activation function")
+        parent_parser.add_argument("--dropout", type=float, default=0.3, help="dropout probablity")
+        parent_parser.add_argument("--batch_norm", type=bool, default=False, help="whether to use batch_norm")
+        return parent_parser
 
     def _get_dataset_class():
         return TripletDataset

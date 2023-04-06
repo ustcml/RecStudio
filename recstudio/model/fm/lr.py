@@ -1,14 +1,11 @@
-import torch
-from collections import OrderedDict
 from ..basemodel import BaseRanker
-from ..module import ctr, LambdaLayer, MLPModule, HStackLayer
+from ..module import ctr
 from ..loss_func import BCEWithLogitLoss
 from recstudio.data.dataset import TripletDataset
 
 
 class LR(BaseRanker):
 
-    @staticmethod
     def _get_dataset_class():
         return TripletDataset
 
