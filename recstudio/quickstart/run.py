@@ -52,5 +52,6 @@ def run(model: str, dataset: str, model_config: Dict=None, data_config: Dict=Non
     datasets = dataset_class(name=dataset, config=data_conf).build(**model_conf['data'])
     logger.info(f"{datasets[0]}")
     logger.info(f"\n{set_color('Model Config', 'green')}: \n\n" + color_dict_normal(model_conf, False))
-    model.fit(*datasets[:2], run_mode='light')
-    model.evaluate(datasets[-1])
+    val_result = model.fit(*datasets[:2], run_mode='light')
+    test_result = model.evaluate(datasets[-1])
+    return (model, datasets), (val_result, test_result)
