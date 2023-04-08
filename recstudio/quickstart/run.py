@@ -1,4 +1,4 @@
-import os, time
+import os, time, torch
 from typing import *
 from recstudio.utils import *
 
@@ -22,6 +22,7 @@ def run(model: str, dataset: str, model_config: Dict=None, data_config: Dict=Non
 
     log_path = time.strftime(f"{model}/{dataset}/%Y-%m-%d-%H-%M-%S.log", time.localtime())
     logger = get_logger(log_path)
+    torch.set_num_threads(model_conf['train']['num_threads'])
 
     if not verbose:
         import logging
