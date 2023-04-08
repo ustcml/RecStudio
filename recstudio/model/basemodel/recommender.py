@@ -18,6 +18,7 @@ from torch.nn.utils.clip_grad import clip_grad_norm_
 from recstudio.model import init, basemodel, loss_func
 from recstudio.utils import callbacks
 from recstudio.utils.utils import *
+from recstudio.utils.data_parallel import data_parallel
 from recstudio.data.dataset import (TripletDataset, CombinedLoaders)
 
 
@@ -600,7 +601,10 @@ class Recommender(torch.nn.Module, abc.ABC):
                 if 'batch_idx' in inspect.getargspec(self.training_step).args:
                     training_step_args['batch_idx'] = batch_idx
 
-                loss = self.training_step(**training_step_args)
+                if getattr(self, '_dp', False):     # there are perfermance degrades in DP mode
+                    loss = data_parallel(self, 'training_step', inputs=None, module_kwargs=training_step_args, device_ids=self._gpu_list, output_device=self.device)
+                else:
+                    loss = self.training_step(**training_step_args)
 
                 if isinstance(loss, dict):
                     if loss['loss'].requires_grad:
@@ -700,11 +704,12 @@ class Recommender(torch.nn.Module, abc.ABC):
             if len(gpu_list) == 1:
                 self.device = torch.device("cuda", gpu_list[0])
                 self = self._to_device(self, self.device)
-            elif self.config['accelerator'] == 'dp':
-                self.device = torch.device("cuda")
+            elif self.config['train']['accelerator'] == 'dp':
+                self.device = torch.device("cuda:{}".format(gpu_list[0]))
                 self = self.to(self.device)
-                self = torch.nn.DataParallel(self, device_ids=gpu_list, output_device=gpu_list[0])
-            elif self.config['accelerator'] == 'ddp':
+                self._dp = True
+                self._gpu_list = [torch.device(f"cuda:{i}") for i in gpu_list]
+            elif self.config['train']['accelerator'] == 'ddp':
                 os.environ["MASTER_ADDR"] = "localhost"
                 os.environ["MASTER_PORT"] = "29500"
                 self.device_list = [torch.device("cuda", i) for i in gpu_list]
