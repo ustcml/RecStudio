@@ -27,11 +27,28 @@ class DenseEmbedding(torch.nn.Module):
     def extra_repr(self):
         return f"embedding_dim={self.embedding_dim}, bias={self.bias}, batch_norm={self.batch_norm}"
 
-
+class DenseKernel(torch.nn.Module):
+    
+    def __init__(self, num_dense_feat):
+        super().__init__()
+        self.num_dense_feat= num_dense_feat
+        self.kernel = nn.Parameter(torch.Tensor(num_dense_feat, 1))
+    
+    def forward(self, input):
+        return input.matmul(self.kernel)
+    
+    def __repr__(self):
+        return f"Parameter(Tensor({self.num_dense_feat}, 1))"
+        
 class Embeddings(torch.nn.Module):
 
     def __init__(self, fields: Set, embed_dim, data, reduction='mean',
-                 share_dense_embedding=False, dense_emb_bias=False, dense_emb_norm=True):
+                 share_dense_embedding=True, dense_emb_bias=False, dense_emb_norm=True,
+                 with_dense_kernel=False):
+        r"""
+        Args:
+            dense_kernel (bool): if `True`, concat all float feats together and inner product
+        """
         super(Embeddings, self).__init__()
         self.embed_dim = embed_dim
 
@@ -40,6 +57,7 @@ class Embeddings(torch.nn.Module):
         self.share_dense_embedding = share_dense_embedding
         self.dense_emb_bias = dense_emb_bias
         self.dense_emb_norm = dense_emb_norm
+        self.with_dense_kernel = with_dense_kernel
 
         self.embeddings = torch.nn.ModuleDict()
         self.num_features = len(self.field2types)
@@ -54,7 +72,7 @@ class Embeddings(torch.nn.Module):
                 self.embeddings[f] = torch.nn.Embedding(
                     data.num_values(f), embed_dim, 0)
             elif (t == "float"):
-                if share_dense_embedding:
+                if share_dense_embedding or with_dense_kernel:
                     _num_dense_feat += 1
                     _dense_feat.append(f)
                 else:
@@ -62,29 +80,41 @@ class Embeddings(torch.nn.Module):
                         embed_dim, dense_emb_bias, dense_emb_norm)
 
         if _num_dense_feat > 0:
-            dense_emb = DenseEmbedding(
-                embed_dim, dense_emb_bias, dense_emb_norm)
-            for f in _dense_feat:
-                self.embeddings[f] = dense_emb
+            if with_dense_kernel:
+                self.embeddings['dense_kernel'] = DenseKernel(_num_dense_feat)
+            else:
+                dense_emb = DenseEmbedding(
+                    embed_dim, dense_emb_bias, dense_emb_norm)
+                for f in _dense_feat:
+                    self.embeddings[f] = dense_emb
 
         if _num_token_seq_feat > 0:
             self.seq_pooling_layer = SeqPoolingLayer(reduction, keepdim=False)
 
     def forward(self, batch):
         embs = []
-        for f in self.embeddings:
+        dense_value_list = []
+        for f, t in self.field2types.items():
             d = batch[f]
-            t = self.field2types[f]
-            if t == 'token' or t == 'float':
+            if t == 'token' or (t == 'float' and not self.with_dense_kernel):
                 # shape: [B,] or [B,N]
                 e = self.embeddings[f](d)
+                embs.append(e)
+            elif t == 'float' and self.with_dense_kernel:
+                dense_value_list.append(d)
             else:
                 # shape: [B, L] or [B,N,L]
                 length = (d > 0).float().sum(dim=-1, keepdim=False)
                 seq_emb = self.embeddings[f](d)
                 e = self.seq_pooling_layer(seq_emb, length)
-            embs.append(e)
+                embs.append(e)
 
+        if 'dense_kernel' in self.embeddings:
+            dense_emb = self.embeddings['dense_kernel'](
+                            torch.vstack(dense_value_list).transpose(0, 1)
+                        ).expand(-1, self.embed_dim)
+            embs.append(dense_emb)
+            
         # [B,num_features,D] or [B,N,num_features,D]
         emb = torch.stack(embs, dim=-2)
         return emb

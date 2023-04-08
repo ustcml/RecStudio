@@ -14,7 +14,9 @@ from recstudio.utils import *
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, Dataset, Sampler
 from torch.utils.data.distributed import DistributedSampler
-
+from sklearn.preprocessing import *
+import ast
+import re
 
 class TripletDataset(Dataset):
     r""" Dataset for Matrix Factorized Methods.
@@ -56,6 +58,7 @@ class TripletDataset(Dataset):
             # determine the valid user set and item set
             self._filter(self.config['min_user_inter'],
                          self.config['min_item_inter'])
+            self._float_preprocess()
             self._map_all_ids()
             self._post_preprocess()
             if self.config['save_cache']:
@@ -100,6 +103,7 @@ class TripletDataset(Dataset):
         self.field2token2idx = {}
         self.field2tokens = {}
         self.field2maxlen = self.config['field_max_len'] or {}
+        self.float_field_preprocess = {}
         self.fuid = self.config['user_id_field'].split(':')[0]
         self.fiid = self.config['item_id_field'].split(':')[0]
         self.ftime = self.config['time_field'].split(':')[0]
@@ -143,7 +147,8 @@ class TripletDataset(Dataset):
         info_str += "{}: {}\n".format(set_color('Total Interactions', 'blue'), self.num_inters)
         info_str += "{}: {:.6f}\n".format(set_color('Sparsity', 'blue'),
                                           (1-self.num_inters / ((self.num_items-1)*(self.num_users-1))))
-        info_str += "=" * (max_len_field*max_num_fields)
+        info_str += "=" * (max_len_field*max_num_fields) + '\n'
+        info_str += color_dict_normal(self.float_field_preprocess, False)
         return info_str
 
     def _filter_ratings(self, thres: float=None):
@@ -310,6 +315,68 @@ class TripletDataset(Dataset):
             feat_list.extend(self.network_feat)
         # return list(feat for feat in feat_list if feat is not None)
         return feat_list
+
+    def _float_preprocess(self):
+        r"""Preprocess float fields."""
+        
+        def preprocess(col, preprocessor_str):
+            preprocessor_dict = {
+                'MinMaxScaler': MinMaxScaler,
+                'StandardScaler': StandardScaler,
+                'MaxAbsScaler': MaxAbsScaler,
+                'RobustScaler': RobustScaler,
+                'Normarlizer': Normalizer,
+                'Binarizer': Binarizer,
+                'KBinsDiscretizer': KBinsDiscretizer,
+                'KernelCenterer': KernelCenterer,
+                'QuantileTransformer': QuantileTransformer,
+                'PowerTransformer': PowerTransformer,
+                'SplineTransformer': SplineTransformer,
+                'FunctionTransfomer': FunctionTransformer
+            }
+            if preprocessor_str == 'LogTransformer()':
+                p = FunctionTransformer(np.log1p)
+            else:
+                preprocessor = re.findall(r'([a-zA-z]+)\(.*\)', preprocessor_str)[0]
+                preprocessor = preprocessor_dict[preprocessor]
+                args = re.findall(r'([a-z_]+)=(\d+\.?\d*|"[A-Za-z]+"|True|False|\(\d+\.?\d* \d+\.?\d*\))', preprocessor_str)
+                if len(args) > 0:
+                    kwargs = {}
+                    for k, v in args:
+                        if '(' not in v:
+                            kwargs[k] = ast.literal_eval(v) 
+                        else:
+                            kwargs[k] = ast.literal_eval(v.replace(' ', ',')) 
+                    p = preprocessor(**kwargs)
+                else:
+                    p = preprocessor()
+            # p = eval(preprocessor_str)
+            col = col.to_numpy().reshape(-1, 1)
+            col = p.fit_transform(col)
+            return col
+        
+        if self.config['float_field_preprocess'] is None:
+            return
+        
+        for f in self.config['float_field_preprocess']:
+            s = f.split(':')
+            float_field = s[0]
+            preprocessor = s[1]
+            if float_field not in self.field or \
+                self.field2type[float_field] != 'float':
+                raise ValueError(f'{float_field} should be float type.')
+            self.float_field_preprocess.update({float_field: preprocessor})
+            
+            for feat in self._get_feat_list():
+                if float_field in feat.columns:
+                    col = feat[float_field]
+                    feat[float_field] = preprocess(col, preprocessor)   
+                       
+                    if 'binarizer' in preprocessor.lower() or \
+                        'discretizer' in preprocessor.lower():       
+                        self.field2type[float_field] = 'token'
+                        feat[float_field] = feat[float_field].astype(str)
+                
 
     def _map_all_ids(self):
         r"""Map tokens to index."""
