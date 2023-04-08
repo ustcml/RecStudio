@@ -61,7 +61,7 @@ train:
     scheduler: ~    # [onplateau, exponential]
 
     seed: 2022  # random seed, usually 42 is a magic number
-    weight_decay: 0      # weight decay for the optimizer
+    weight_decay: 0.0      # weight decay for the optimizer
     tensorboard_path: ~
 
 
