@@ -635,8 +635,8 @@ class Recommender(torch.nn.Module, abc.ABC):
                     #
                     if opt is not None:
                         opt['optimizer'].step()
-                if len(outputs) > 0:
-                    output_list.append(outputs)
+            if len(outputs) > 0:
+                output_list.append(outputs)
         return output_list
 
     @torch.no_grad()
