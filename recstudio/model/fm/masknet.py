@@ -13,18 +13,6 @@ Paper Reference:
 """
 
 class MaskNet(BaseRanker):
-    
-    def add_model_specific_args(parent_parser):
-        parent_parser.add_argument_group("MaskNet")
-        parent_parser.add_argument("--parallel", type=bool, default=True, help="whether to use parallel or serial mode")
-        parent_parser.add_argument("--num_blocks", type=int, default=3, help="number of blocks when parallel mode")
-        parent_parser.add_argument("--block_dim", type=int,  nargs='+', default=50, help="dimension for each block, int for parallel, list for serial")
-        parent_parser.add_argument("--reduction_ratio", type=float, default=1.0, help="reduction ratio, must greater than 1")
-        parent_parser.add_argument("--hidden_layer_norm", type=bool, default=False, help="whether to use layer norm in hidden layers")
-        parent_parser.add_argument("--mlp_layer", type=int, nargs='+', default=[512,128], help="the MLP layer size")
-        parent_parser.add_argument("--activation", type=str, default='relu', help="activation function")
-        parent_parser.add_argument("--dropout", type=float, default=0.5, help="dropout probablity")
-        return parent_parser
 
     def _get_dataset_class():
         return TripletDataset

@@ -12,28 +12,6 @@ class IRGAN(basemodel.BaseRetriever):
         super().__init__(config, **kwargs)
         self.generator = Generator(config)
 
-    def add_model_specific_args(parent_parser):
-        parent_parser = basemodel.Recommender.add_model_specific_args(parent_parser)
-        parent_parser.add_argument_group('IRGAN')
-        parent_parser.add_argument("--negative_count", type=int, default=1, help='negative sampling numbers')
-        parent_parser.add_argument("--weight_decay_dis", type=float, default=1e-4,
-                                   help='weight decay for discriminator')
-        parent_parser.add_argument("--weight_decay_gen", type=float, default=1e-4, help='weight decay for generator')
-        parent_parser.add_argument("--learning_rate_dis", type=float, default=1e-3,
-                                   help='learning rate for discriminator')
-        parent_parser.add_argument("--learning_rate_gen", type=float, default=1e-3, help='learning rate for generator')
-        parent_parser.add_argument("--every_n_epoch_gen", type=int, default=2, help='epochs for generator to optimize')
-        parent_parser.add_argument("--every_n_epoch_dis", type=int, default=5,
-                                   help='epochs for discriminator to optimize')
-        parent_parser.add_argument("--T_dis", type=float, default=0.2,
-                                   help='temperature for softmax distribution for discriminator')
-        parent_parser.add_argument("--T_gen", type=float, default=1,
-                                   help='temperature for softmax distribution for generator')
-        parent_parser.add_argument(
-            "--sample_lambda", type=float, default=0.2,
-            help='lambda coef for distribution in optimization of generator')
-        return parent_parser
-
     def _init_model(self, train_data):
         self.generator._init_model(train_data)
         # self.retriever._init_parameter()

@@ -10,6 +10,6 @@ model:
   num_attention_layers: 3
   n_head: 2
   
-  residual: True
-  residual_project: True
-  layer_norm: False
+  res_mode: each_layer
+  scale: False
+  relu_before_att: False

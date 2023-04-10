@@ -1,0 +1,8 @@
+model:
+  bridge_type: hadamard_product
+  temperature: 1.0
+  embed_dim: 10
+  activation: relu
+  num_layers: 5
+  dropout: 0.5
+  batch_norm: True

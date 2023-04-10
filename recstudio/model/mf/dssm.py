@@ -9,16 +9,6 @@ from ..module import LambdaLayer, MLPModule, ctr
 
 class DSSM(basemodel.BaseRetriever):
 
-    def add_model_specific_args(parent_parser):
-        parent_parser = basemodel.Recommender.add_model_specific_args(parent_parser)
-        parent_parser.add_argument_group('DSSM')
-        parent_parser.add_argument("--mlp_layer", type=int, nargs='+', default=[256, 256, 256], help='mlp layer size')
-        parent_parser.add_argument("--activation", type=str, default='tanh', help='activation function name')
-        parent_parser.add_argument("--dropout", type=float, default=0.3, help='dropout rate for MLP')
-        parent_parser.add_argument("--batch_norm", action='store_true', help='whether to use batch norm')
-        parent_parser.add_argument("--negative_count", type=int, default=1, help='negative sampling numbers')
-        return parent_parser
-
     def _set_data_field(self, data):
         data.use_field = data.field
 

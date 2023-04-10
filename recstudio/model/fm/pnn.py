@@ -15,16 +15,6 @@ Paper Reference:
 """
 
 class PNN(BaseRanker):
-    
-    def add_model_specific_args(parent_parser):
-        parent_parser.add_argument_group("PNN")
-        parent_parser.add_argument("--product_type", type=str, default='inner', help="product type for each pair interaction")
-        parent_parser.add_argument("--mlp_layer", type=int, nargs='+', default=[128,64], help="the MLP layer size")
-        parent_parser.add_argument("--activation", type=str, default='relu', help="activation function")
-        parent_parser.add_argument("--dropout", type=float, default=0.5, help="dropout probablity")
-        parent_parser.add_argument("--batch_norm", action='store_true', default=False, help="whether to use batch_norm")
-        parent_parser.add_argument("--stack_dim", type=int, default=None, help="whether to stack and the stack dimension")
-        return parent_parser
 
     def _get_dataset_class():
         return TripletDataset
@@ -44,14 +34,14 @@ class PNN(BaseRanker):
             else:
                 raise ValueError(f'Expect product_type to be `inner` or `outer`, but got {model_config["product_type"]}.')
         else:
-            self.Wz = nn.Parameter(torch.Tensor(num_fields * self.embed_dim, model_config['stack_dim']))
+            self.Wz = nn.Parameter(torch.randn(num_fields * self.embed_dim, model_config['stack_dim']))
             if model_config['product_type'].lower() == 'inner':
-                self.Thetap = nn.Parameter(torch.Tensor(num_fields, model_config['stack_dim']))
+                self.Thetap = nn.Parameter(torch.randn(num_fields, model_config['stack_dim']))
             elif model_config['product_type'].lower() == 'outer':
-                self.Wp = nn.Parameter(torch.Tensor(self.embed_dim, self.embed_dim, model_config['stack_dim']))
+                self.Wp = nn.Parameter(torch.randn(self.embed_dim, self.embed_dim, model_config['stack_dim']))
             else:
                 raise ValueError(f'Expect product_type to be `inner` or `outer`, but got {model_config["product_type"]}.')
-            self.bias = nn.Parameter(torch.Tensor(model_config['stack_dim']))
+            self.bias = nn.Parameter(torch.randn(model_config['stack_dim']))
             mlp_in_dim = 2 * model_config['stack_dim']
             
         self.mlp = MLPModule(

@@ -1,0 +1,13 @@
+model:
+  combination: parallel
+  low_rank: ~
+  num_experts: 4
+  num_layers: 3
+  embed_dim: 10
+  mlp_layer: [256,256,256]
+  activation: relu
+  cross_activation: tanh
+  dropout: 0.5
+  batch_norm: True
+  
+  scheduler: onplateau

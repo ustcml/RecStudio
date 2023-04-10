@@ -1,7 +1,6 @@
 model:
-  product_type: inner
-  mlp_layer: [128, 64]
+  hidden_dims: [64, 64, 64]
   activation: relu
   dropout: 0.5
   batch_norm: False
-  stack_dim: 2
+  layer_norm: True

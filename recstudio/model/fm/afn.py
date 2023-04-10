@@ -16,18 +16,6 @@ Paper Reference:
 """
 
 class AFN(BaseRanker):
-
-    def add_model_specific_args(parent_parser):
-        parent_parser.add_argument_group("AFN")
-        parent_parser.add_argument("--log_hidden_size", type=int, default=128, help="hidden size of logtransformer layer")
-        parent_parser.add_argument("--mlp_layer", type=int, nargs='+', default=[128,128], help="the MLP layer size")
-        parent_parser.add_argument("--activation", type=str, default='relu', help="activation function")
-        parent_parser.add_argument("--dropout", type=float, default=0.5, help="dropout probablity")
-        parent_parser.add_argument("--ensemble", type=bool, default=True, help="whether to ensemble another MLP")
-        parent_parser.add_argument("--ensemble_mlp_layer", type=int, nargs='+', default=[256,64], help="layer size of ensemble MLP")
-        parent_parser.add_argument("--ensemble_activation", type=str, default='relu', help="activation function of ensemble MLP")
-        parent_parser.add_argument("--ensemble_dropout", type=float, default=0.5, help="dropout probablity of ensemble MLP")
-        return parent_parser
     
     def _get_dataset_class():
         return TripletDataset

@@ -7,14 +7,6 @@ from ..loss_func import BCEWithLogitLoss
 
 
 class NFM(BaseRanker):
-    
-    def add_model_specific_args(parent_parser):
-        parent_parser.add_argument_group("NFM")
-        parent_parser.add_argument("--mlp_layer", type=int, nargs='+', default=[128,128,128], help="the MLP layer size")
-        parent_parser.add_argument("--activation", type=str, default='sigmoid', help="activation function")
-        parent_parser.add_argument("--dropout", type=float, default=0.3, help="dropout probablity")
-        parent_parser.add_argument("--batch_norm", type=bool, default=False, help="whether to use batch_norm")
-        return parent_parser
 
     def _get_dataset_class():
         return TripletDataset

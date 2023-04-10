@@ -1,0 +1,8 @@
+model:
+  op: sum
+  top_mlp_layer: [128, 128]
+  top_activation: relu
+  top_dropout: 0.5
+  bottom_mlp_layer: [128, 128]
+  bottom_activation: relu
+  bottom_dropout: 0.5

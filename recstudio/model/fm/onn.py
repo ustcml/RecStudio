@@ -15,14 +15,6 @@ Paper Reference:
 """
 
 class ONN(BaseRanker):
-    
-    def add_model_specific_args(parent_parser):
-        parent_parser.add_argument_group("ONN")
-        parent_parser.add_argument("--mlp_layer", type=int, nargs='+', default=[128,64], help="the MLP layer size")
-        parent_parser.add_argument("--activation", type=str, default='relu', help="activation function")
-        parent_parser.add_argument("--dropout", type=float, default=0.2, help="dropout probablity")
-        parent_parser.add_argument("--batch_norm", action='store_true', default=False, help="whether to use batch_norm")
-        return parent_parser
 
     def _get_dataset_class():
         return TripletDataset

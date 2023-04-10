@@ -1,5 +1,5 @@
 model:
-  parallel: True
+  parallel: False
   num_blocks: 3
   block_dim: 50
   reduction_ratio: 1

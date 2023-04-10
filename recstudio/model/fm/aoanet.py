@@ -17,15 +17,6 @@ Paper Reference:
 
 class AOANet(BaseRanker):
 
-    def add_model_specific_args(parent_parser):
-        parent_parser.add_argument_group("AOANet")
-        parent_parser.add_argument("--mlp_layer", type=int, nargs='+', default=[64,64], help="the MLP layer size")
-        parent_parser.add_argument("--activation", type=str, default='relu', help="activation function")
-        parent_parser.add_argument("--dropout", type=float, default=0.2, help="dropout probablity")
-        parent_parser.add_argument("--num_subspaces", type=int, default=3, help="number of subspaces")
-        parent_parser.add_argument("--num_interaction_layers", type=int, default=3, help="number of interaction layers")
-        return parent_parser
-
     def _get_dataset_class():
         return TripletDataset
 

@@ -15,12 +15,6 @@ Paper Reference:
 """
 
 class AFM(BaseRanker):
-    
-    def add_model_specific_args(parent_parser):
-        parent_parser.add_argument_group("AFM")
-        parent_parser.add_argument("--attention_dim", type=int, default=4, help="dimension for modeling attention")
-        parent_parser.add_argument("--dropout", type=float, default=0.5, help="dropout probablity")
-        return parent_parser
 
     def _get_dataset_class():
         return TripletDataset

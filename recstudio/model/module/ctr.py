@@ -2,7 +2,43 @@ from typing import Set
 import math
 import torch
 import torch.nn as nn
-from .layers import MLPModule, AttentionLayer, SeqPoolingLayer, get_act, KMaxPoolingLayer, VStackLayer, HStackLayer
+from .layers import MLPModule, AttentionLayer, SeqPoolingLayer, get_act, KMaxPoolingLayer, HStackLayer
+
+__all__ = [
+    'DenseEmbedding',
+    'Embeddings',
+    'LinearLayer',
+    'FMLayer',
+    'CrossInteraction',
+    'CrossNetwork',
+    'CrossNetworkV2',
+    'CrossNetworkMix',
+    'DINScorer',
+    'BehaviorSequenceTransformer',
+    'DIENScorer',
+    'CIN',
+    'AFMLayer',
+    'LogTransformLayer',
+    'SelfAttentionInteractingLayer',
+    'DisentangledSelfAttentionInteractingLayer',
+    'ConvLayer',
+    'SqueezeExcitation',
+    'BilinearInteraction',
+    'MaskBlock',
+    'ParallelMaskNet',
+    'SerialMaskNet',
+    'InnerProductLayer',
+    'OuterProductLayer',
+    'OperationAwareFMLayer',
+    'FieldAwareFMLayer',
+    'GeneralizedInteractionFusion',
+    'InteractionMachine',
+    'BridgeLayer',
+    'RegulationLayer',
+    'FeatureSelection',
+    'MultiHeadBilinearFusion',
+    'FieldWiseBiInteraction'
+]
 
 
 class DenseEmbedding(torch.nn.Module):
@@ -152,30 +188,97 @@ class FMLayer(nn.Module):
         return f"reduction={reduction_repr}"
 
 
-class CrossNetwork(torch.nn.Module):
+class CrossInteraction(nn.Module):
+    def __init__(self, embed_dim):
+        super(CrossInteraction, self).__init__()
+        self.weight = nn.Parameter(torch.randn(embed_dim))
+        self.bias = nn.Parameter(torch.zeros(embed_dim))
+
+    def forward(self, X0, Xi):
+        return (X0.t() * (torch.tensordot(Xi, self.weight, dims=([1], [0])))).t() + self.bias
+    
+
+class CrossNetwork(nn.Module):
     def __init__(self, embed_dim, num_layers):
         super(CrossNetwork, self).__init__()
         self.embed_dim = embed_dim
         self.num_layers = num_layers
-        self.weight = torch.nn.ParameterList([
-            torch.nn.Parameter(torch.randn(self.embed_dim))
-            for _ in range(num_layers)
-        ])
-        self.bias = torch.nn.ParameterList([
-            torch.nn.Parameter(torch.zeros(self.embed_dim))
-            for _ in range(num_layers)
-        ])
+        self.cross = nn.ModuleList([CrossInteraction(embed_dim) for _ in range(num_layers)])
 
     def forward(self, input):
         x = input
-        for i in range(self.num_layers):
-            x_1 = torch.tensordot(x, self.weight[i], dims=([1], [0]))
-            x_2 = (input.transpose(0, 1) * x_1).transpose(0, 1)
-            x = x_2 + x + self.bias[i]
+        for cross in self.cross:
+            x = x + cross(input, x)
         return x
 
     def extra_repr(self) -> str:
         return f'embed_dim={self.embed_dim}, num_layers={self.num_layers}'
+
+
+class CrossNetworkV2(torch.nn.Module):
+    def __init__(self, embed_dim, num_layers):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.num_layers = num_layers
+        self.linear = nn.ModuleList([
+            nn.Linear(embed_dim, embed_dim, bias=True)
+            for _ in range(num_layers)
+        ])
+
+    def forward(self, input):
+        x0 = input
+        xl = x0
+        for i in range(self.num_layers):
+            xl = x0 * self.linear[i](xl) + xl
+        return xl
+
+    def extra_repr(self) -> str:
+        return f'embed_dim={self.embed_dim}, num_layers={self.num_layers}'
+    
+    
+class CrossNetworkMix(torch.nn.Module):
+    def __init__(self, embed_dim, num_layers, low_rank, num_experts, activation):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.num_layers = num_layers
+        self.low_rank = low_rank
+        self.num_experts = num_experts
+        self.activation = activation
+        self.U = nn.ParameterList([
+                    nn.Parameter(torch.randn(num_experts, embed_dim, low_rank))
+                    for _ in range(num_layers)
+                ])
+        self.V = nn.ParameterList([
+                    nn.Parameter(torch.randn(num_experts, embed_dim, low_rank))
+                    for _ in range(num_layers)
+                ])
+        self.C = nn.ParameterList([
+                    nn.Parameter(torch.randn(num_experts, low_rank, low_rank))
+                    for _ in range(num_layers)
+                ])
+        self.bias = nn.ParameterList([
+                    nn.Parameter(torch.randn(embed_dim))
+                    for _ in range(num_layers)
+                ])
+        self.gate = nn.Linear(embed_dim, num_experts, bias=False)
+        self.act = get_act(activation)
+
+    def forward(self, input):
+        x0 = input                                          # B x F*D
+        xl = x0
+        for i in range(self.num_layers):
+            gate_score = self.gate(xl).softmax(dim=-1)
+            Vx = torch.einsum('edr,bd->ber', [self.V[i], xl])
+            Vx = self.act(Vx)
+            CVx = torch.einsum('eRr,beR->ber', [self.C[i], Vx])
+            CVx = self.act(CVx)
+            UCVx = torch.einsum('edr,ber->ebd', [self.U[i], CVx])
+            expert_out = x0 * (UCVx + self.bias[i])
+            xl = torch.einsum('be,ebd->bd', [gate_score, expert_out]) + xl
+        return xl
+
+    def extra_repr(self) -> str:
+        return f'embed_dim={self.embed_dim}, num_layers={self.num_layers}, low_rank={self.low_rank}, num_experts={self.num_experts}, activation={self.activation}'
 
 
 class DINScorer(torch.nn.Module):
@@ -367,7 +470,6 @@ class AFMLayer(nn.Module):
     def __init__(self, embed_dim, attention_dim, num_fields, dropout=0):
         super(AFMLayer, self).__init__()
         self.attention_dim = attention_dim
-        self.dropout = dropout
         self.attention = nn.Sequential(
                             nn.Linear(embed_dim, attention_dim),
                             nn.ReLU(),
@@ -375,15 +477,11 @@ class AFMLayer(nn.Module):
                             nn.Softmax(dim=1))
         self.p = nn.Linear(embed_dim, 1, bias=False)
         self.dropout = nn.Dropout(dropout)
-        self.triu_index = nn.Parameter(
-                            torch.triu_indices(num_fields, num_fields, offset=1), 
-                            requires_grad=False)
+        self.inner_prod = InnerProductLayer(num_fields, reduction=False)
 
     def forward(self, inputs):
         # inputs: B x F x D
-        emb0 = torch.index_select(inputs, 1, self.triu_index[0])
-        emb1 = torch.index_select(inputs, 1, self.triu_index[1])
-        prod = emb0 * emb1
+        prod = self.inner_prod(inputs)
         attn = self.attention(prod)
         attn_sum = (attn * prod).sum(1)
         output = self.dropout(attn_sum)
@@ -392,7 +490,7 @@ class AFMLayer(nn.Module):
         return output
 
     def extra_repr(self):
-        return f"attention dim={self.attention_dim}, dropout={self.dropout}"
+        return f"attention dim={self.attention_dim}, dropout={self.dropout.p}"
    
     
 class LogTransformLayer(nn.Module):
@@ -419,7 +517,7 @@ class LogTransformLayer(nn.Module):
         return f"hidden_size={self.hidden_size}, clamp_min={self.clamp_min}"
     
     
-class InteractingLayer(nn.Module):
+class SelfAttentionInteractingLayer(nn.Module):
     
     def __init__(self, embed_dim, n_head=1, dropout=0, residual=True, residual_project=True, layer_norm=False):
         super().__init__()
@@ -453,10 +551,69 @@ class InteractingLayer(nn.Module):
         return output.relu()
     
     def extra_repr(self):
-        s = f"attention_dim={self.embed_dim}, n_head={self.n_head}, dropout={self.dropout}"
+        return f"attention_dim={self.embed_dim}, n_head={self.n_head}, dropout={self.dropout}, residual={self.residual}, layer_norm={self.layer_norm}"
+    
+
+class DisentangledSelfAttentionInteractingLayer(nn.Module):
+    
+    def __init__(self, embed_dim, attention_dim, n_head=1, dropout=0, residual=True, scale=True, relu_before_att=False):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.attention_dim = attention_dim
+        self.n_head = n_head
+        self.residual = residual
+        self.scale = scale
+        self.relu_before_att = relu_before_att
+        self.unary = nn.Linear(embed_dim, n_head)
+        self.Wq = nn.Linear(embed_dim, attention_dim)
+        self.Wk = nn.Linear(embed_dim, attention_dim)
+        self.Wv = nn.Linear(embed_dim, attention_dim)  
+        self.dropout = nn.Dropout(dropout) 
+        if residual:
+            self.res = nn.Linear(embed_dim, embed_dim)
+            
+    def forward(self, inputs):
+        bs = inputs.size(0)
+        
+        unary = self.unary(inputs)                                      # B x F x n_head
+        unary_weight = unary.softmax(dim=1)
+        unary_weight = unary_weight.view(bs * self.n_head, -1, 1)       # B*n_head x F x 1
+        
+        query = self.Wq(inputs)
+        key = self.Wk(inputs)
+        value = self.Wv(inputs)
+        
+        if self.relu_before_att:
+            query = query.relu()
+            key = key.relu()
+            value = value.relu()
+            
+        dim_per_head = self.attention_dim // self.n_head
+        query = query.view(bs * self.n_head, -1, dim_per_head)
+        key = key.view(bs * self.n_head, -1, dim_per_head)
+        value = value.view(bs * self.n_head, -1, dim_per_head)
+            
+        mu_query = query - query.mean(dim=1, keepdim=True)
+        mu_key = key - key.mean(dim=1, keepdim=True)
+        
+        pair_weight = mu_query @ mu_key.transpose(1, 2)
+        if self.scale:
+            pair_weight /=  dim_per_head ** 0.5
+        pair_weight = pair_weight.softmax(dim=2)                        # B*n_head x F x F
+        
+        attn = unary_weight + pair_weight 
+        attn = self.dropout(attn)
+        output = attn @ value
+        output = output.view(bs, -1, self.attention_dim)       
+        
         if self.residual:
-            s += f", residual={self.residual}"
-        return s
+            res_out = self.res(inputs)
+            output += res_out
+        return output
+    
+    def extra_repr(self):
+        return f"attention_dim={self.embed_dim}, n_head={self.n_head}, dropout={self.dropout.p}, " + \
+                f"residual={self.residual}, scale={self.scale}, relu_before_att={self.relu_before_att}"
  
     
 class ConvLayer(nn.Module):
@@ -540,11 +697,11 @@ class BilinearInteraction(nn.Module):
                              f'but got {bilinear_type}.')
         self.bilinear_type = bilinear_type.lower()
         if self.bilinear_type == 'all':
-            self.weight = nn.Parameter(torch.Tensor(embed_dim, embed_dim))
+            self.weight = nn.Parameter(torch.randn(embed_dim, embed_dim))
         elif self.bilinear_type == 'each':
-            self.weight = nn.Parameter(torch.Tensor(num_fields, embed_dim, embed_dim))
+            self.weight = nn.Parameter(torch.randn(num_fields, embed_dim, embed_dim))
         else:
-            self.weight = nn.Parameter(torch.Tensor(
+            self.weight = nn.Parameter(torch.randn(
                             num_fields * (num_fields - 1) // 2, embed_dim, embed_dim))
 
         self.triu_index = nn.Parameter(
@@ -644,23 +801,24 @@ class SerialMaskNet(nn.Module):
         if not isinstance(block_dim, list):
             self.block_dim = [block_dim]
         self.block_dim = [num_fields * embed_dim] + self.block_dim
-        self.mask_blocks = VStackLayer(
-                               HStackLayer(*[
-                                    MaskBlock(
-                                        num_fields * embed_dim, 
-                                        self.block_dim[i], 
-                                        self.block_dim[i + 1], 
-                                        reduction_ratio, 
-                                        activation, 
-                                        dropout,
-                                        hidden_layer_norm)
-                                for i in range(len(self.block_dim) - 1)]))
+        self.mask_blocks = nn.ModuleList([
+                                MaskBlock(
+                                    num_fields * embed_dim, 
+                                    self.block_dim[i], 
+                                    self.block_dim[i + 1], 
+                                    reduction_ratio, 
+                                    activation, 
+                                    dropout,
+                                    hidden_layer_norm)
+                                for i in range(len(self.block_dim) - 1)])
         self.fc = nn.Linear(self.block_dim[-1], 1)
         self.layer_norm = nn.LayerNorm(embed_dim)
 
     def forward(self, inputs):
+        bs = inputs.size(0)
         ln_emb = self.layer_norm(inputs)
-        block_out = self.mask_blocks(inputs, ln_emb)
+        for mb in self.mask_blocks:
+            block_out = mb(inputs.view(bs, -1), ln_emb.view(bs, -1))
         V_out = self.fc(block_out)
         return V_out
     
@@ -669,33 +827,41 @@ class SerialMaskNet(nn.Module):
     
 
 class InnerProductLayer(nn.Module):
-    def __init__(self, num_fields):
+    def __init__(self, num_fields, reduction : bool = True):
         super().__init__()
         self.triu_index = nn.Parameter(
                             torch.triu_indices(num_fields, num_fields, offset=1), 
-                            requires_grad=False)
+                            requires_grad=False)  
+        self.reduction = reduction
 
     def forward(self, inputs):
         # inputs: B x F x D
         emb0 = torch.index_select(inputs, 1, self.triu_index[0])
         emb1 = torch.index_select(inputs, 1, self.triu_index[1])
-        outer_prod_mat = torch.einsum('bnd,bnd->bn', [emb0, emb1])
-        return outer_prod_mat.view(inputs.size(0), -1)
+        inner_prod_mat = emb0 * emb1                # B x N x D
+        if self.reduction:
+            return inner_prod_mat.sum(-1)
+        else:
+            return inner_prod_mat
     
     
 class OuterProductLayer(nn.Module):
-    def __init__(self, num_fields):
+    def __init__(self, num_fields, reduction : bool = True):
         super().__init__()
         self.triu_index = nn.Parameter(
                             torch.triu_indices(num_fields, num_fields, offset=1), 
                             requires_grad=False)
+        self.reduction = reduction
 
     def forward(self, inputs):
         # inputs: B x F x D
         emb0 = torch.index_select(inputs, 1, self.triu_index[0])
         emb1 = torch.index_select(inputs, 1, self.triu_index[1])
-        outer_prod_mat = torch.einsum('bni,bnj->bnij', [emb0, emb1])
-        return outer_prod_mat.view(inputs.size(0), -1)
+        outer_prod_mat = emb0.unsqueeze(-1) @ emb1.unsqueeze(-2)    # B x N x D x D
+        if self.reduction:
+            return outer_prod_mat.view(inputs.size(0), -1)
+        else:
+            return outer_prod_mat
     
     
 class OperationAwareFMLayer(nn.Module):
@@ -754,6 +920,8 @@ class FieldAwareFMLayer(nn.Module):
 class GeneralizedInteractionFusion(nn.Module):
     def __init__(self, num_fields, embed_dim, in_subspaces, out_subspaces):
         super().__init__()
+        self.in_subspaces = in_subspaces
+        self.out_subspaces = out_subspaces
         self.W = nn.Parameter(torch.eye(embed_dim, embed_dim).unsqueeze(0).repeat(out_subspaces, 1, 1))
         self.alpha = nn.Parameter(torch.ones(num_fields, in_subspaces, out_subspaces))
         self.h = nn.Parameter(torch.ones(out_subspaces, embed_dim, 1))
@@ -765,10 +933,15 @@ class GeneralizedInteractionFusion(nn.Module):
         output = torch.matmul(fusion, self.h).squeeze(-1)   # B x N x D
         return output  
     
+    def extra_repr(self):
+        return f'in_subspaces={self.in_subspaces}, out_subspaces={self.out_subspaces}'
+    
     
 class GeneralizedInteractionNet(nn.Module):
     def __init__(self, num_fields, embed_dim, num_layers, num_subspaces):
         super().__init__()
+        self.num_layers = num_layers
+        self.num_subspaces = num_subspaces
         self.layers = nn.ModuleList([
                     GeneralizedInteractionFusion( 
                         num_fields, 
@@ -782,3 +955,230 @@ class GeneralizedInteractionNet(nn.Module):
         for layer in self.layers:
             B_i = layer(inputs, B_i)
         return B_i  
+    
+    def extra_repr(self):
+        return f'num_layers={self.num_layers}, num_subspaces={self.num_subspaces}'
+    
+    
+class InteractionMachine(nn.Module):
+    def __init__(self, embed_dim, order):
+        super().__init__()
+        self.order = order
+        self.fc = nn.Linear(order * embed_dim, 1)
+        
+    def _2nd_order(self, p1, p2):
+        return (p1.pow(2) - p2) / 2
+
+    def _3rd_order(self, p1, p2, p3):
+        return (p1.pow(3) - 3 * p1 * p2 + 2 * p3) / 6
+
+    def _4th_order(self, p1, p2, p3, p4):
+        return (p1.pow(4) - 6 * p1.pow(2) * p2 + 3 * p2.pow(2)
+                + 8 * p1 * p3 - 6 * p4) / 24
+
+    def _5th_order(self, p1, p2, p3, p4, p5):
+        return (p1.pow(5) - 10 * p1.pow(3) * p2 + 20 * p1.pow(2) * p3 - 30 * p1 * p4
+                - 20 * p2 * p3 + 15 * p1 * p2.pow(2) + 24 * p5) / 120
+        
+    def _kth_order(self, k, *args):
+        sum_ = 0
+        C = k * [0]                 # c1, ..., ck
+        while True:
+            C[0] += 1
+            for i in range(0, k):
+                if C[i] > k / (i+1):
+                    C[i] = 0
+                    C[i+1] += 1
+                else:
+                    break
+            if sum([a*b for a, b in zip(C, range(1, k+1))]) == k:
+                prod = 1
+                for j, c in enumerate(C):
+                    prod *= (-args[j] / (j+1)).pow(c) / math.factorial(c)
+                sum_ += prod
+            if C[-1] == 1:
+                break
+        return (-1)**k * sum_
+
+    def forward(self, X):
+        Q = X
+        p1 = Q.sum(dim=1)
+        P = [p1]
+        interaction = [p1]
+        if self.order >= 2:
+            Q = Q * X
+            P.append(Q.sum(dim=1))
+            interaction.append(self._2nd_order(*P))
+        if self.order >= 3:
+            Q = Q * X
+            P.append(Q.sum(dim=1))
+            interaction.append(self._3rd_order(*P))
+        if self.order >= 4:
+            Q = Q * X
+            P.append(Q.sum(dim=1))
+            interaction.append(self._4th_order(*P))
+        if self.order >= 5:
+            Q = Q * X
+            P.append(Q.sum(dim=1))
+            interaction.append(self._5th_order(*P))
+        if self.order >= 6:
+            for k in range(6, self.order + 1):
+                Q = Q * X
+                P.append(Q.sum(dim=1))
+                interaction.append(self._kth_order(k, *P))
+        output = self.fc(torch.cat(interaction, dim=-1))
+        return output
+        
+    def extra_repr(self):
+        return f'order={self.order}'
+
+
+class BridgeLayer(nn.Module):
+    def __init__(self, embed_dim, bridge_type):
+        super().__init__()
+        if bridge_type.lower() not in ['pointwise_addition', 'hadamard_product', 
+                                       'concatenation', 'attention_pooling']:
+            raise ValueError('Expect bridge_type to be '
+                             '`pointwise_addition`|`hadamard_product`|'
+                             '`concatenation`|`attention_pooling`, '
+                             f'but got {bridge_type}.')
+        self.bridge_type = bridge_type.lower()
+        if self.bridge_type == 'concatenation':
+            self.bridge = nn.Sequential(
+                            nn.Linear(2 * embed_dim, embed_dim),
+                            nn.ReLU()
+                        )
+        else:
+            self.bridge = HStackLayer(
+                            nn.Sequential(
+                                nn.Linear(embed_dim, embed_dim),
+                                nn.ReLU(),
+                                nn.Linear(embed_dim, embed_dim, bias=False),
+                                nn.Softmax(dim=-1)),
+                            nn.Sequential(
+                                nn.Linear(embed_dim, embed_dim),
+                                nn.ReLU(),
+                                nn.Linear(embed_dim, embed_dim, bias=False),
+                                nn.Softmax(dim=-1))
+                        )
+    
+    def forward(self, input0, input1):
+        if self.bridge_type == 'pointwise_addition':
+            return input0 + input1
+        elif self.bridge_type == 'hadamard_product':
+            return input0 * input1
+        elif self.bridge_type == 'concatenation':
+            return self.bridge(torch.cat([input0, input1], dim=-1))
+        else:
+            a0, a1 = self.bridge(input0, input1)
+            return a0 * input0 + a1 * input1
+    
+    def extra_repr(self):
+        return f'bridge_type={self.bridge_type}'
+    
+    
+class RegulationLayer(nn.Module):
+    def __init__(self, num_fields, embed_dim, temperature=1.0, batch_norm=False):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.temperature = temperature
+        self.batch_norm = batch_norm
+        self.cross_gate = nn.Parameter(torch.ones(num_fields))
+        self.deep_gate = nn.Parameter(torch.ones(num_fields))
+        if batch_norm:
+            self.cross_bn = nn.BatchNorm1d(num_fields * embed_dim)
+            self.deep_bn = nn.BatchNorm1d(num_fields * embed_dim)
+            
+    def forward(self, inputs):
+        cross_g = (self.cross_gate / self.temperature).softmax(dim=0)
+        deep_g = (self.deep_gate / self.temperature).softmax(dim=0)
+        cross_out = cross_g.tile(self.embed_dim) * inputs
+        deep_out = deep_g.tile(self.embed_dim) * inputs
+        if self.batch_norm:
+            cross_out = self.cross_bn(cross_out)
+            deep_out = self.deep_bn(deep_out)
+        return cross_out, deep_out
+    
+
+class FeatureSelection(nn.Module):
+    def __init__(self, stream1_fields, stream2_fields, embed_dim, num_fields, data, mlp_layer, dropout=0):
+        super().__init__()
+        self.fields1 = stream1_fields
+        self.fields2 = stream2_fields
+        
+        num_fields1 = len(stream1_fields)
+        num_fields2 = len(stream2_fields)
+        
+        self.embedding1 = Embeddings(stream1_fields, embed_dim, data)
+        self.embedding2 = Embeddings(stream2_fields, embed_dim, data)
+            
+        self.gate1 = MLPModule(
+                        [embed_dim * num_fields1] + mlp_layer + [embed_dim * num_fields], 
+                        'relu', dropout, last_activation=False)
+        self.gate2 = MLPModule(
+                        [embed_dim * num_fields2] + mlp_layer + [embed_dim * num_fields], 
+                        'relu', dropout, last_activation=False)
+
+
+    def forward(self, batch, inputs):
+        emb1 = self.embedding1(batch)
+        g1 = 2 * self.gate1(emb1.view(inputs.size(0), -1)).sigmoid()
+        
+        emb2 = self.embedding2(batch)
+        g2 = 2 * self.gate2(emb2.view(inputs.size(0), -1)).sigmoid()    
+        
+        return g1 * inputs, g2 * inputs
+    
+
+class MultiHeadBilinearFusion(nn.Module):
+    def __init__(self, n_head, embed_dim1, embed_dim2, output_dim=1):
+        super().__init__()
+        self.n_head = n_head
+        self.output_dim = output_dim
+        self.dim1_per_head = embed_dim1 // n_head
+        self.dim2_per_head = embed_dim2 // n_head
+        self.blrs = nn.ModuleList([
+                        nn.Bilinear(self.dim1_per_head, self.dim2_per_head, output_dim)
+                        for _ in range(n_head)
+                    ])
+        self.lr1 = nn.Linear(embed_dim1, output_dim, bias=False)
+        self.lr2 = nn.Linear(embed_dim2, output_dim, bias=False)
+
+    def forward(self, input1, input2):
+        lr_out = self.lr1(input1) + self.lr2(input2)
+        blr_out = []
+        input1 = input1.view(-1, self.n_head, self.dim1_per_head)
+        input2 = input2.view(-1, self.n_head, self.dim2_per_head)  
+        for i, blr in enumerate(self.blrs):
+            blr_out.append(blr(input1[:, i, :], input2[:, i, :]))
+        blr_out = torch.cat(blr_out, dim=-1).sum(-1, keepdim=True)
+        output = lr_out + blr_out
+        return output
+    
+    
+class FieldWiseBiInteraction(nn.Module):
+    def __init__(self, embed_dim, data, activation, dropout, fields):
+        super().__init__()
+        all_fields = set()
+        for f in fields:
+            all_fields = all_fields.union(set(f))
+        self.fields = fields
+        self.linear = LinearLayer(all_fields, data)
+        self.mf = InnerProductLayer(len(fields), reduction=False)
+        self.fm = FMLayer(reduction='none')
+        self.fc = MLPModule(2 * [embed_dim + 1], 
+                            activation, dropout,
+                            bias=False, batch_norm=True,
+                            last_activation=True, last_bn=True)
+        self.r_mf = nn.Linear(math.comb(len(fields), 2), 1, bias=False)
+        self.r_fm = nn.Linear(len(fields), 1, bias=False)
+        
+    def forward(self, batch, field_embs):
+        lr_out = self.linear(batch)
+        mf_in = torch.cat([_.sum(1, keepdim=True) for _ in field_embs], dim=1)          # B x M x D
+        mf_out = self.r_mf(self.mf(mf_in).transpose(1, 2))                              # B x N x D -> B x D x N -> B x D x 1
+        fm_out = torch.stack([self.fm(_) for _ in field_embs], dim=1)                   # B x M x D
+        fm_out = self.r_fm(fm_out.transpose(1, 2))                                      # B x D x 1                   
+        fwbi_out = self.fc(torch.cat([lr_out.unsqueeze(-1), (fm_out + mf_out).squeeze(-1)], dim=-1))  # B x (D+1)
+        return fwbi_out
+        
