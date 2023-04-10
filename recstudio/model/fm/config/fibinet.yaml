@@ -1,0 +1,9 @@
+model:
+  reduction_ratio: 3
+  excitation_activation: relu
+  bilinear_type: interaction
+  mlp_layer: [128, 32]
+  activation: relu
+  dropout: 0.5
+  shared_bilinear: True
+  learning_rate: 1e-4

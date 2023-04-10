@@ -1,0 +1,6 @@
+model:
+  mlp_layer: [64, 64]
+  activation: relu
+  dropout: 0.2
+  num_subspaces: 3
+  num_interaction_layers: 3

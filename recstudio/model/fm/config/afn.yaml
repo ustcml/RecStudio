@@ -1,0 +1,11 @@
+model:
+  log_hidden_size: 128
+  mlp_layer: [128, 128]
+  activation: relu
+  dropout: 0.5
+
+  ensemble: True
+  ensemble_mlp_layer: [256, 64]
+  ensemble_activation: relu
+  ensemble_dropout: 0.5
+

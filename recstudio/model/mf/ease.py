@@ -16,12 +16,6 @@ class QueryEncoder(object):
 
 class EASE(basemodel.BaseRetriever):
 
-    def add_model_specific_args(parent_parser):
-        parent_parser = basemodel.Recommender.add_model_specific_args(parent_parser)
-        parent_parser.add_argument_group('EASE')
-        parent_parser.add_argument("--lambda", type=int, default=250, help='lambda coef for the regularization')
-        return parent_parser
-
     def _get_dataset_class():
         return TripletDataset
 

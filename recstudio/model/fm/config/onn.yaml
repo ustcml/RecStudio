@@ -1,0 +1,5 @@
+model:
+  mlp_layer: [128, 64]
+  activation: relu
+  dropout: 0.2
+  batch_norm: True

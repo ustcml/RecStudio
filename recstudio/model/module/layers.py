@@ -1,7 +1,22 @@
 from typing import Tuple
-
 import torch
 from torch.nn.parameter import Parameter
+
+__all__ = [
+    'get_act',
+    'CrossCompressUnit',
+    'FeatInterLayers',
+    'MLPModule',
+    'GRULayer',
+    'SeqPoolingLayer',
+    'AttentionLayer',
+    'Dice',
+    'LambdaLayer',
+    'HStackLayer',
+    'VStackLayer',
+    'KMaxPoolingLayer',
+    'ResidualLayer'
+]
 
 
 def get_act(activation: str, dim=None):
@@ -378,12 +393,6 @@ class AttentionLayer(torch.nn.Module):
                 self.attn_layer(query, key, value, key_padding_mask,
                                 True, attn_mask, average_attn_weights)
 
-        elif self.attention_type == 'scaled-dot-product':
-            product = query @ key.transpose(1, 2)
-            attn_output_weight = torch.softmax(
-                product / torch.sqrt(query.size(-1)), dim=-1)
-            attn_output = attn_output_weight @ value
-
         if need_weight:
             return attn_output, attn_output_weight
         else:
@@ -431,7 +440,7 @@ class HStackLayer(torch.nn.Sequential):
 
     def forward(self, *input):
         output = []
-        assert (len(input) == 1) or (len(input) == len(self.module_list))
+        assert (len(input) == 1) or (len(input) == len(list(self.children())))
         for i, module in enumerate(self):
             if len(input) == 1:
                 output.append(module(input[0]))
@@ -449,3 +458,40 @@ class VStackLayer(torch.nn.Sequential):
             else:
                 input = module(input)
         return input
+
+
+class KMaxPoolingLayer(torch.nn.Module):
+    def __init__(self, k, dim):
+        super().__init__()
+        self.k = k
+        self.dim = dim
+
+    def forward(self, input):
+        output = torch.topk(input, self.k, self.dim, sorted=True)[0]
+        return output
+    
+    
+class ResidualLayer(torch.nn.Module):
+    def __init__(self, module, num_fields, embed_dim, activation, dropout, batch_norm, layer_norm):
+        super().__init__()
+        self.module = module
+        self.num_fields = num_fields
+        self.batch_norm = batch_norm
+        self.layer_norm = layer_norm
+        if batch_norm:
+            self.bn = torch.nn.BatchNorm1d(num_fields)
+        elif layer_norm:
+            self.ln = torch.nn.LayerNorm(embed_dim)
+        self.activation = get_act(activation)
+        self.dropout = torch.nn.Dropout(dropout)
+            
+    def forward(self, inputs):  # B x F x D
+        output = inputs + self.module(inputs.view(inputs.size(0), -1)).view(inputs.size(0), self.num_fields, -1)
+        if self.batch_norm:
+            output = self.bn(output)
+        elif self.layer_norm:
+            output = self.ln(output)
+        output = self.dropout(self.activation(output))
+        return output
+    
+    

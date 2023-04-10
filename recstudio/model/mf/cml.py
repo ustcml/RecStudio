@@ -6,14 +6,6 @@ from recstudio.model import basemodel, loss_func, scorer
 
 class CML(basemodel.BaseRetriever):
 
-    def add_model_specific_args(parent_parser):
-        parent_parser = basemodel.Recommender.add_model_specific_args(parent_parser)
-        parent_parser.add_argument_group('CML')
-        parent_parser.add_argument("--negative_count", type=int, default=1, help='negative sampling numbers')
-        parent_parser.add_argument("--margin", type=int, default=1, help='margin for CML loss')
-        parent_parser.add_argument("--use_rank_weight", action='store_true', help='whether to use rank weight in CML loss')
-        return parent_parser
-
     def _get_dataset_class():
         return advance_dataset.ALSDataset
 

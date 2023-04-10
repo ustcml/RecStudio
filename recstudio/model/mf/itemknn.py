@@ -5,14 +5,6 @@ import numpy as np
 import torch
 class ItemKNN(EASE):
 
-    def add_model_specific_args(parent_parser):
-        parent_parser = basemodel.Recommender.add_model_specific_args(parent_parser)
-        parent_parser.add_argument_group('ItemKNN')
-        parent_parser.add_argument("--knn", type=int, default=100, help='k for K-nearest neighbor')
-        parent_parser.add_argument("--similarity", type=str, default='cosine', choices=['cosione', 'jaccard'], help='distance type')
-        return parent_parser
-
-
     def training_epoch(self, nepoch):
         config = self.config['train']
         data, iscombine = self.current_epoch_trainloaders(nepoch)

@@ -1,6 +1,2 @@
 model:
     embed_dim: 10
-
-eval:
-    val_metrics: [auc, logloss]
-    test_metrics: [auc, logloss]

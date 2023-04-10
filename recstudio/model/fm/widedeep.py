@@ -1,10 +1,7 @@
-import torch
-from collections import OrderedDict
 from recstudio.data.dataset import TripletDataset
-
 from ..basemodel import BaseRanker
 from ..loss_func import BCEWithLogitLoss
-from ..module import ctr, LambdaLayer, MLPModule, HStackLayer
+from ..module import ctr, MLPModule
 
 
 class WideDeep(BaseRanker):

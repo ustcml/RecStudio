@@ -1,0 +1,6 @@
+model:
+  hidden_dims: [64, 64, 64]
+  activation: relu
+  dropout: 0.5
+  batch_norm: False
+  layer_norm: True

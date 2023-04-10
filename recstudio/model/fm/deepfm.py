@@ -1,5 +1,4 @@
 from recstudio.data.dataset import TripletDataset
-
 from ..basemodel import BaseRanker
 from ..loss_func import BCEWithLogitLoss
 from ..module import ctr, MLPModule

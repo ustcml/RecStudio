@@ -1,0 +1,3 @@
+model:
+  attention_dim: 4
+  dropout: 0.5

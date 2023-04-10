@@ -1,0 +1,6 @@
+model:
+  order: 5
+  deep: True
+  mlp_layer: [128, 128]
+  activation: relu
+  dropout: 0.5

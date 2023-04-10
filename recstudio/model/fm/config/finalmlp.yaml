@@ -1,0 +1,13 @@
+model:
+  embed_dim: 10
+  mlp_layer1: [256, 256, 256]
+  mlp_layer2: [256, 256, 256]
+  activation1: relu
+  activation2: relu
+  dropout1: 0.3
+  dropout2: 0.3
+  batch_norm1: False
+  batch_norm2: False
+  feature_selection: True
+  fs_mlp_layer: [32]
+  n_head: 2
