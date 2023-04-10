@@ -1,5 +1,3 @@
-import os
-import time
 from recstudio.utils import *
 from recstudio import quickstart
 

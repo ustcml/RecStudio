@@ -1,14 +1,14 @@
 url: https://rec.ustc.edu.cn/share/62299ea0-e083-11ec-8586-b7917c2cff26
-user_id_field: &u user_id:token
-item_id_field: &i item_id:token
-rating_field: &r interactions:float
-time_field: &t time_stamp:float
+user_id_field: &u use_ID:token
+item_id_field: &i ite_ID:token
+rating_field: &r act_ID:float
+time_field: &t time:float
 time_format: ~
 
 encoding_method: utf-8
-inter_feat_name: tmall-click.inter
-inter_feat_field: [*u, seller_id:token, *i, category_id:token, *t, *r]
-inter_feat_header: ~
+inter_feat_name: ijcai2016_taobao.csv
+inter_feat_field: [*u, sel_ID:token, *i, cat_id:token, *r, *t]
+inter_feat_header: 0
 
 
 user_feat_name: ~
@@ -22,7 +22,7 @@ item_feat_header: ~
 
 
 use_fields: ~
-field_separator: "::"
+field_separator: ","
 min_user_inter: 5
 min_item_inter: 5
 field_max_len: ~
