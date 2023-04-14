@@ -63,9 +63,9 @@ class FinalMLP(BaseRanker):
     def score(self, batch):
         emb = self.embedding(batch)
         if self.config['model']['feature_selection']:
-            emb1, emb2 = self.fs(batch, emb.view(emb.size(0), -1))
+            emb1, emb2 = self.fs(batch, emb.flatten(1))
         else:
-            emb1 = emb2 = emb.view(emb.size(0), -1)
+            emb1 = emb2 = emb.flatten(1)
         score = self.towers((emb1, emb2)).squeeze(-1)
         return {'score' : score}
 

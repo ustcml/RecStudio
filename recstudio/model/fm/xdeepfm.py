@@ -27,7 +27,7 @@ class xDeepFM(BaseRanker):
         lr_score = self.linear(batch)
         emb = self.embedding(batch)
         cin_score = self.cin(emb).squeeze(-1)
-        mlp_score = self.mlp(emb.view(emb.size(0), -1)).squeeze(-1)
+        mlp_score = self.mlp(emb.flatten(1)).squeeze(-1)
         return {'score' : lr_score + cin_score + mlp_score}
 
     def _get_loss_func(self):

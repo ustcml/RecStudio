@@ -52,12 +52,11 @@ class PNN(BaseRanker):
 
     def score(self, batch):
         emb = self.embedding(batch)                                         # B x F x D
-        bs = emb.size(0)
         if self.config['model']['stack_dim'] is None:
-            lz = emb.view(bs, -1)                                           # B x F*D
+            lz = emb.flatten(1)                                             # B x F*D
             lp = self.prod_layer(emb)                                       # B x num_pairs
         else:
-            lz = (self.Wz * emb.view(bs, -1, 1)).sum(1)                     # B x S
+            lz = (self.Wz * emb.view(emb.size(0), -1, 1)).sum(1)            # B x S
             if self.config['model']['product_type'] == 'inner':
                 delta = torch.einsum('fs,bfd->bfsd', [self.Thetap, emb])    # B x F x S x D
                 lp = (delta.sum(1)**2).sum(-1)                              # B x S

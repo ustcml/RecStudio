@@ -1,0 +1,9 @@
+model:
+  deep: True
+  mlp_layer: [256, 256, 256]
+  activation: relu
+  dropout: 0.5
+
+  layer_norm: True
+  num_gnn_layers: 3
+  n_head: 2

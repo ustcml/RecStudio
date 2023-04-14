@@ -23,7 +23,7 @@ class DeepFM(BaseRanker):
         lr_score = self.linear(batch)
         emb = self.embedding(batch)
         fm_score = self.fm(emb)
-        mlp_score = self.mlp(emb.view(emb.size(0), -1)).squeeze(-1)
+        mlp_score = self.mlp(emb.flatten(1)).squeeze(-1)
         return {'score' : lr_score + fm_score + mlp_score}
 
     def _get_loss_func(self):
