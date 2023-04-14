@@ -35,8 +35,7 @@ class CCPM(BaseRanker):
                                 ctr.ConvLayer(
                                     num_fields,
                                     channels=model_config['channels'],
-                                    heights=model_config['heights'],
-                                    activation=model_config['conv_activation']))
+                                    heights=model_config['heights']))
                         ]))                               
         self.mlp = MLPModule(
                     [3 * self.embed_dim * model_config['channels'][-1]] + model_config['mlp_layer'] + [1],
@@ -47,7 +46,7 @@ class CCPM(BaseRanker):
 
     def score(self, batch):
         conv_out = self.conv(batch)
-        score = self.mlp(conv_out.reshape(conv_out.size(0), -1)).squeeze(-1)
+        score = self.mlp(conv_out.flatten(1)).squeeze(-1)
         return {'score' : score}
 
     def _get_loss_func(self):

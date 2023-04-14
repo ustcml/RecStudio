@@ -40,12 +40,13 @@ class DeepCrossing(BaseRanker):
                                 model_config['dropout'],
                                 model_config['batch_norm'],
                                 model_config['layer_norm']
-                            ) for hidden_dim in model_config['hidden_dims']]))
+                            ) 
+                            for hidden_dim in model_config['hidden_dims']]))
                 ]))
         self.fc = nn.Linear(num_fields * self.embed_dim, 1)
     def score(self, batch):
         dc_out = self.dc(batch)
-        score = self.fc(dc_out.view(dc_out.size(0), -1)).squeeze(-1)
+        score = self.fc(dc_out.flatten(1)).squeeze(-1)
         return {'score' : score}
 
     def _get_loss_func(self):

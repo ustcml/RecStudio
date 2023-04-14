@@ -43,7 +43,7 @@ class DLRM(BaseRanker):
             self.interaction = LambdaLayer(lambda emb: emb.sum(1))
             top_mlp_in = self.embed_dim
         else:
-            raise ValueError(f'Expect op to be `dot`|`cat`|`sum`, but got{model_config["op"]}')
+            raise ValueError(f'Expect op to be `dot`|`cat`|`sum`, but got{model_config["op"]}.')
         self.top_mlp = MLPModule(
                         [top_mlp_in] + model_config['top_mlp_layer'] + [1],
                         model_config['top_activation'], 

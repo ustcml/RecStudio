@@ -54,7 +54,7 @@ class EDCN(BaseRanker):
 
     def score(self, batch):
         emb = self.embedding(batch)
-        ci, di = self.regulation[0](emb.view(emb.size(0), -1))
+        ci, di = self.regulation[0](emb.flatten(1))
         c0 = ci
         for i, (cross, deep, bridge) in enumerate(zip(self.cross, self.mlp, self.bridge)):
             ci = cross(c0, ci)

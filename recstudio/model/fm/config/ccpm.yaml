@@ -1,7 +1,6 @@
 model:
   channels: [3, 3]
   heights: [6, 5]
-  conv_activation: tanh
 
   mlp_layer: [256]
   activation: relu
