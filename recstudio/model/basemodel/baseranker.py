@@ -155,7 +155,7 @@ class BaseRanker(Recommender):
             global_m = eval.get_global_metrics(metric)
             metrics = {}
             for n, f in pred_m:
-                if not n in global_m:
+                if not (n, f) in global_m:
                     if len(inspect.signature(f).parameters) > 2:                                # precision, recall, f1
                         metrics[n] = f(torch.sigmoid(result['pos_score']), result['label'], 
                                        self.config['eval']['binarized_prob_thres'])
@@ -184,7 +184,7 @@ class BaseRanker(Recommender):
             metrics = {f"{name}@{cutoff}": func(label, pos_rating, cutoff) for cutoff in cutoffs for name, func in rank_m}
         return metrics, bs
 
-    def _test_epoch_end(self, outputs):
+    def _test_epoch_end(self, outputs, metrics):
         metric_list, bs = zip(*outputs)
         bs = torch.tensor(bs)
         out = defaultdict(list)
@@ -202,11 +202,8 @@ class BaseRanker(Recommender):
             out[k] = (metric * bs).sum() / bs.sum()
         #
         # calculate global metrics like AUC.
-        global_m = eval.get_global_metrics(out)
+        global_m = eval.get_global_metrics(metrics)
         if len(global_m) > 0:
             for m, f in global_m:
-                if 'thres' in inspect.signature(f).parameters:
-                    out[m] = f(scores, labels)
-                else:
-                    out[m] = f(scores, labels)
+                out[m] = f(scores, labels)
         return out
