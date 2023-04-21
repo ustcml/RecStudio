@@ -77,7 +77,7 @@ class DIN(basemodel.BaseRanker):
         attn_seq = self.norm(attn_seq)
         cat_emb = torch.cat((attn_seq, target_emb, target_emb*attn_seq), dim=-1)
         score = self.fc(self.dense_mlp(cat_emb)).squeeze(-1)
-        return score + item_bias
+        return {'score': score + item_bias}
 
     def _get_loss_func(self):
-        return loss_func.BCEWithLogitLoss(self.rating_threshold)
+        return loss_func.BCEWithLogitLoss()
