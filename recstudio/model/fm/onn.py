@@ -40,7 +40,7 @@ class ONN(BaseRanker):
                                     model_config['activation'],
                                     model_config['dropout'],
                                     batch_norm=model_config['batch_norm'],
-                                    last_activation=False, last_bn=True))
+                                    last_activation=False, last_bn=False))
                         ]))
         
 

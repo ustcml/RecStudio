@@ -73,6 +73,7 @@ def parser_yaml(config_path):
 
 
 def color_dict(dict_, keep=True):
+    keykey_color = 'pink'
     key_color = 'blue'
     val_color = 'yellow'
 
@@ -88,7 +89,14 @@ def color_dict(dict_, keep=True):
     else:
         start = set_color('Testing: ', 'green', keep=keep)
     info = ' '.join([color_kv(k, v, '%s', '%.'+str(des)+'f')
-                    for k, v in dict_.items() if k != 'epoch'])
+                    for k, v in dict_.items() if k != 'epoch' and not isinstance(v, dict)])
+    
+    for k, v in dict_.items():
+        if isinstance(v, dict):
+            if info != '':
+                info += ' '
+            info += set_color('%s', keykey_color, keep=keep) % k + ' ' + \
+                    ' '.join([color_kv(vk, vv, '%s', '%.'+str(des)+'f') for vk, vv in v.items()])
     return start + ' [' + info + ']'
 
 
@@ -121,7 +129,7 @@ def get_model(model_name: str):
         Recommender: model class
         Dict: model configuration dict
     """
-    model_submodule = ['ae', 'mf', 'seq', 'fm', 'graph', 'kg', 'debias']
+    model_submodule = ['ae', 'mf', 'seq', 'fm', 'graph', 'kg', 'debias', 'multitask']
 
     model_file_name = model_name.lower()
     model_module = None

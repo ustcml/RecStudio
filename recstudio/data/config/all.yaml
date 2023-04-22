@@ -24,7 +24,7 @@ item_feat_header: ~
 field_separator: "\t"
 min_user_inter: 0
 min_item_inter: 0
-field_max_len: 10
+field_max_len: ~      # a YAML-format dict
 low_rating_thres: ~   # low rating threshold, which is used for drop low rating interactions
 # drop_low_rating: True # if true, the interactions with rating lower than `rating_thres` would be dropped.
 

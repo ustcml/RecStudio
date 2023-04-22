@@ -5,6 +5,7 @@ import logging
 import warnings
 from typing import *
 from operator import itemgetter
+from collections.abc import Iterable
 
 import numpy as np
 import pandas as pd
@@ -64,7 +65,10 @@ class TripletDataset(Dataset):
             if self.config['save_cache']:
                 self._save_cache(md5(self.config))
 
-        self._use_field = set([self.fuid, self.fiid, self.frating])
+        if not isinstance(self.frating, Iterable):
+            self._use_field = set([self.fuid, self.fiid, self.frating])
+        else:
+            self._use_field = set([self.fuid, self.fiid, *self.frating])
 
     @property
     def field(self):
@@ -108,7 +112,10 @@ class TripletDataset(Dataset):
         self.fiid = self.config['item_id_field'].split(':')[0]
         self.ftime = self.config['time_field'].split(':')[0]
         if self.config['rating_field'] is not None:
-            self.frating = self.config['rating_field'].split(':')[0]
+            if not isinstance(self.config['rating_field'], Iterable):
+                self.frating = self.config['rating_field'].split(':')[0]
+            else:
+                self.frating = [r.split(':')[0] for r in self.config['rating_field']]
         else:
             self.frating = None
 
@@ -151,7 +158,7 @@ class TripletDataset(Dataset):
         info_str += color_dict_normal(self.float_field_preprocess, False)
         return info_str
 
-    def _filter_ratings(self, thres: float=None):
+    def _filter_ratings(self, thres: Union[float, List[float]] = None):
         """Filter out the interactions whose ratings are below thres.
 
         Args:
@@ -159,7 +166,10 @@ class TripletDataset(Dataset):
                 filtering operation is closed.
         """
         if thres is not None:
-            self.inter_feat = self.inter_feat[(self.inter_feat[self.frating] >= thres)]
+            if not isinstance(self.frating, Iterable):
+                self.inter_feat = self.inter_feat[(self.inter_feat[self.frating] >= thres)]
+            else:
+                self.inter_feat = self.inter_feat[(self.inter_feat[self.frating] >= thres).all(axis=1)]
             self.inter_feat.reset_index(drop=True, inplace=True)
 
     def _load_all_data(self, data_dir, field_sep):
@@ -795,11 +805,17 @@ class TripletDataset(Dataset):
             lens = end - start
             l = torch.cat([torch.arange(s, e) for s, e in zip(start, end)])
             d = self.inter_feat.get_col(self.fiid)[l]
-            rating = self.inter_feat.get_col(self.frating)[l]
             data[self.fiid] = pad_sequence(
                 d.split(tuple(lens.numpy())), batch_first=True)
-            data[self.frating] = pad_sequence(
-                rating.split(tuple(lens.numpy())), batch_first=True)
+            if not isinstance(self.frating, Iterable):
+                rating = self.inter_feat.get_col(self.frating)[l]
+                data[self.frating] = pad_sequence(
+                    rating.split(tuple(lens.numpy())), batch_first=True)
+            else:
+                for r in self.frating:
+                    rating = self.inter_feat.get_col(r)[l]
+                    data[r] = pad_sequence(
+                        rating.split(tuple(lens.numpy())), batch_first=True)
         else:
             idx = self.data_index[index]
             data = self.inter_feat[idx]
@@ -881,7 +897,10 @@ class TripletDataset(Dataset):
     def _binarize_rating(self, thres):
         neg_idx = self.inter_feat[self.frating] < thres
         self.inter_feat[self.frating] = 1.0
-        self.inter_feat.loc[neg_idx, self.frating] = 0.0
+        if not isinstance(self.frating, Iterable):
+            self.inter_feat.loc[neg_idx, self.frating] = 0.0
+        else:
+            self.inter_feat = self.inter_feat[neg_idx].fillna(0.0)
 
     def build(
             self,
@@ -1081,7 +1100,10 @@ class TripletDataset(Dataset):
     def drop_feat(self, keep_fields):
         if keep_fields is not None and len(keep_fields) > 0:
             fields = set(keep_fields)
-            fields.add(self.frating)
+            if not isinstance(self.frating, Iterable):
+                fields.add(self.frating)
+            else:
+                fields = {*fields, *self.frating}
             for feat in self._get_feat_list():
                 feat.del_fields(fields)
             if 'user_hist' in fields:

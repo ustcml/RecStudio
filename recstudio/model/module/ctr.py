@@ -1,4 +1,5 @@
 from typing import Set
+from collections.abc import Iterable
 import math
 import torch
 import torch.nn as nn
@@ -37,7 +38,8 @@ __all__ = [
     'RegulationLayer',
     'FeatureSelection',
     'MultiHeadBilinearFusion',
-    'FieldWiseBiInteraction'
+    'FieldWiseBiInteraction',
+    'ExtractionLayer'
 ]
 
 
@@ -79,7 +81,7 @@ class DenseKernel(torch.nn.Module):
 class Embeddings(torch.nn.Module):
 
     def __init__(self, fields: Set, embed_dim, data, reduction='mean',
-                 share_dense_embedding=True, dense_emb_bias=False, dense_emb_norm=True,
+                 share_dense_embedding=True, dense_emb_bias=False, dense_emb_norm=False,
                  with_dense_kernel=False):
         r"""
         Args:
@@ -88,7 +90,10 @@ class Embeddings(torch.nn.Module):
         super(Embeddings, self).__init__()
         self.embed_dim = embed_dim
 
-        self.field2types = {f: data.field2type[f] for f in fields if f != data.frating}
+        if not isinstance(data.frating, Iterable):
+            self.field2types = {f: data.field2type[f] for f in fields if f != data.frating}
+        else:
+            self.field2types = {f: data.field2type[f] for f in fields if f not in data.frating}
         self.reduction = reduction
         self.share_dense_embedding = share_dense_embedding
         self.dense_emb_bias = dense_emb_bias
@@ -808,9 +813,11 @@ class ParallelMaskNet(nn.Module):
                                 dropout,
                                 hidden_layer_norm) 
                             for _ in range(num_blocks)])
-        self.mlp = MLPModule(mlp_layers=[num_blocks * blockout_dim] + mlp_layer + [1],
-                             activation_func=activation,
-                             dropout=dropout)
+        self.mlp = MLPModule([num_blocks * blockout_dim] + mlp_layer + [1],
+                             activation,
+                             dropout,
+                             last_activation=False,
+                             last_bn=False)
         self.layer_norm = nn.LayerNorm(embed_dim)
     def forward(self, inputs):
         bs = inputs.size(0)
@@ -1212,3 +1219,68 @@ class FieldWiseBiInteraction(nn.Module):
         fwbi_out = self.fc(torch.cat([lr_out.unsqueeze(-1), (fm_out + mf_out).squeeze(-1)], dim=-1))  # B x (D+1)
         return fwbi_out
         
+        
+class ExtractionLayer(nn.Module):
+    def __init__(self, in_dim, specific_experts_per_task, num_task, num_shared_experts, share_gate,
+                 expert_mlp_layer, expert_activation, expert_dropout, 
+                 gate_mlp_layer, gate_activation, gate_dropout):
+        super().__init__()
+        self.specific_experts_per_task = specific_experts_per_task
+        self.num_task = num_task
+        self.num_shared_experts = num_shared_experts
+        self.share_gate = share_gate
+        self.specific_experts = nn.ModuleList([
+                                    nn.ModuleList([
+                                        MLPModule(
+                                            [in_dim] + expert_mlp_layer,
+                                            expert_activation, 
+                                            expert_dropout)
+                                        for _ in range(specific_experts_per_task)
+                                    ])
+                                    for _ in range(num_task)
+                                ])
+        self.shared_experts = nn.ModuleList([
+                                MLPModule(
+                                    [in_dim] + expert_mlp_layer,
+                                    expert_activation, 
+                                    expert_dropout)
+                                for _ in range(specific_experts_per_task)
+                            ])
+        self.gates = nn.ModuleList([
+                        MLPModule(
+                            [in_dim] + gate_mlp_layer + [specific_experts_per_task + num_shared_experts],
+                            gate_activation, 
+                            gate_dropout)
+                        for _ in range(num_task)
+                    ])
+        for g in self.gates:
+            g.add_modules(nn.Softmax(-1))
+            
+        if share_gate:
+            self.shared_gates = MLPModule(
+                                    [in_dim] + gate_mlp_layer + [num_task * specific_experts_per_task + num_shared_experts],
+                                    gate_activation, 
+                                    gate_dropout)
+            self.shared_gates.add_modules(nn.Softmax(-1))
+    
+    def forward(self, inputs):
+        experts_out = []
+        for i, experts_per_task in enumerate(self.specific_experts):
+            experts_out.append(torch.stack([e(inputs[i]) for e in experts_per_task], dim=1))   # B x SpecificPerTask x De
+                
+        shared_e_out = torch.stack(
+                        [shared_e(inputs[-1]) for shared_e in self.shared_experts], dim=1)      # B x Shared x De
+        
+        outputs = []
+        for i, (g, e_out) in enumerate(zip(self.gates, experts_out)):
+            gate_out = g(inputs[i])        # B x (SpecificPerTask + Shared)
+            outputs.append((gate_out.unsqueeze(-1) * torch.cat([e_out, shared_e_out], dim=1)).sum(1))    # B x De
+        
+        if self.share_gate:
+            shared_gate_out = self.shared_gates(inputs[-1])
+            outputs.append((shared_gate_out.unsqueeze(-1) * shared_e_out).sum(1))
+        return outputs
+    
+    def extra_repr(self):
+        return f'specific_experts_per_task={self.specific_experts_per_task}, ' + \
+                f'num_task={self.num_task}, num_shared_experts={self.num_shared_experts}'
