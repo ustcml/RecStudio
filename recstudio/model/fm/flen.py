@@ -37,7 +37,7 @@ class FLEN(BaseRanker):
                 all_fields = all_fields.union(set(f))
             if len(all_fields) != self.embedding.num_features:
                 raise ValueError(f'Expect fields consist {self.embedding.num_features}, '
-                                f'but got {all_fields - self.fields}')
+                                f'but got {all_fields - self.fields}.')
                 
         self.fwbi = ctr.FieldWiseBiInteraction(
                         self.embed_dim,
@@ -61,7 +61,7 @@ class FLEN(BaseRanker):
             field_idx = [list(self.embedding.embeddings).index(f) for f in field if f != self.frating]
             field_embs.append(emb[:, field_idx, :])
         fwbi_out = self.fwbi(batch, field_embs)
-        mlp_out = self.mlp(emb.view(emb.size(0), -1))
+        mlp_out = self.mlp(emb.flatten(1))
         score = self.fc(torch.cat([mlp_out, fwbi_out], dim=-1)).squeeze(-1)
         return {'score': score}
 

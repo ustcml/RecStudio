@@ -55,7 +55,7 @@ class FiBiNET(BaseRanker):
         else:
             bilinear_senet = self.bilinear4se(senet_emb)
         comb = torch.cat([bilinear_ori, bilinear_senet], dim=1)
-        mlp_score = self.mlp(comb.view(comb.size(0), -1)).squeeze(-1)
+        mlp_score = self.mlp(comb.flatten(1)).squeeze(-1)
         return {'score' : lr_score + mlp_score}
 
     def _get_loss_func(self):

@@ -297,10 +297,10 @@ class Recommender(torch.nn.Module, abc.ABC):
         # val_metric = [f'{m}@{cutoff}' if len(eval.get_rank_metrics(m)) > 0 \
         #     else m for cutoff in cutoffs[:1] for m in val_metric]
         if isinstance(outputs[0][0], List):
-            out = self._test_epoch_end(outputs)
+            out = self._test_epoch_end(outputs, val_metric)
             out = dict(zip(val_metric, out))
         elif isinstance(outputs[0][0], Dict):
-            out = self._test_epoch_end(outputs)
+            out = self._test_epoch_end(outputs, val_metric)
         self.log_dict(out)
         return out
 
@@ -315,14 +315,14 @@ class Recommender(torch.nn.Module, abc.ABC):
         cutoff = self.config['eval']['cutoff']
         test_metric = eval.get_eval_metrics(test_metrics, cutoff, validation=False)
         if isinstance(outputs[0][0], List):
-            out = self._test_epoch_end(outputs)
+            out = self._test_epoch_end(outputs, test_metric)
             out = dict(zip(test_metric, out))
         elif isinstance(outputs[0][0], Dict):
-            out = self._test_epoch_end(outputs)
+            out = self._test_epoch_end(outputs, test_metric)
         self.log_dict(out, tensorboard=False)
         return out
 
-    def _test_epoch_end(self, outputs):
+    def _test_epoch_end(self, outputs, metrics):
         if isinstance(outputs[0][0], List):
             metric, bs = zip(*outputs)
             metric = torch.tensor(metric)

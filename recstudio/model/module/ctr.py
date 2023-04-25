@@ -2,7 +2,8 @@ from typing import Set
 import math
 import torch
 import torch.nn as nn
-from .layers import MLPModule, AttentionLayer, SeqPoolingLayer, get_act, KMaxPoolingLayer, HStackLayer
+from itertools import product
+from .layers import MLPModule, AttentionLayer, SeqPoolingLayer, get_act, KMaxPoolingLayer, HStackLayer, LambdaLayer
 
 __all__ = [
     'DenseEmbedding',
@@ -22,6 +23,7 @@ __all__ = [
     'SelfAttentionInteractingLayer',
     'DisentangledSelfAttentionInteractingLayer',
     'ConvLayer',
+    'FGCNNLayer',
     'SqueezeExcitation',
     'BilinearInteraction',
     'MaskBlock',
@@ -37,7 +39,15 @@ __all__ = [
     'RegulationLayer',
     'FeatureSelection',
     'MultiHeadBilinearFusion',
-    'FieldWiseBiInteraction'
+    'FieldWiseBiInteraction',
+    'TrianglePoolingLayer',
+    'HolographicFMLayer',
+    'AttentionalAggregation',
+    'GateNN',
+    'PPLayer',
+    'SAMFeatureInteraction',
+    'GraphAggregationLayer',
+    'FiGNNLayer'
 ]
 
 
@@ -540,7 +550,7 @@ class LogTransformLayer(nn.Module):
         log_out = self.linear(log_emb.transpose(1, 2)).transpose(1, 2)
         exp_out = torch.exp(log_out)
         exp_out = self.exp_bn(exp_out)
-        output = exp_out.view(exp_out.size(0), -1)
+        output = exp_out.flatten(1)
         return output
     
     def extra_repr(self):
@@ -648,7 +658,7 @@ class DisentangledSelfAttentionInteractingLayer(nn.Module):
     
 class ConvLayer(nn.Module):
     
-    def __init__(self, num_fields, channels, heights, activation):
+    def __init__(self, num_fields, channels, heights):
         super().__init__()
         
         if len(heights) != len(channels):
@@ -656,21 +666,19 @@ class ConvLayer(nn.Module):
         
         self.channels = [1] + channels
         self.heights = heights
-        self.activation = activation
         layers = len(heights)
         
         module_list = []
         for i in range(1, len(self.channels)):
-            in_channels = self.channels[i - 1]
-            out_channels = self.channels[i]
+            in_channel = self.channels[i - 1]
+            out_channel = self.channels[i]
             height = heights[i - 1]
-            module_list.append(nn.ZeroPad2d((0, 0, math.floor(height - 1), math.ceil(height - 1))))
-            module_list.append(nn.Conv2d(in_channels, out_channels, kernel_size=(height, 1)))
+            module_list.append(nn.Conv2d(in_channel, out_channel, kernel_size=(height, 1), padding='same'))
             if i < layers:
                 k = max(3, int((1 - pow(float(i) / layers, layers - i)) * num_fields))
             else:
                 k = 3
-            module_list.append(get_act(activation))
+            module_list.append(nn.Tanh())
             module_list.append(KMaxPoolingLayer(k, dim=2))
         self.conv = nn.Sequential(*module_list)
 
@@ -678,23 +686,77 @@ class ConvLayer(nn.Module):
         return self.conv(inputs.unsqueeze(1)) # -> N(Batch size) x C(Channels) x H(Height) x W(Embed dim)
                 
     def extra_repr(self):
-        return f"channels={self.channels}, heights={self.heights}, activation={self.activation}"
+        return f"channels={self.channels}, heights={self.heights}"
         
 
+class FGCNNLayer(nn.Module):
+    def __init__(self, num_raw_fields, embed_dim, channels, heights, 
+                 pooling_sizes, recombine_channels, batch_norm):
+        super().__init__()
+        
+        if len(heights) != len(channels):
+            raise ValueError("channels and widths should have the same length.")
+        
+        self.channels = [1] + channels
+        self.heights = heights
+        self.pooling_sizes = pooling_sizes
+        self.recombine_channels = recombine_channels
+        
+        conv_layers = []
+        recomb_layers = []
+        self.out_height = [num_raw_fields]
+        for i in range(1, len(self.channels)):
+            module_list = []
+            in_channel = self.channels[i - 1]
+            out_channel = self.channels[i]
+            height = heights[i - 1]
+            pooling_size = pooling_sizes[i - 1]
+            recomb_channel = recombine_channels[i - 1]
+            module_list += [nn.Conv2d(in_channel, out_channel, kernel_size=(height, 1), padding='same')]
+            if batch_norm:
+                module_list += [nn.BatchNorm2d(out_channel)]
+            module_list += [nn.Tanh(), nn.MaxPool2d((pooling_size, 1))]
+            conv_layers.append(nn.Sequential(*module_list))
+            self.out_height.append(self.out_height[-1] // pooling_size)
+            if self.out_height[-1] == 0:
+                raise ValueError(f'pooling_sizes[{i-1}:] is too large, please change them to 1.')
+            recomb_layers.append(nn.Sequential(
+                                    nn.Linear(out_channel*self.out_height[-1]*embed_dim, 
+                                              recomb_channel*self.out_height[-1]*embed_dim), 
+                                    nn.Tanh()))
+        self.conv_layers = nn.ModuleList(conv_layers)
+        self.recomb_layers = nn.ModuleList(recomb_layers)
+
+    def forward(self, inputs):
+        conv_out = inputs.unsqueeze(1)
+        new_emb = []
+        for conv, recomb in zip(self.conv_layers, self.recomb_layers):
+            conv_out = conv(conv_out)                   # N(Batch size) x C(Channels) x H(Height) x W(Embed dim)
+            recomb_out = recomb(conv_out.flatten(1))
+            new_emb.append(recomb_out.reshape(inputs.size(0), -1, inputs.size(-1)))
+        new_emb = torch.cat(new_emb, dim=1)
+        return new_emb
+                
+    def extra_repr(self):
+        return f"channels={self.channels}, heights={self.heights}, " + \
+                f"pooling_sizes={self.pooling_sizes}, recombine_channels={self.recombine_channels}, " + \
+                f"out_height={self.out_height}"
+        
+        
 class SqueezeExcitation(nn.Module):
     
     def __init__(self, num_fields, reduction_ratio, activation, pool='avg') -> None:
         super().__init__()
         
         if pool.lower() not in ['avg', 'max']:
-            raise ValueError(f'Expect pool to be `avg` or `max`, but got {pool}')
+            raise ValueError(f'Expect pool to be `avg` or `max`, but got {pool}.')
         
         if not isinstance(activation, list):
             self.activation = [activation]
         if len(self.activation) == 1:
             self.activation = 2 * self.activation    
         elif len(self.activation) > 2 or len(self.activation) < 1:
-            raise ValueError(f'Expect activation to be one or two, but got {len([activation])}')
+            raise ValueError(f'Expect activation to be one or two, but got {len([activation])}.')
         
             
         self.pool = pool.lower()
@@ -765,7 +827,7 @@ class MaskBlock(nn.Module):
                  dropout=0, layer_norm=True):
         super().__init__()
         if reduction_ratio < 1:
-            raise ValueError(f'Expect reduction_ratio > 1, but got {reduction_ratio}')
+            raise ValueError(f'Expect reduction_ratio > 1, but got {reduction_ratio}.')
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
         self.reduction_ratio = reduction_ratio
@@ -813,9 +875,8 @@ class ParallelMaskNet(nn.Module):
                              dropout=dropout)
         self.layer_norm = nn.LayerNorm(embed_dim)
     def forward(self, inputs):
-        bs = inputs.size(0)
         ln_emb = self.layer_norm(inputs)
-        block_out = [mb(inputs.view(bs, -1), ln_emb.view(bs, -1)) for mb in self.mask_blocks]
+        block_out = [mb(inputs.flatten(1), ln_emb.flatten(1)) for mb in self.mask_blocks]
         concat_out = torch.cat(block_out, dim=-1)
         V_out = self.mlp(concat_out)
         return V_out
@@ -848,7 +909,7 @@ class SerialMaskNet(nn.Module):
         bs = inputs.size(0)
         ln_emb = self.layer_norm(inputs)
         for mb in self.mask_blocks:
-            block_out = mb(inputs.view(bs, -1), ln_emb.view(bs, -1))
+            block_out = mb(inputs.flatten(1), ln_emb.flatten(1))
         V_out = self.fc(block_out)
         return V_out
     
@@ -889,7 +950,7 @@ class OuterProductLayer(nn.Module):
         emb1 = torch.index_select(inputs, 1, self.triu_index[1])
         outer_prod_mat = emb0.unsqueeze(-1) @ emb1.unsqueeze(-2)    # B x N x D x D
         if self.reduction:
-            return outer_prod_mat.view(inputs.size(0), -1)
+            return outer_prod_mat.flatten(1)
         else:
             return outer_prod_mat
     
@@ -911,11 +972,11 @@ class OperationAwareFMLayer(nn.Module):
         bs = inputs.size(0)
         field_wise_emb = inputs.view(bs, self.num_fields, self.num_fields, -1)      # B x F x F x D
         emb_copy = torch.masked_select(field_wise_emb, self.diag_mask)              # B x F x D; copy i-th of emb_i
-        emb_copy = emb_copy.view(bs, -1)
+        emb_copy = emb_copy.flatten(1)
         
         inner_prod = (field_wise_emb.transpose(1, 2) * field_wise_emb).sum(dim=-1)  # B x F x F; <j-th of emb_i, i-th of emb_j> 
         ffm_out = torch.masked_select(inner_prod, self.triu_mask)
-        ffm_out = ffm_out.view(bs, -1)
+        ffm_out = ffm_out.flatten(1)
         
         output = torch.cat([emb_copy, ffm_out], dim=1)
         return output
@@ -943,7 +1004,7 @@ class FieldAwareFMLayer(nn.Module):
         field_wise_emb = inputs.view(bs, self.num_fields, self.num_fields - 1, -1)      # B x F x F-1 x D
         emb0 = torch.masked_select(field_wise_emb, self.triu_mask)                      # B*num_pairs*D, 1D tensor
         emb1 = torch.masked_select(field_wise_emb.transpose(1, 2), self.tril_mask)      # B*num_pairs*D, 1D tensor
-        output = (emb0 * emb1).view(bs, -1).sum(-1)                                     # w_{ij} * w_{ji}
+        output = (emb0 * emb1).flatten(1).sum(-1)                                       # w_{ij} * w_{ji}
         return output
         
 
@@ -1129,6 +1190,9 @@ class RegulationLayer(nn.Module):
             deep_out = self.deep_bn(deep_out)
         return cross_out, deep_out
     
+    def extra_repr(self):
+        return f'temperature={self.temperature}'
+    
 
 class FeatureSelection(nn.Module):
     def __init__(self, stream1_fields, stream2_fields, embed_dim, num_fields, data, mlp_layer, dropout=0):
@@ -1152,13 +1216,16 @@ class FeatureSelection(nn.Module):
 
     def forward(self, batch, inputs):
         emb1 = self.embedding1(batch)
-        g1 = 2 * self.gate1(emb1.view(inputs.size(0), -1)).sigmoid()
+        g1 = 2 * self.gate1(emb1.flatten(1)).sigmoid()
         
         emb2 = self.embedding2(batch)
-        g2 = 2 * self.gate2(emb2.view(inputs.size(0), -1)).sigmoid()    
+        g2 = 2 * self.gate2(emb2.flatten(1)).sigmoid()    
         
         return g1 * inputs, g2 * inputs
     
+    def extra_repr(self):
+        return f'stream1_fields={self.fields1}, stream2_fields={self.fields2}'
+
 
 class MultiHeadBilinearFusion(nn.Module):
     def __init__(self, n_head, embed_dim1, embed_dim2, output_dim=1):
@@ -1211,4 +1278,197 @@ class FieldWiseBiInteraction(nn.Module):
         fm_out = self.r_fm(fm_out.transpose(1, 2))                                      # B x D x 1                   
         fwbi_out = self.fc(torch.cat([lr_out.unsqueeze(-1), (fm_out + mf_out).squeeze(-1)], dim=-1))  # B x (D+1)
         return fwbi_out
+     
+    def extra_repr(self):
+        return f'fields={self.fields}'
+ 
+     
+class TrianglePoolingLayer(nn.Module):
+    def __init__(self, num_fields):
+        super().__init__()
+        self.inner_product = InnerProductLayer(num_fields)
         
+    def forward(self, inputs):
+        '''
+        gamma(u,v)  = (1 - <u, v>L - u0 - v0) / (u0 * v0)
+                    = (1 + u0 * v0 - sum_1^d u_i*vi - u0 - v0) / (u0 * v0)
+                    = 1 + (1 - sum_1^d u_i*vi - u0 - v0) / (u0 * v0)
+        '''
+        inner_prod = self.inner_product(inputs)                                         # B x N
+        zero_component = torch.sqrt(1 + (inputs**2).sum(-1))                    # B x num_fields
+        u0 = torch.index_select(zero_component, -1, self.inner_product.triu_index[0])   # B x N
+        v0 = torch.index_select(zero_component, -1, self.inner_product.triu_index[1])   # B x N
+        gamma = 1 + (1 - inner_prod - u0 - v0) / (u0 * v0)
+        output = gamma.sum(-1)
+        return output
+    
+    
+class HolographicFMLayer(nn.Module):
+    def __init__(self, num_fields, op):
+        super().__init__()
+        if op.lower() not in ['circular_convolution', 'circular_correlation']:
+            raise ValueError(f'Expect op to be `circular_convolution`|'
+                             f'`circular_correlation`, but got {op}.')
+        self.op = op.lower()
+        self.triu_index = nn.Parameter(
+                            torch.triu_indices(num_fields, num_fields, offset=1), 
+                            requires_grad=False)  
+        
+    def forward(self, inputs):
+        emb0 = torch.index_select(inputs, 1, self.triu_index[0])
+        emb1 = torch.index_select(inputs, 1, self.triu_index[1])
+        fft0 = torch.fft.fft(emb0)
+        fft1 = torch.fft.fft(emb1)
+        if self.op == 'circular_correlation':
+            fft0 = fft0.conj()
+        output = torch.view_as_real(torch.fft.ifft(fft0 * fft1))[..., 0]
+        return output
+    
+    def extra_repr(self):
+        return f'op={self.op}'
+    
+    
+class AttentionalAggregation(nn.Module):
+    def __init__(self, embed_dim, hidden_dim):
+        super().__init__()
+        self.agg = nn.Sequential(
+                    nn.Linear(embed_dim, hidden_dim, bias=False), 
+                    nn.ReLU(),
+                    nn.Linear(hidden_dim, 1, bias=False),           # query layer
+                    nn.Softmax(dim=1))
+
+    def forward(self, key, value):
+        attn_weight = self.agg(key)
+        attn_out = (attn_weight * value).sum(dim=1)
+        return attn_out
+    
+
+class GateNN(nn.Module):
+    def __init__(self, in_dim, hidden_dim, out_dim, dropout, activation, batch_norm):
+        super().__init__()
+        self.gate = MLPModule(
+                        [in_dim, hidden_dim, out_dim],
+                        activation,
+                        dropout,
+                        batch_norm=batch_norm,
+                        last_activation=False,
+                        last_bn=False
+                    )
+        self.gate.add_modules(nn.Sigmoid())
+        
+    def forward(self, inputs):
+        return 2 * self.gate(inputs)
+    
+    
+class PPLayer(nn.Module):
+    def __init__(self, mlp_layer, gate_in_dim, gate_hidden_dim, activation, dropout, batch_norm):
+        super().__init__()
+        self.gate = GateNN(
+                        gate_in_dim, 
+                        gate_hidden_dim, 
+                        mlp_layer[0],
+                        dropout, 
+                        activation, 
+                        batch_norm)
+        self.mlp = MLPModule(
+                    mlp_layer, 
+                    activation, 
+                    dropout, 
+                    batch_norm=batch_norm, 
+                    last_activation=False)
+    
+    def forward(self, gate_in, mlp_in):
+        gate_out = self.gate(gate_in)
+        output = self.mlp(gate_out * mlp_in)
+        return output
+
+
+class SAMFeatureInteraction(nn.Module):
+    '''
+    According to table 2 in SAM, there is no sum on SAM2A and SAM2E.
+    '''
+    def __init__(self, interaction_type, embed_dim, num_fields, dropout):
+        super().__init__()
+        if interaction_type not in ['sam1', 'sam2a', 'sam2e', 'sam3a', 'sam3e']:
+            raise ValueError('Expect interaction_type to be `sam1`|`sam2a`|`sam2e`|`sam3a`|`sam3e`, '
+                             f'but got {interaction_type}.')
+        self.interaction_type = interaction_type   
+        if interaction_type in ['sam2a', 'sam3a']:
+            self.W = nn.Parameter(torch.ones(num_fields, num_fields, embed_dim))
+        if interaction_type == 'sam3a':
+            self.K = nn.Linear(embed_dim, embed_dim, bias=False)
+            self.res = nn.Linear(embed_dim, embed_dim, bias=False)
+        elif interaction_type == 'sam3e':
+            self.K = nn.Linear(embed_dim, embed_dim, bias=False)
+            self.res = nn.Linear(embed_dim, embed_dim, bias=False)
+        self.dropout = nn.Dropout(dropout)
+            
+    def forward(self, inputs):
+        if self.interaction_type == 'sam1':
+            output = inputs                                                     # B x F x D
+        elif self.interaction_type == 'sam2a':
+            inner_prod = inputs @ inputs.transpose(1, 2)                        # B x F x F
+            output = (inner_prod.unsqueeze(-1) * self.W)                        # B x F x F x D
+        elif self.interaction_type == 'sam2e':
+            inner_prod = torch.einsum('bFd,bfd->bFfd', 2 * [inputs])            # B x F x F x D
+            output = (inner_prod.sum(-1, keepdim=True) * inner_prod)            # B x F x F x D
+        else:
+            inner_prod = inputs @ self.K(inputs).transpose(1, 2)                # B x F x F
+            if self.interaction_type == 'sam3a':
+                output = (inner_prod.unsqueeze(-1) * self.W).sum(2)             # B x F x F x D -> B x F x D
+            else:
+                output = (inner_prod.unsqueeze(-1) * (torch.einsum('bFd,bfd->bFfd', 2 * [inputs]))).sum(2)  # B x F x F x D -> B x F x D
+            output = output + self.res(inputs) 
+        output = self.dropout(output)
+        return output   
+    
+    def extra_repr(self):
+        return f'interaction_type={self.interaction_type}, dropout={self.dropout.p}'
+    
+    
+class GraphAggregationLayer(nn.Module):
+    def __init__(self, num_fields, embed_dim):
+        super().__init__()
+        self.W_in = nn.Parameter(torch.randn(num_fields, embed_dim, embed_dim))
+        self.W_out = nn.Parameter(torch.randn(num_fields, embed_dim, embed_dim))
+        self.bias = nn.Parameter(torch.zeros(embed_dim))
+        
+    def forward(self, h, w):
+        '''w: F x F'''
+        h_out = (self.W_out @ h.unsqueeze(-1)).squeeze(-1)          # F x D x D, B x F x D -> B x F x D
+        agg = w @ h_out                                             # B x F x F, B x F x D -> B x F x D
+        a = (self.W_in @ agg.unsqueeze(-1)).squeeze(-1) + self.bias # F x D x D, B x F x D -> B x F x D
+        return a
+        
+    
+class FiGNNLayer(nn.Module):
+    def __init__(self, num_fields, embed_dim, num_layers):
+        super().__init__()
+        self.idx_i, self.idx_j = zip(*list(product(range(num_fields), repeat=2)))  
+        self.w = nn.Sequential(
+                    nn.Linear(2 * embed_dim, 1, bias=False),
+                    nn.LeakyReLU(),
+                    LambdaLayer(lambda x: x.reshape(-1, num_fields, num_fields)),
+                    nn.Softmax(-1),
+                    LambdaLayer(lambda x: x - x[0].diag().diag_embed()))
+        self.gnn = nn.ModuleList([
+                        GraphAggregationLayer(num_fields, embed_dim)
+                        for _ in range(num_layers)
+                    ])
+        self.gru = nn.GRUCell(embed_dim, embed_dim)
+        
+    def forward(self, inputs):
+        emb0 = inputs[:, self.idx_i, :]
+        emb1 = inputs[:, self.idx_j, :]
+        w = self.w(torch.cat([emb0, emb1], dim=-1))
+        h = inputs
+        for gnn in self.gnn:
+            a = gnn(h, w)
+            h = self.gru(a.flatten(end_dim=1), h.flatten(end_dim=1)).view_as(inputs)
+            h = h + inputs
+        return h
+    
+    def extra_repr(self):
+        return f'num_layers={len(self.gnn)}'
+    
+    

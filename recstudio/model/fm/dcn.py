@@ -25,8 +25,7 @@ class DCN(BaseRanker):
         self.fc = torch.nn.Linear(num_features*self.embed_dim + mlp_layer[-1], 1)
 
     def score(self, batch):
-        emb = self.embedding(batch)
-        emb = emb.view(*emb.shape[:-2], -1)
+        emb = self.embedding(batch).flatten(1)
         cross_out = self.cross_net(emb)
         deep_out = self.mlp(emb)
         score = self.fc(torch.cat([deep_out, cross_out], -1)).squeeze(-1)

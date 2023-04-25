@@ -49,7 +49,7 @@ class FwFM(BaseRanker):
             lr_emb = self.linear_embedding(batch)
             lr_score = (lr_emb * emb).sum((1, 2))
         else:
-            lr_score = self.linear(emb.view(emb.size(0), -1)).squeeze(-1)
+            lr_score = self.linear(emb.flatten(1)).squeeze(-1)
         fwfm_score = self.fwfm(emb).squeeze(-1)
         return {'score' : lr_score + fwfm_score}
 

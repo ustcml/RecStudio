@@ -59,9 +59,7 @@ class AFN(BaseRanker):
         afn_score = self.afn(batch)
         if self.config['model']['ensemble']:
             ensemble_emb = self.ensemble_embedding(batch)
-            ensemble_mlp_score = self.ensemble_mlp(
-                                    ensemble_emb.view(ensemble_emb.size(0), -1)
-                                )
+            ensemble_mlp_score = self.ensemble_mlp(ensemble_emb.flatten(1))
             score = self.ensemble_fc(
                         torch.cat([afn_score, ensemble_mlp_score], dim=-1)
                     )

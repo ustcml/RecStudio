@@ -1,0 +1,8 @@
+model:
+  order: 3
+  feedforward_dim: 32
+  aggregation_dim: 32
+  mlp_layer: [256, 256, 256]
+  activation: relu
+  dropout: 0.5
+  n_head: 2

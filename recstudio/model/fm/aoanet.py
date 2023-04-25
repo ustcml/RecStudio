@@ -40,8 +40,8 @@ class AOANet(BaseRanker):
 
     def score(self, batch):
         emb = self.embedding(batch)
-        mlp_out = self.mlp(emb.view(emb.size(0), -1))
-        gin_out = self.gin(emb).reshape(emb.size(0), -1)
+        mlp_out = self.mlp(emb.flatten(1))
+        gin_out = self.gin(emb).flatten(1)
         score = self.fc(torch.cat([mlp_out, gin_out], dim=-1)).squeeze(-1)
         return {'score' : score}
 

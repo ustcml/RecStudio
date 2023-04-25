@@ -15,3 +15,7 @@ train:
   batch_size: 256
   negative_count: 20
 
+data:
+  low_rating_thres: 0.0
+  binarized_rating_thres: 3.0
+

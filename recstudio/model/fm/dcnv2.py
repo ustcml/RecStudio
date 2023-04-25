@@ -45,11 +45,10 @@ class DCNv2(BaseRanker):
                         model_config['dropout'],
                         batch_norm=model_config['batch_norm'])
         else:
-            raise ValueError(f'Expect combination to be `parallel`|`stacked`, but got {model_config["combination"]}')
+            raise ValueError(f'Expect combination to be `parallel`|`stacked`, but got {model_config["combination"]}.')
 
     def score(self, batch):
-        emb = self.embedding(batch)
-        emb = emb.view(emb.size(0), -1)
+        emb = self.embedding(batch).flatten(1)
         cross_out = self.cross_net(emb)
         if self.config['model']['combination'].lower() == 'parallel':
             deep_out = self.mlp(emb)

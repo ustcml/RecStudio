@@ -1,0 +1,9 @@
+model:
+  id_fields: ~
+  mlp_layer: [256, 256, 256]
+  activation: relu
+  dropout: 0.5
+  batch_norm: False
+  id_embed_dim: 8
+  pp_hidden_dims: [128, 128, 128]
+  gate_hidden_dims: [64, 64, 64]

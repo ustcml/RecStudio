@@ -56,13 +56,13 @@ class DESTINE(BaseRanker):
         if self.config['model']['res_mode'].lower() == 'last_layer':
             attn_out += self.res(emb)
         attn_out = attn_out.relu()
-        attn_score = self.fc(attn_out.reshape(emb.size(0), -1)).squeeze(-1)
+        attn_score = self.fc(attn_out.flatten(1)).squeeze(-1)
         score = attn_score
         if self.config['model']['wide']:
             lr_score = self.linear(batch)
             score += lr_score
         if self.config['model']['deep']:
-            mlp_score = self.mlp(emb.view(emb.size(0), -1)).squeeze(-1)
+            mlp_score = self.mlp(emb.flatten(1)).squeeze(-1)
             score += mlp_score
         return {'score' : score}
 
