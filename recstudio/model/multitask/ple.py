@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 from collections import defaultdict
-from collections.abc import Iterable
 from recstudio.data.dataset import TripletDataset
 from ..basemodel import BaseRanker
 from ..loss_func import BCEWithLogitLoss
@@ -25,7 +24,7 @@ class PLE(BaseRanker):
         super()._init_model(train_data, drop_unused_field)
         model_config = self.config['model']
         self.embedding = ctr.Embeddings(self.fields, self.embed_dim, train_data)
-        assert isinstance(self.frating, Iterable), f'Expect rating_field to be a list, but got {self.frating}.'
+        assert isinstance(self.frating, list), f'Expect rating_field to be a list, but got {self.frating}.'
         self.extraction_layers = nn.Sequential(*[
                                     ctr.ExtractionLayer(
                                         self.embedding.num_features * self.embed_dim,

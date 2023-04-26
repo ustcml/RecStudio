@@ -4,7 +4,6 @@ import inspect
 import logging
 from typing import Dict, List, Optional, Tuple
 from collections import defaultdict
-from collections.abc import Iterable
 
 import time
 # import nni
@@ -85,8 +84,8 @@ class Recommender(torch.nn.Module, abc.ABC):
         self._set_data_field(train_data) #TODO(@AngusHuang17): to be considered in a better way
         self.fields = train_data.use_field
         self.frating = train_data.frating
-        assert (not isinstance(self.frating, Iterable) and self.frating in self.fields) or \
-            (isinstance(self.frating, Iterable) and set(self.frating).issubset(self.fields)), 'rating field is required.'
+        assert (not isinstance(self.frating, list) and self.frating in self.fields) or \
+            (isinstance(self.frating, list) and set(self.frating).issubset(self.fields)), 'rating field is required.'
         if drop_unused_field:
             train_data.drop_feat(self.fields)
         self.item_feat = train_data.item_feat
@@ -271,7 +270,7 @@ class Recommender(torch.nn.Module, abc.ABC):
         output_list = [output_list] if not isinstance(output_list, list) else output_list
         for outputs in output_list:
             if isinstance(outputs, List):
-                if not isinstance(self.frating, Iterable):
+                if not isinstance(self.frating, list):
                     loss_metric = {'train_'+ k: torch.hstack([e[k] for e in outputs]).mean() for k in outputs[0]}
                 else:
                     loss_metric = {'train_'+ k: torch.hstack([e[k] for e in outputs]).mean() for k in outputs[0] if k not in self.frating}
@@ -350,7 +349,7 @@ class Recommender(torch.nn.Module, abc.ABC):
 
     def log_dict(self, metrics: Dict, tensorboard: bool=True):
         if tensorboard:
-            if not (isinstance(self.frating, Iterable) and set(self.frating).issubset(metrics)):
+            if not (isinstance(self.frating, list) and set(self.frating).issubset(metrics)):
                 for k, v in metrics.items():
                     if 'train' in k:
                         self.tensorboard_logger.add_scalar(f"train/{k}", v, self.logged_metrics['epoch']+1)
@@ -557,7 +556,7 @@ class Recommender(torch.nn.Module, abc.ABC):
 
                 # model is saved in callback when the callback return True.
                 if nepoch % self.config['eval']['val_n_epoch'] == 0:
-                    if not isinstance(self.frating, Iterable):
+                    if not isinstance(self.frating, list):
                         stop_training = self.callback(self, nepoch, self.logged_metrics)
                     else:
                         main_task = self.config['eval'].get('main_task', self.frating[0])
@@ -642,7 +641,7 @@ class Recommender(torch.nn.Module, abc.ABC):
                                 v = v.detach()
                             elif isinstance(v, List):
                                 v = [_ for _ in v]
-                        if not (isinstance(self.frating, Iterable) and k in self.frating):
+                        if not (isinstance(self.frating, list) and k in self.frating):
                            loss_[f'{k}_{loader_idx}'] = v
                         else:
                             loss_[k][f'{loader_idx}'] = v

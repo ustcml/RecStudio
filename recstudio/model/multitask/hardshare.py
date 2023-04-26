@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 from collections import defaultdict
-from collections.abc import Iterable
 from recstudio.data.dataset import TripletDataset
 from ..basemodel import BaseRanker
 from ..loss_func import BCEWithLogitLoss
@@ -30,7 +29,7 @@ class HardShare(BaseRanker):
                             model_config['bottom_activation'], 
                             model_config['bottom_dropout'],
                             batch_norm=model_config['bottom_batch_norm'])
-        assert isinstance(self.frating, Iterable), f'Expect rating_field to be a list, but got {self.frating}.'
+        assert isinstance(self.frating, list), f'Expect rating_field to be a list, but got {self.frating}.'
         self.top_mlp = nn.ModuleDict({
                             r: MLPModule(
                                 [model_config['bottom_mlp_layer'][-1]] + model_config['top_mlp_layer'] + [1],

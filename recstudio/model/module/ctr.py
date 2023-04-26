@@ -1,5 +1,4 @@
 from typing import Set
-from collections.abc import Iterable
 import math
 import torch
 import torch.nn as nn
@@ -90,7 +89,7 @@ class Embeddings(torch.nn.Module):
         super(Embeddings, self).__init__()
         self.embed_dim = embed_dim
 
-        if not isinstance(data.frating, Iterable):
+        if not isinstance(data.frating, list):
             self.field2types = {f: data.field2type[f] for f in fields if f != data.frating}
         else:
             self.field2types = {f: data.field2type[f] for f in fields if f not in data.frating}

@@ -1,5 +1,4 @@
 from collections import defaultdict
-from collections.abc import Iterable
 import inspect
 import torch
 import recstudio.eval as eval
@@ -49,7 +48,7 @@ class BaseRanker(Recommender):
 
     def _set_data_field(self, data):
         token_field = set([k for k, v in data.field2type.items() if v=='token'])
-        if not isinstance(data.frating, Iterable):
+        if not isinstance(data.frating, list):
             token_field.add(data.frating)
         else:
             token_field = {*token_field, *data.frating}
@@ -79,14 +78,14 @@ class BaseRanker(Recommender):
         # calculate scores
         if self.retriever is None:
             output = self.score(batch)
-            if not isinstance(self.frating, Iterable):
+            if not isinstance(self.frating, list):
                 return {'pos_score': output['score'], 'label': batch[self.frating]}, output  
             else:
                 return {r: {'pos_score': output[r]['score'], 'label': batch[r]} for r in self.frating}, output
         else:
             # only positive samples in batch
             assert self.neg_count is not None, 'expecting neg_count is not None.'
-            assert not isinstance(self.frating, Iterable), 'expecting non-iterable rating_field.'
+            assert not isinstance(self.frating, list), 'expecting a list for rating_field.'
             pos_output = self.score(batch)
             pos_prob, neg_item_idx, neg_prob = self.retriever.sampling(
                 batch, self.neg_count, method=self.config['train']['sampling_method'])
@@ -162,7 +161,7 @@ class BaseRanker(Recommender):
             result, _ = self.forward(batch)
             global_m = eval.get_global_metrics(metric)
             metrics = {}
-            if not isinstance(self.frating, Iterable):
+            if not isinstance(self.frating, list):
                 for n, f in pred_m:
                     if not (n, f) in global_m:
                         if len(inspect.signature(f).parameters) > 2:                                # precision, recall, f1
@@ -182,8 +181,11 @@ class BaseRanker(Recommender):
                     for n, f in pred_m:
                         if not (n, f) in global_m:
                             if len(inspect.signature(f).parameters) > 2:                                        # precision, recall, f1
+                                binarized_prob_thres = self.config['eval']['binarized_prob_thres']
+                                if not isinstance(binarized_prob_thres, list):
+                                    binarized_prob_thres = [binarized_prob_thres] * len(self.frating)
                                 metrics[r][n] = f(torch.sigmoid(result[r]['pos_score']), result[r]['label'], 
-                                                self.config['eval']['binarized_prob_thres'][i])
+                                                binarized_prob_thres[i])
                             elif n == 'logloss':                                                                    # logloss
                                 metrics[r][n] = f(result[r]['pos_score'], result[r]['label'])
                             else:                                                                                   # acc, mae, mse
@@ -213,7 +215,7 @@ class BaseRanker(Recommender):
         metric_list, bs = zip(*outputs)
         bs = torch.tensor(bs)
         global_m = eval.get_global_metrics(metrics)
-        if not isinstance(self.frating, Iterable):
+        if not isinstance(self.frating, list):
             out = defaultdict(list)
             for o in metric_list:
                 for k, v in o.items():
