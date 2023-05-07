@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple
 from collections import defaultdict
 
 import time
-# import nni
+import nni
 import recstudio.eval as eval
 import torch
 import torch.optim as optim
@@ -29,6 +29,9 @@ class Recommender(torch.nn.Module, abc.ABC):
             self.config = config
         else:
             self.config = parser_yaml(os.path.join(os.path.dirname(__file__), "basemodel.yaml"))
+
+        if kwargs['run_mode'] == 'tune':
+            self._update_config_with_nni()
 
         if self.config['train']['seed'] is not None:
             seed_everything(self.config['train']['seed'], workers=True)
@@ -96,7 +99,14 @@ class Recommender(torch.nn.Module, abc.ABC):
             else:
                 self.loss_fn = self._get_loss_func()
 
-
+    def _update_config_with_nni(self):
+        next_parameter = nni.get_next_parameter() # Updated config dict
+        # Model config is given a higher priority when config entry name conflicts
+        for k, v in next_parameter.items():
+            if k in self.config['model'].keys(): 
+                self.config['model'].update({k: v})
+            elif k in self.config['train'].keys():
+                self.config['train'].update({k: v})
 
     def fit(
         self,
@@ -213,9 +223,6 @@ class Recommender(torch.nn.Module, abc.ABC):
         self.eval()
         output_list = self.test_epoch(test_loader)
         output.update(self.test_epoch_end(output_list))
-        if self.run_mode == 'tune':
-            output['default'] = output[self.val_metric]
-            # nni.report_final_result(output)
         if verbose:
             self.logger.info(color_dict(output, self.run_mode == 'tune'))
         return output
@@ -276,9 +283,6 @@ class Recommender(torch.nn.Module, abc.ABC):
                 loss_metric = {'train_'+k : v for k, v in outputs}
             self.log_dict(loss_metric)
 
-        if self.val_check and self.run_mode == 'tune':
-            metric = self.logged_metrics[self.val_metric]
-            # nni.report_intermediate_result(metric)
         # TODO: only print when rank=0
         if self.run_mode in ['light', 'tune'] or self.val_check:
             self.logger.info(color_dict(self.logged_metrics, self.run_mode == 'tune'))
@@ -302,6 +306,9 @@ class Recommender(torch.nn.Module, abc.ABC):
         elif isinstance(outputs[0][0], Dict):
             out = self._test_epoch_end(outputs, val_metric)
         self.log_dict(out)
+        if self.run_mode == 'tune':
+            nni_result = self._get_nni_format_result(out)
+            nni.report_intermediate_result(nni_result)
         return out
 
     def test_epoch_end(self, outputs):
@@ -320,6 +327,9 @@ class Recommender(torch.nn.Module, abc.ABC):
         elif isinstance(outputs[0][0], Dict):
             out = self._test_epoch_end(outputs, test_metric)
         self.log_dict(out, tensorboard=False)
+        if self.run_mode == 'tune':
+            nni_result = self._get_nni_format_result(out)
+            nni.report_final_result(nni_result)
         return out
 
     def _test_epoch_end(self, outputs, metrics):
@@ -348,6 +358,14 @@ class Recommender(torch.nn.Module, abc.ABC):
                 else:
                     self.tensorboard_logger.add_scalar(f"valid/{k}", v, self.logged_metrics['epoch']+1)
         self.logged_metrics.update(metrics)
+
+    def _get_nni_format_result(self, metrics: Dict):
+        nni_result = {}
+        for k, v in metrics.items():
+            nni_result[k] = v.item()
+        # The 'default' metric is used to control behavior of nni
+        nni_result['default'] = list(nni_result.values())[0]
+        return nni_result
 
     def _init_parameter(self):
         init_methods = {
@@ -699,7 +717,10 @@ class Recommender(torch.nn.Module, abc.ABC):
 
     def _accelerate(self):
         gpu_list = get_gpus(self.config['train']['gpu'])
-        if gpu_list is not None:
+        if self.run_mode == 'tune':
+            self.device = torch.device('cuda') # NNI will assign gpu index automatically
+            self = self._to_device(self, self.device)
+        elif gpu_list is not None:
             self.logger.info(f"GPU id {gpu_list} are selected.")
             if len(gpu_list) == 1:
                 self.device = torch.device("cuda", gpu_list[0])
