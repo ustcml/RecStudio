@@ -1,4 +1,4 @@
-import os, nni, datetime, torch
+import os, datetime, torch
 from typing import *
 from recstudio.utils import *
 
@@ -30,15 +30,7 @@ def run(model: str, dataset: str, model_config: Dict=None, data_config: Dict=Non
 
     logger.info("Log saved in {}.".format(os.path.abspath(log_path)))
     if run_mode == 'tune':
-        next_parameter = nni.get_next_parameter() # Updated config dict
-        for k, v in next_parameter.items():
-            para_name = k.split('/')
-            assert len(para_name) == 2 and para_name[0] in ['train', 'model'], \
-                'The format of NNI search space entry should be train/XXX or model/XXX.'
-            if model_conf[para_name[0]].get(para_name[1]) == None:
-                logger.warning(f"NNI search space variable {para_name[1]} doesn't exist in config/{para_name[0]}")
-            else:
-                model_conf[para_name[0]][para_name[1]] = v
+        model_conf = update_config_with_nni(model_conf)
     model = model_class(model_conf)
     dataset_class = model_class._get_dataset_class()
 
