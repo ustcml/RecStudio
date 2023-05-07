@@ -30,9 +30,6 @@ class Recommender(torch.nn.Module, abc.ABC):
         else:
             self.config = parser_yaml(os.path.join(os.path.dirname(__file__), "basemodel.yaml"))
 
-        if kwargs['run_mode'] == 'tune':
-            self._update_config_with_nni()
-
         if self.config['train']['seed'] is not None:
             seed_everything(self.config['train']['seed'], workers=True)
 
@@ -98,15 +95,6 @@ class Recommender(torch.nn.Module, abc.ABC):
                 self.loss_fn = self._get_loss_func(train_data)
             else:
                 self.loss_fn = self._get_loss_func()
-
-    def _update_config_with_nni(self):
-        next_parameter = nni.get_next_parameter() # Updated config dict
-        # Model config is given a higher priority when config entry name conflicts
-        for k, v in next_parameter.items():
-            if k in self.config['model'].keys(): 
-                self.config['model'].update({k: v})
-            elif k in self.config['train'].keys():
-                self.config['train'].update({k: v})
 
     def fit(
         self,
