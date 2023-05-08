@@ -67,7 +67,7 @@ class TripletDataset(Dataset):
         if not isinstance(self.frating, list):
             self._use_field = set([self.fuid, self.fiid, self.frating])
         else:
-            self._use_field = set([self.fuid, self.fiid, *self.frating])
+            self._use_field = set([self.fuid, self.fiid, *self.frating]) - {None}
 
     @property
     def field(self):
@@ -710,7 +710,7 @@ class TripletDataset(Dataset):
 
         splits = np.hstack(
             [np.zeros((m, 1), dtype=np.int32), np.cumsum(splits, axis=1)])
-        cumsum = np.hstack([[0], data_count.cumsum().iloc[:-1]])
+        cumsum = np.hstack([[0], data_count.cumsum()[:-1]])
         splits = cumsum.reshape(-1, 1) + splits
         return splits, data_count.index if m > 1 else None
 
@@ -725,8 +725,8 @@ class TripletDataset(Dataset):
         if splits[0][-1] == data_count.values.sum():
             return splits, data_count.index if m > 1 else None
         else:
-            ValueError(f'Expecting the number of interactions \
-            should be equal to the sum of {num}')
+            raise ValueError('Expecting the number of interactions' \
+                            f'should be equal to the sum of {num}')
 
     def _split_by_leave_one_out(self, leave_one_num, data_count, rep=True):
         r"""Split dataset into train/valid/test by leave one out method.
@@ -978,8 +978,8 @@ class TripletDataset(Dataset):
         else:
             splits = self._split_by_num(ratio_or_num, user_count)
 
-        splits_ = splits[0][0]
-        if split_mode == 'entry':
+        if split_mode == 'entry' and splits[1] is not None:
+            splits_ = splits[0][0]
             ucnts = pd.DataFrame({self.fuid : splits[1]})
             for i, (start, end) in enumerate(zip(splits_[:-1], splits_[1:])):
                 self.inter_feat[start:end] = self.inter_feat[start:end].sort_values(
@@ -996,10 +996,12 @@ class TripletDataset(Dataset):
                 [torch.tensor(0), u_cumsum[:, -1][:-1]]).view(-1, 1).cumsum(dim=0)
             splits = torch.hstack([u_start, u_cumsum + u_start])
             uids = ucnts[:, 0]
-            if isinstance(self, UserDataset):
+            if type(self) == TripletDataset:
+                splits = (splits.numpy(), uids)
+            elif isinstance(self, UserDataset) or isinstance(self, SeqDataset):
                 splits = (splits, uids.view(-1, 1))
             else:
-                splits = (splits.numpy(), uids)
+                raise ValueError(f'{type(self)} is not supportable for `entry` split_mode.')
 
 
         self.dataframe2tensors()

@@ -247,7 +247,7 @@ def check_valid_dataset(name: str, config: Dict, default_dataset_path=DEFAULT_CA
             return False, default_dir
         elif download_flag and (config['url'] is not None):
             if config['url'].startswith('http'):
-                logger.info(f"will download dataset {name} fron the url {config['url']}.")
+                logger.info(f"will download dataset {name} from the url {config['url']}.")
                 return False, download_dataset(config['url'], name, default_dir)
             elif config['url'].startswith('recstudio:'): # use dataset privided in dataset_demo
                 dir = os.path.dirname(os.path.dirname(__file__)) # recstudio dir

@@ -1,9 +1,7 @@
 import torch
 import torch.nn as nn
 from collections import defaultdict
-from recstudio.data.dataset import TripletDataset
-from ..basemodel import BaseRanker
-from ..loss_func import BCEWithLogitLoss
+from recstudio.model.multitask.hardshare import HardShare
 from ..module import ctr, MLPModule
 
 r"""
@@ -15,10 +13,7 @@ Paper Reference:
     https://dl.acm.org/doi/10.1145/3219819.3220007
 """
 
-class MMoE(BaseRanker):
-
-    def _get_dataset_class():
-        return TripletDataset
+class MMoE(HardShare):
 
     def _init_model(self, train_data, drop_unused_field=True):
         super()._init_model(train_data, drop_unused_field)
@@ -63,22 +58,3 @@ class MMoE(BaseRanker):
             mmoe_out = (gate_out.unsqueeze(-1) * experts_out).sum(1)            # B x De
             score[r]['score'] = self.towers[r](mmoe_out).squeeze(-1)
         return score
-
-    def _get_loss_func(self):
-        return BCEWithLogitLoss()
-    
-    def training_step(self, batch):
-        y_h, _ = self.forward(batch)
-        loss = {}
-        for r in self.frating:
-            loss[r] = self.loss_fn(**y_h[r])
-        
-        weights = self.config['train'].get('weights', [1.0]*len(self.frating))
-        if weights is None:
-            weights = [1.0]*len(self.frating)
-        assert len(weights) == len(self.frating), \
-            f'Expect {len(self.frating)} float(s) for weights, but got {self.config["train"]["weights"]}.'
-        weights = torch.tensor(weights, device=self.device).softmax(0)
-        
-        loss['loss'] = sum(w*v for w, (_, v) in zip(weights, loss.items()))
-        return loss

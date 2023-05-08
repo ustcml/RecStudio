@@ -80,7 +80,7 @@ class DenseKernel(torch.nn.Module):
 class Embeddings(torch.nn.Module):
 
     def __init__(self, fields: Set, embed_dim, data, reduction='mean',
-                 share_dense_embedding=True, dense_emb_bias=False, dense_emb_norm=False,
+                 share_dense_embedding=False, dense_emb_bias=False, dense_emb_norm=False,
                  with_dense_kernel=False):
         r"""
         Args:
@@ -1220,6 +1220,25 @@ class FieldWiseBiInteraction(nn.Module):
         
         
 class ExtractionLayer(nn.Module):
+    r"""Extraction Layer of PLE.
+    
+    Args:
+        in_dim(int): dimension of layer input
+        specific_experts_per_task(int): number of task-specific experts per task
+        num_task(int): number of tasks
+        num_shared_experts(int): number of shared experts
+        share_gate(bool): whether to set share_gate, `False` for final ExtractionLayer
+        expert_mlp_layer(list): list of hidden layers of each expert
+        expert_activation(str): activation function for each expert
+        expert_dropout(float): dropout rate for each expert
+        gate_mlp_layer(list): list of hidden layers of each gate
+        gate_activation(str): activation function for each gate
+        gate_dropout(float): dropout rate for each gate
+        
+    Returns:
+        list: each element is a torch.Tensor with shape of (batch_size, expert_mlp_layer[-1])
+    
+    """
     def __init__(self, in_dim, specific_experts_per_task, num_task, num_shared_experts, share_gate,
                  expert_mlp_layer, expert_activation, expert_dropout, 
                  gate_mlp_layer, gate_activation, gate_dropout):
@@ -1243,7 +1262,7 @@ class ExtractionLayer(nn.Module):
                                     [in_dim] + expert_mlp_layer,
                                     expert_activation, 
                                     expert_dropout)
-                                for _ in range(specific_experts_per_task)
+                                for _ in range(num_shared_experts)
                             ])
         self.gates = nn.ModuleList([
                         MLPModule(
@@ -1265,14 +1284,14 @@ class ExtractionLayer(nn.Module):
     def forward(self, inputs):
         experts_out = []
         for i, experts_per_task in enumerate(self.specific_experts):
-            experts_out.append(torch.stack([e(inputs[i]) for e in experts_per_task], dim=1))   # B x SpecificPerTask x De
+            experts_out.append(torch.stack([e(inputs[i]) for e in experts_per_task], dim=1))    # B x SpecificPerTask x De
                 
         shared_e_out = torch.stack(
                         [shared_e(inputs[-1]) for shared_e in self.shared_experts], dim=1)      # B x Shared x De
         
         outputs = []
         for i, (g, e_out) in enumerate(zip(self.gates, experts_out)):
-            gate_out = g(inputs[i])        # B x (SpecificPerTask + Shared)
+            gate_out = g(inputs[i])                                                             # B x (SpecificPerTask + Shared)
             outputs.append((gate_out.unsqueeze(-1) * torch.cat([e_out, shared_e_out], dim=1)).sum(1))    # B x De
         
         if self.share_gate:

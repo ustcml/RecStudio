@@ -1,9 +1,7 @@
 import torch
 import torch.nn as nn
 from collections import defaultdict
-from recstudio.data.dataset import TripletDataset
-from ..basemodel import BaseRanker
-from ..loss_func import BCEWithLogitLoss
+from recstudio.model.multitask.hardshare import HardShare
 from ..module import ctr, MLPModule, AttentionLayer
 
 r"""
@@ -15,10 +13,7 @@ Paper Reference:
     https://doi.org/10.1145/3447548.3467071
 """
 
-class AITM(BaseRanker):
-
-    def _get_dataset_class():
-        return TripletDataset
+class AITM(HardShare):
 
     def _init_model(self, train_data, drop_unused_field=True):
         super()._init_model(train_data, drop_unused_field)
@@ -65,9 +60,6 @@ class AITM(BaseRanker):
             if r in self.info_layers:
                 info_out = self.info_layers[r](ait_out)                     # B x T
         return score
-
-    def _get_loss_func(self):
-        return BCEWithLogitLoss()
     
     def training_step(self, batch):
         y_h, _ = self.forward(batch)

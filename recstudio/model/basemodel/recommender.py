@@ -613,11 +613,11 @@ class Recommender(torch.nn.Module, abc.ABC):
                         opt['optimizer'].zero_grad()
                 # model loss
                 training_step_args = {'batch': batch}
-                if 'nepoch' in inspect.getargspec(self.training_step).args:
+                if 'nepoch' in inspect.getfullargspec(self.training_step).args:
                     training_step_args['nepoch'] = nepoch
-                if 'loader_idx' in inspect.getargspec(self.training_step).args:
+                if 'loader_idx' in inspect.getfullargspec(self.training_step).args:
                     training_step_args['loader_idx'] = loader_idx
-                if 'batch_idx' in inspect.getargspec(self.training_step).args:
+                if 'batch_idx' in inspect.getfullargspec(self.training_step).args:
                     training_step_args['batch_idx'] = batch_idx
 
                 if getattr(self, '_dp', False):     # there are perfermance degrades in DP mode
