@@ -725,8 +725,9 @@ class TripletDataset(Dataset):
         if splits[0][-1] == data_count.values.sum():
             return splits, data_count.index if m > 1 else None
         else:
-            raise ValueError('Expecting the number of interactions' \
-                            f'should be equal to the sum of {num}')
+            raise ValueError('Expecting the sum of split_ratio ' \
+                            f'be equal to {data_count.values.sum()}, '
+                            f'but got {num}.')
 
     def _split_by_leave_one_out(self, leave_one_num, data_count, rep=True):
         r"""Split dataset into train/valid/test by leave one out method.
@@ -978,16 +979,23 @@ class TripletDataset(Dataset):
         else:
             splits = self._split_by_num(ratio_or_num, user_count)
 
-        if split_mode == 'entry' and splits[1] is not None:
+
+        # split_mode is `entry` and split_ratio is [num_trn, num_val, num_tst]
+        # But if `UserDataset` or `SeqDataset`, it should be applicable to `user_entry`,
+        # so sort the entries by user while keeping the trn/val/tst in order for each user.
+        if split_mode == 'entry' and \
+            isinstance(ratio_or_num, list) and isinstance(ratio_or_num[0], int) and \
+            (isinstance(self, UserDataset) or isinstance(self, SeqDataset)):
             splits_ = splits[0][0]
             ucnts = pd.DataFrame({self.fuid : splits[1]})
             for i, (start, end) in enumerate(zip(splits_[:-1], splits_[1:])):
-                self.inter_feat[start:end] = self.inter_feat[start:end].sort_values(
+                self.inter_feat[start:end] = self.inter_feat[start:end].sort_values(    # sort user_id in trn/val/tst respectively
                     by=[self.fuid, self.ftime] if self.ftime in self.inter_feat
                     else self.fuid)
-                ucnts[i] = self.inter_feat[start:end][self.fuid].groupby(
+                ucnts[i] = self.inter_feat[start:end][self.fuid].groupby(               # count num_trn/num_val/num_tst per user
                     self.inter_feat[self.fuid], sort=True).count().values
-            self.inter_feat.sort_values(by=[self.fuid], inplace=True, kind='mergesort')
+            self.inter_feat.sort_values(by=[self.fuid], inplace=True, kind='mergesort') # stable sort all entries to ensure 
+                                                                                        # order of trn/val/tst for each user
             self.inter_feat.reset_index(drop=True, inplace=True)
             ucnts = ucnts.astype(int)
             ucnts = torch.from_numpy(ucnts.values)
@@ -996,12 +1004,7 @@ class TripletDataset(Dataset):
                 [torch.tensor(0), u_cumsum[:, -1][:-1]]).view(-1, 1).cumsum(dim=0)
             splits = torch.hstack([u_start, u_cumsum + u_start])
             uids = ucnts[:, 0]
-            if type(self) == TripletDataset:
-                splits = (splits.numpy(), uids)
-            elif isinstance(self, UserDataset) or isinstance(self, SeqDataset):
-                splits = (splits, uids.view(-1, 1))
-            else:
-                raise ValueError(f'{type(self)} is not supportable for `entry` split_mode.')
+            splits = (splits, uids.view(-1, 1))
 
 
         self.dataframe2tensors()
