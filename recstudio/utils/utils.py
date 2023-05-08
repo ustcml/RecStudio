@@ -5,6 +5,7 @@ import logging
 import os
 import random
 import re
+import nni
 from collections import OrderedDict
 from typing import *
 from torch import Tensor
@@ -185,6 +186,33 @@ def get_download_url_from_recstore(share_number: str):
     download_url = res['entity'][resource] + "&download=download"
     return download_url
 
+def update_config_with_nni(config: dict):
+    r""" Update the model config with feeded NNI hyperparameters.
+    The hyperparameters provided by NNI should be defined in the format like `ARG_GROUP/HYPERPARAMETER`, 
+    where `ARG_GROUP` can only be 'train' or 'model' while `HYPERPARAMETER` is the name of the tuned hyperparameter.
+
+    Examples of defining the search space:
+    - `train/learning_rate`
+    - `model/dropout_rate`
+
+    Args:
+        config(Dict): the config of the model
+    Returns:
+        config(Dict): the updated config
+    """
+    logger = logging.getLogger('recstudio')
+    next_parameter = nni.get_next_parameter() # Updated config dict provided by NNI tuner.
+    for k, v in next_parameter.items(): # Update the original config with the corresponding NNI config.
+        para_name = k.split('/') # para_name[0] should be 'train' or 'model' while para_name[1] is the name of tuned hyperparameter.
+        assert len(para_name) == 2 and para_name[0] in ['train', 'model'], \
+            'The format of hyperparameter defined in NNI search space should be like train/XXX or model/XXX, \
+            where XXX is the actual name of one hyperparameter.'
+        if config[para_name[0]].get(para_name[1]) == None:
+            logger.warning(f"The tuned hyperparameter {para_name[1]} defined in the NNI search space \
+                           doesn't exist in the {para_name[0]} config, which may be a spelling mistake.")
+        else:
+            config[para_name[0]][para_name[1]] = v
+    return config
 
 def check_valid_dataset(name: str, config: Dict, default_dataset_path=DEFAULT_CACHE_DIR):
     r""" Check existed dataset according to the md5 string.
@@ -487,6 +515,7 @@ __all__ = [
     'get_model',
     'md5',
     'get_download_url_from_recstore',
+    'update_config_with_nni',
     'check_valid_dataset',
     'download_dataset',
     'seed_everything',
