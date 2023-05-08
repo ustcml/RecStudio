@@ -56,24 +56,6 @@ class Recommender(torch.nn.Module, abc.ABC):
 
         self.ckpt_path = None
 
-    @staticmethod
-    def add_model_specific_args(parent_parser):
-        parent_parser.add_argument_group('Recommender')
-        parent_parser.add_argument("--learning_rate", type=float, default=0.001, help='learning rate')
-        parent_parser.add_argument("--learner", type=str, default="adam", help='optimization algorithm')
-        parent_parser.add_argument('--weight_decay', type=float, default=0, help='weight decay coefficient')
-        parent_parser.add_argument('--epochs', type=int, default=50, help='training epochs')
-        parent_parser.add_argument('--batch_size', type=int, default=256, help='training batch size')
-        parent_parser.add_argument('--eval_batch_size', type=int, default=128, help='evaluation batch size')
-        parent_parser.add_argument('--val_n_epoch', type=int, default=1, help='valid epoch interval')
-        parent_parser.add_argument('--embed_dim', type=int, default=64, help='embedding dimension')
-        parent_parser.add_argument('--early_stop_patience', type=int, default=10, help='early stop patience')
-        parent_parser.add_argument('--gpu', type=int, action='append', default=None, help='gpu number')
-        parent_parser.add_argument('--init_method', type=str, default='xavier_normal', help='init method for model')
-        parent_parser.add_argument('--init_range', type=float, help='init range for some methods like normal')
-        parent_parser.add_argument('--seed', type=int, default=2022, help='random seed')
-        return parent_parser
-
     def _add_modules(self, train_data):
         pass
 
@@ -281,13 +263,6 @@ class Recommender(torch.nn.Module, abc.ABC):
         val_metrics = self.config['eval']['val_metrics']
         cutoff = self.config['eval']['cutoff']
         val_metric = eval.get_eval_metrics(val_metrics, cutoff, validation=True)
-        # val_metric = val_metrics if isinstance(val_metrics, list) else [val_metrics]
-        # if cutoff is not None:
-        #     cutoffs = cutoff if isinstance(cutoff, list) else [cutoff]
-        # else:
-        #     cutoffs = []
-        # val_metric = [f'{m}@{cutoff}' if len(eval.get_rank_metrics(m)) > 0 \
-        #     else m for cutoff in cutoffs[:1] for m in val_metric]
         if isinstance(outputs[0][0], List):
             out = self._test_epoch_end(outputs, val_metric)
             out = dict(zip(val_metric, out))
@@ -359,7 +334,7 @@ class Recommender(torch.nn.Module, abc.ABC):
         init_methods = {
             'xavier_normal': init.xavier_normal_initialization,
             'xavier_uniform': init.xavier_uniform_initialization,
-            'normal': init.normal_initialization,
+            'normal': init.normal_initialization(),
         }
         for name, module in self.named_children():
             if isinstance(module, Recommender):
@@ -389,7 +364,6 @@ class Recommender(torch.nn.Module, abc.ABC):
                 return self.item_feat[data]
 
     def _get_train_loaders(self, train_data, ddp=False) -> List:
-        # TODO: modify loaders in model
         return [train_data.train_loader(
                     batch_size = self.config['train']['batch_size'],
                     shuffle = True,
@@ -465,9 +439,7 @@ class Recommender(torch.nn.Module, abc.ABC):
         Returns:
             torch.optim.optimizer: optimizer according to the config.
         """
-        # '''@nni.variable(nni.choice(0.1, 0.05, 0.01, 0.005, 0.001), name=learning_rate)'''
         learning_rate = lr
-        # '''@nni.variable(nni.choice(0.1, 0.01, 0.001, 0), name=decay)'''
         decay = weight_decay
         if name.lower() == 'adam':
             optimizer = optim.Adam(params, lr=learning_rate, weight_decay=decay)
@@ -479,8 +451,6 @@ class Recommender(torch.nn.Module, abc.ABC):
             optimizer = optim.RMSprop(params, lr=learning_rate, weight_decay=decay)
         elif name.lower() == 'sparse_adam':
             optimizer = optim.SparseAdam(params, lr=learning_rate)
-            # if self.weight_decay > 0:
-            #    self.logger.warning('Sparse Adam cannot argument received argument [{weight_decay}]')
         else:
             optimizer = optim.Adam(params, lr=learning_rate)
         return optimizer
