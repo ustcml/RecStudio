@@ -109,7 +109,10 @@ class TripletDataset(Dataset):
         self.float_field_preprocess = {}
         self.fuid = self.config['user_id_field'].split(':')[0]
         self.fiid = self.config['item_id_field'].split(':')[0]
-        self.ftime = self.config['time_field'].split(':')[0]
+        if self.config['time_field'] is not None:
+            self.ftime = self.config['time_field'].split(':')[0]
+        else:
+            self.ftime = None
         if self.config['rating_field'] is not None:
             if not isinstance(self.config['rating_field'], list):
                 self.frating = self.config['rating_field'].split(':')[0]
@@ -472,7 +475,7 @@ class TripletDataset(Dataset):
                 {self.fiid: np.arange(self.num_items)})
 
     def _post_preprocess(self):
-        if self.ftime in self.inter_feat:
+        if self.ftime is not None and self.ftime in self.inter_feat:
             if self.field2type[self.ftime] == 'str':
                 assert 'time_format' in self.config, "time_format is required when timestamp is string."
                 time_format = self.config['time_format']
@@ -945,7 +948,7 @@ class TripletDataset(Dataset):
             self.inter_feat = self.inter_feat[self.first_item_idx]
 
         if (split_mode == 'user_entry') or (split_mode == 'user'):
-            if self.ftime in self.inter_feat:
+            if self.ftime is not None and self.ftime in self.inter_feat:
                 self.inter_feat.sort_values(by=[self.fuid, self.ftime], inplace=True)
                 self.inter_feat.reset_index(drop=True, inplace=True)
             else:
@@ -990,7 +993,7 @@ class TripletDataset(Dataset):
             ucnts = pd.DataFrame({self.fuid : splits[1]})
             for i, (start, end) in enumerate(zip(splits_[:-1], splits_[1:])):
                 self.inter_feat[start:end] = self.inter_feat[start:end].sort_values(    # sort user_id in trn/val/tst respectively
-                    by=[self.fuid, self.ftime] if self.ftime in self.inter_feat
+                    by=[self.fuid, self.ftime] if self.ftime is not None and self.ftime in self.inter_feat
                     else self.fuid)
                 ucnts[i] = self.inter_feat[start:end][self.fuid].groupby(               # count num_trn/num_val/num_tst per user
                     self.inter_feat[self.fuid], sort=True).count().values

@@ -1558,7 +1558,8 @@ class ExtractionLayer(nn.Module):
         
         if self.share_gate:
             shared_gate_out = self.shared_gates(inputs[-1])
-            outputs.append((shared_gate_out.unsqueeze(-1) * shared_e_out).sum(1))
+            e_out = torch.cat(experts_out, dim=1)                                               # B x num_task*SpecificPerTask x De
+            outputs.append((shared_gate_out.unsqueeze(-1) * torch.cat([e_out, shared_e_out], dim=1)).sum(1))
         return outputs
     
     def extra_repr(self):
