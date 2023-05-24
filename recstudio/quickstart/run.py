@@ -1,6 +1,7 @@
 import os, datetime, torch
 from typing import *
 from recstudio.utils import *
+from recstudio import LOG_DIR
 
 def run(model: str, dataset: str, model_config: Dict=None, data_config: Dict=None, model_config_path: str=None, data_config_path: str=None, verbose=True, run_mode='light', **kwargs):
     model_class, model_conf = get_model(model)
@@ -28,7 +29,7 @@ def run(model: str, dataset: str, model_config: Dict=None, data_config: Dict=Non
         import logging
         logger.setLevel(logging.ERROR)
 
-    logger.info("Log saved in {}.".format(os.path.abspath(log_path)))
+    logger.info("Log saved in {}.".format(os.path.abspath(os.path.join(LOG_DIR, log_path))))
     if run_mode == 'tune':
         model_conf = update_config_with_nni(model_conf)
     model = model_class(model_conf)
