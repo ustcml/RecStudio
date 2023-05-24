@@ -234,7 +234,7 @@ import recstudio
 recstudio.run(model="BPR", data_dir="./datasets/", dataset='ml-100k')
 ```
 
-For more detailed information, please refer to our documentation https://recstudio.readthedocs.io/.
+For more detailed information, please refer to our documentation http://recstudio.org.cn/docs/.
 
 ## Automatic Hyper-parameter Tuning
 RecStudio integrates with NNI module for tuning the hype-parameters automatically. For easy usage,
