@@ -216,6 +216,16 @@ def accuracy(pred, target, thres=0.5):
     return M.accuracy(pred, target, task='binary', threshold=thres)
 
 
+def mse(pred, target):
+    """Calculate Meas Square Error"""
+    return M.mean_squared_error(pred, target)
+
+
+def mae(pred, target):
+    """Calculate Mean Absolute Error."""
+    return M.mean_absolute_error(pred, target)
+
+
 metric_dict = {
     'ndcg': ndcg,
     'precision': precision,
@@ -224,8 +234,8 @@ metric_dict = {
     'hit': hits,
     'mrr': mrr,
     'f1': f1,
-    'mse': M.mean_squared_error,
-    'mae': M.mean_absolute_error,
+    'mse': mse,
+    'mae': mae,
     'auc': auc,
     'logloss': logloss,
     'accuracy': accuracy
@@ -244,7 +254,7 @@ def get_rank_metrics(metric):
 def get_pred_metrics(metric):
     if not isinstance(metric, list):
         metric = [metric]
-    pred_metrics = {'mae', 'mse', 'auc', 'logloss', 'accuracy', 
+    pred_metrics = {'mae', 'mse', 'auc', 'logloss', 'accuracy',
                     'precision', 'recall', 'f1'}
     pred_m = [(m, metric_dict[m])
               for m in metric if m in pred_metrics and m in metric_dict]
