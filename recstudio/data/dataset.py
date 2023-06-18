@@ -845,7 +845,7 @@ class TripletDataset(Dataset):
             dict: A dict contains different feature.
         """
         data = self._get_pos_data(index)
-        if self.eval_mode and 'user_hist' not in data:
+        if self.eval_mode and not getattr(self, 'fmeval', False) and 'user_hist' not in data:
             user_count = self.user_count[data[self.fuid]].max()
             data['user_hist'] = self.user_hist[data[self.fuid]][:, 0:user_count]
         else:
