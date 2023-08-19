@@ -89,7 +89,8 @@ class Recommender(torch.nn.Module, abc.ABC):
         if drop_unused_field:
             train_data.drop_feat(self.fields)
         self.item_feat = train_data.item_feat
-        self.item_fields = set(train_data.item_feat.fields).intersection(self.fields)
+        if self.item_feat is not None:
+            self.item_fields = set(train_data.item_feat.fields).intersection(self.fields)
         self.neg_count = self.config['train']['negative_count']
         if self.loss_fn is None:
             if 'train_data' in inspect.signature(self._get_loss_func).parameters:

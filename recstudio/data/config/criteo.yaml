@@ -1,0 +1,36 @@
+url: https://rec.ustc.edu.cn/share/f519a9c0-e593-11ed-a011-2d240ca5a5b5
+user_id_field: ~
+item_id_field: ~
+rating_field: &r rating:float
+time_field: ~
+time_format: ~
+
+
+inter_feat_name: train.txt
+inter_feat_field: [*r, I1:float, I2:float, I3:float, I4:float, I5:float, I6:float, I7:float, I8:float, I9:float, I10:float, I11:float, I12:float, I13:float, C1:token, C2:token, C3:token, C4:token, C5:token, C6:token, C7:token, C8:token, C9:token, C10:token, C11:token, C12:token, C13:token, C14:token, C15:token, C16:token, C17:token, C18:token, C19:token, C20:token, C21:token, C22:token, C23:token, C24:token, C25:token, C26:token]
+inter_feat_header: ~
+
+user_feat_name: ~
+user_feat_field: ~
+user_feat_header: ~
+
+
+item_feat_name: ~
+item_feat_field: ~
+item_feat_header: ~
+
+
+field_separator: "\t"
+min_user_inter: 0
+min_item_inter: 0
+field_max_len: ~
+low_rating_thres: ~
+drop_dup: False
+max_seq_len: 20
+
+# network feature, including social network and knowledge graph, the first two fields are remapped the corresponding features
+network_feat_name: ~
+mapped_feat_field: ~
+network_feat_field: ~
+network_feat_header: ~
+save_cache: True # whether to save processed dataset to cache.
