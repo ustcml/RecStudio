@@ -4,9 +4,10 @@ import inspect
 import logging
 from typing import Dict, List, Optional, Tuple
 from collections import defaultdict
+from tqdm import tqdm
 
 import time
-# import nni
+import nni
 import recstudio.eval as eval
 import torch
 import torch.optim as optim
@@ -56,24 +57,6 @@ class Recommender(torch.nn.Module, abc.ABC):
 
         self.ckpt_path = None
 
-    @staticmethod
-    def add_model_specific_args(parent_parser):
-        parent_parser.add_argument_group('Recommender')
-        parent_parser.add_argument("--learning_rate", type=float, default=0.001, help='learning rate')
-        parent_parser.add_argument("--learner", type=str, default="adam", help='optimization algorithm')
-        parent_parser.add_argument('--weight_decay', type=float, default=0, help='weight decay coefficient')
-        parent_parser.add_argument('--epochs', type=int, default=50, help='training epochs')
-        parent_parser.add_argument('--batch_size', type=int, default=256, help='training batch size')
-        parent_parser.add_argument('--eval_batch_size', type=int, default=128, help='evaluation batch size')
-        parent_parser.add_argument('--val_n_epoch', type=int, default=1, help='valid epoch interval')
-        parent_parser.add_argument('--embed_dim', type=int, default=64, help='embedding dimension')
-        parent_parser.add_argument('--early_stop_patience', type=int, default=10, help='early stop patience')
-        parent_parser.add_argument('--gpu', type=int, action='append', default=None, help='gpu number')
-        parent_parser.add_argument('--init_method', type=str, default='xavier_normal', help='init method for model')
-        parent_parser.add_argument('--init_range', type=float, help='init range for some methods like normal')
-        parent_parser.add_argument('--seed', type=int, default=2022, help='random seed')
-        return parent_parser
-
     def _add_modules(self, train_data):
         pass
 
@@ -97,8 +80,6 @@ class Recommender(torch.nn.Module, abc.ABC):
                 self.loss_fn = self._get_loss_func(train_data)
             else:
                 self.loss_fn = self._get_loss_func()
-
-
 
     def fit(
         self,
@@ -215,9 +196,6 @@ class Recommender(torch.nn.Module, abc.ABC):
         self.eval()
         output_list = self.test_epoch(test_loader)
         output.update(self.test_epoch_end(output_list))
-        if self.run_mode == 'tune':
-            output['default'] = output[self.val_metric]
-            # nni.report_final_result(output)
         if verbose:
             self.logger.info(color_dict(output, self.run_mode == 'tune'))
         return output
@@ -284,9 +262,6 @@ class Recommender(torch.nn.Module, abc.ABC):
                 loss_metric = {'train_'+k : v for k, v in outputs}
             self.log_dict(loss_metric)
 
-        if self.val_check and self.run_mode == 'tune':
-            metric = self.logged_metrics[self.val_metric]
-            # nni.report_intermediate_result(metric)
         # TODO: only print when rank=0
         if self.run_mode in ['light', 'tune'] or self.val_check:
             self.logger.info(color_dict(self.logged_metrics, self.run_mode == 'tune'))
@@ -297,19 +272,15 @@ class Recommender(torch.nn.Module, abc.ABC):
         val_metrics = self.config['eval']['val_metrics']
         cutoff = self.config['eval']['cutoff']
         val_metric = eval.get_eval_metrics(val_metrics, cutoff, validation=True)
-        # val_metric = val_metrics if isinstance(val_metrics, list) else [val_metrics]
-        # if cutoff is not None:
-        #     cutoffs = cutoff if isinstance(cutoff, list) else [cutoff]
-        # else:
-        #     cutoffs = []
-        # val_metric = [f'{m}@{cutoff}' if len(eval.get_rank_metrics(m)) > 0 \
-        #     else m for cutoff in cutoffs[:1] for m in val_metric]
         if isinstance(outputs[0][0], List):
             out = self._test_epoch_end(outputs, val_metric)
             out = dict(zip(val_metric, out))
         elif isinstance(outputs[0][0], Dict):
             out = self._test_epoch_end(outputs, val_metric)
         self.log_dict(out)
+        if self.run_mode == 'tune':
+            nni_result = self._get_nni_format_result(out)
+            nni.report_intermediate_result(nni_result)
         return out
 
     def test_epoch_end(self, outputs):
@@ -328,6 +299,9 @@ class Recommender(torch.nn.Module, abc.ABC):
         elif isinstance(outputs[0][0], Dict):
             out = self._test_epoch_end(outputs, test_metric)
         self.log_dict(out, tensorboard=False)
+        if self.run_mode == 'tune':
+            nni_result = self._get_nni_format_result(out)
+            nni.report_final_result(nni_result)
         return out
 
     def _test_epoch_end(self, outputs, metrics):
@@ -365,11 +339,19 @@ class Recommender(torch.nn.Module, abc.ABC):
                             self.tensorboard_logger.add_scalar(f"valid/{r}/{k}", v, self.logged_metrics['epoch']+1)
         self.logged_metrics = deep_update(self.logged_metrics, metrics)
 
+    def _get_nni_format_result(self, metrics: Dict):
+        nni_result = {}
+        for k, v in metrics.items():
+            nni_result[k] = v.item()
+        # The 'default' metric is used to control behavior of nni
+        nni_result['default'] = list(nni_result.values())[0]
+        return nni_result
+
     def _init_parameter(self):
         init_methods = {
             'xavier_normal': init.xavier_normal_initialization,
             'xavier_uniform': init.xavier_uniform_initialization,
-            'normal': init.normal_initialization,
+            'normal': init.normal_initialization(),
         }
         for name, module in self.named_children():
             if isinstance(module, Recommender):
@@ -399,7 +381,6 @@ class Recommender(torch.nn.Module, abc.ABC):
                 return self.item_feat[data]
 
     def _get_train_loaders(self, train_data, ddp=False) -> List:
-        # TODO: modify loaders in model
         return [train_data.train_loader(
                     batch_size = self.config['train']['batch_size'],
                     shuffle = True,
@@ -475,9 +456,7 @@ class Recommender(torch.nn.Module, abc.ABC):
         Returns:
             torch.optim.optimizer: optimizer according to the config.
         """
-        # '''@nni.variable(nni.choice(0.1, 0.05, 0.01, 0.005, 0.001), name=learning_rate)'''
         learning_rate = lr
-        # '''@nni.variable(nni.choice(0.1, 0.01, 0.001, 0), name=decay)'''
         decay = weight_decay
         if name.lower() == 'adam':
             optimizer = optim.Adam(params, lr=learning_rate, weight_decay=decay)
@@ -489,8 +468,6 @@ class Recommender(torch.nn.Module, abc.ABC):
             optimizer = optim.RMSprop(params, lr=learning_rate, weight_decay=decay)
         elif name.lower() == 'sparse_adam':
             optimizer = optim.SparseAdam(params, lr=learning_rate)
-            # if self.weight_decay > 0:
-            #    self.logger.warning('Sparse Adam cannot argument received argument [{weight_decay}]')
         else:
             optimizer = optim.Adam(params, lr=learning_rate)
         return optimizer
@@ -605,6 +582,14 @@ class Recommender(torch.nn.Module, abc.ABC):
 
         for loader_idx, loader in enumerate(trn_dataloaders):
             outputs = []
+            loader = tqdm(
+                loader,
+                total=len(loader),
+                ncols=75,
+                desc=set_color(f"Training {nepoch:>5}", "green"),
+                leave=False,
+                disable=self.run_mode == 'tune', # Mute the progressbar when tuning
+            )
             for batch_idx, batch in enumerate(loader):
                 # data to device
                 batch = self._to_device(batch, self._parameter_device)
@@ -667,7 +652,14 @@ class Recommender(torch.nn.Module, abc.ABC):
         if hasattr(self, '_update_item_vector'):
             self._update_item_vector()
         output_list = []
-
+        dataloader = tqdm(
+            dataloader,
+            total=len(dataloader),
+            ncols=75,
+            desc=set_color(f"Evaluating {nepoch:>5}", "green"),
+            leave=False,
+            disable=self.run_mode == 'tune', # Mute the progressbar when tuning
+        )
         for batch in dataloader:
             # data to device
             batch = self._to_device(batch, self._parameter_device)
@@ -722,7 +714,10 @@ class Recommender(torch.nn.Module, abc.ABC):
 
     def _accelerate(self):
         gpu_list = get_gpus(self.config['train']['gpu'])
-        if gpu_list is not None:
+        if self.run_mode == 'tune':
+            self.device = torch.device('cuda') # NNI will assign gpu index automatically
+            self = self._to_device(self, self.device)
+        elif gpu_list is not None:
             self.logger.info(f"GPU id {gpu_list} are selected.")
             if len(gpu_list) == 1:
                 self.device = torch.device("cuda", gpu_list[0])

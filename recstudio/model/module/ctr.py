@@ -978,11 +978,11 @@ class OperationAwareFMLayer(nn.Module):
         bs = inputs.size(0)
         field_wise_emb = inputs.view(bs, self.num_fields, self.num_fields, -1)      # B x F x F x D
         emb_copy = torch.masked_select(field_wise_emb, self.diag_mask)              # B x F x D; copy i-th of emb_i
-        emb_copy = emb_copy.view(bs, -1)
+        emb_copy = emb_copy.flatten(1)
         
         inner_prod = (field_wise_emb.transpose(1, 2) * field_wise_emb).sum(dim=-1)  # B x F x F; <j-th of emb_i, i-th of emb_j> 
         ffm_out = torch.masked_select(inner_prod, self.triu_mask)
-        ffm_out = ffm_out.view(bs, -1)
+        ffm_out = ffm_out.flatten(1)
         
         output = torch.cat([emb_copy, ffm_out], dim=1)
         return output
@@ -1284,7 +1284,6 @@ class FieldWiseBiInteraction(nn.Module):
         fm_out = self.r_fm(fm_out.transpose(1, 2))                                      # B x D x 1                   
         fwbi_out = self.fc(torch.cat([lr_out.unsqueeze(-1), (fm_out + mf_out).squeeze(-1)], dim=-1))  # B x (D+1)
         return fwbi_out
-     
 
     def extra_repr(self):
         return f'fields={self.fields}'
@@ -1479,8 +1478,6 @@ class FiGNNLayer(nn.Module):
         return f'num_layers={len(self.gnn)}'
     
     
-
-        
 class ExtractionLayer(nn.Module):
     r"""Extraction Layer of PLE.
     
@@ -1565,3 +1562,4 @@ class ExtractionLayer(nn.Module):
     def extra_repr(self):
         return f'specific_experts_per_task={self.specific_experts_per_task}, ' + \
                 f'num_task={self.num_task}, num_shared_experts={self.num_shared_experts}'
+

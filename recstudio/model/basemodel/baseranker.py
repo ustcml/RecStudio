@@ -157,6 +157,7 @@ class BaseRanker(Recommender):
             result, _ = self.forward(batch)
             global_m = eval.get_global_metrics(metric)
             metrics = {}
+
             if not isinstance(self.frating, list):
                 for n, f in pred_m:
                     if not (n, f) in global_m:
@@ -190,6 +191,7 @@ class BaseRanker(Recommender):
                         # gather scores and labels for global metrics like AUC.
                         metrics[r]['score'] = result[r]['pos_score'].detach()
                         metrics[r]['label'] = result[r]['label']
+
         else:
             # pair-wise, support topk-based metrics, like [NDCG, Recall, Precision, MRR, MAP, MR, et al.]
             # The case is suitable for the scene where there are only positives in dataset.
@@ -210,6 +212,7 @@ class BaseRanker(Recommender):
     def _test_epoch_end(self, outputs, metrics):
         metric_list, bs = zip(*outputs)
         bs = torch.tensor(bs)
+
         global_m = eval.get_global_metrics(metrics)
         if not isinstance(self.frating, list):
             out = defaultdict(list)
