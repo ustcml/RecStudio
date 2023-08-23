@@ -1267,7 +1267,7 @@ class UserDataset(TripletDataset):
     def _init_common_field(self):
         super()._init_common_field()
         if self.fuid is None:
-            raise ValueError('The given user_id-free dataset is incompatible with the model which needs user_id.')
+            raise ValueError(f"The selected dataset type {self.__class__.__name__} requires `user_id` while got a user-id-free dataset.")
 
     def build(
             self,
@@ -1358,7 +1358,7 @@ class SeqDataset(TripletDataset):
     def _init_common_field(self):
         super()._init_common_field()
         if self.fuid is None:
-            raise ValueError('The given user_id-free dataset is incompatible with the model which need user_id.')
+            raise ValueError(f"The selected dataset type {self.__class__.__name__} requires `user_id` while got a user-id-free dataset.")
             
     @property
     def drop_dup(self):
