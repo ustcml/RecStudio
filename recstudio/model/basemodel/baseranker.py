@@ -48,10 +48,6 @@ class BaseRanker(Recommender):
 
     def _set_data_field(self, data):
         token_field = set([k for k, v in data.field2type.items() if v=='token'])
-        if not isinstance(data.frating, list):
-            token_field.add(data.frating)
-        else:
-            token_field = {*token_field, *data.frating}
         data.use_field = token_field
 
     def _get_retriever(self, train_data):

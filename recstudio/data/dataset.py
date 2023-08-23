@@ -976,6 +976,8 @@ class TripletDataset(Dataset):
             self.inter_feat = self.inter_feat[self.first_item_idx]
 
         if (split_mode == 'user_entry') or (split_mode == 'user'):
+            if self.fuid is None:
+                raise ValueError('There is no user_id in dataset, please set `split_mode` to `entry`.')
             if self.ftime is not None and self.ftime in self.inter_feat:
                 self.inter_feat.sort_values(by=[self.fuid, self.ftime], inplace=True)
                 self.inter_feat.reset_index(drop=True, inplace=True)
@@ -1142,7 +1144,7 @@ class TripletDataset(Dataset):
             if not isinstance(self.frating, list):
                 fields.add(self.frating)
             else:
-                fields = {*fields, *self.frating}
+                fields = {*fields, *self.frating}               # For multitask model only
             for feat in self._get_feat_list():
                 feat.del_fields(fields)
             if 'user_hist' in fields:
@@ -1262,6 +1264,11 @@ class TripletDataset(Dataset):
 
 
 class UserDataset(TripletDataset):
+    def _init_common_field(self):
+        super()._init_common_field()
+        if self.fuid is None:
+            raise ValueError('The given user_id-free dataset is incompatible with the model which needs user_id.')
+
     def build(
             self,
             binarized_rating_thres: float = None,
@@ -1348,6 +1355,11 @@ class UserDataset(TripletDataset):
 
 
 class SeqDataset(TripletDataset):
+    def _init_common_field(self):
+        super()._init_common_field()
+        if self.fuid is None:
+            raise ValueError('The given user_id-free dataset is incompatible with the model which need user_id.')
+            
     @property
     def drop_dup(self):
         return False
