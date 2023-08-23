@@ -1,0 +1,11 @@
+data:
+  fmeval: True
+  low_rating_thres: ~
+  binarized_rating_thres: ~
+
+eval:
+  val_metrics: [auc, logloss]
+  test_metrics: [auc, logloss]
+
+train:
+  weights: ~

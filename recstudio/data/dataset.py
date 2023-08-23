@@ -64,7 +64,10 @@ class TripletDataset(Dataset):
             if self.config['save_cache']:
                 self._save_cache(md5(self.config))
 
-        self._use_field = set([self.fuid, self.fiid, self.frating])
+        if not isinstance(self.frating, list):
+            self._use_field = set([self.fuid, self.fiid, self.frating])
+        else:
+            self._use_field = set([self.fuid, self.fiid, *self.frating]) - {None}
 
     @property
     def field(self):
@@ -104,11 +107,26 @@ class TripletDataset(Dataset):
         self.field2tokens = {}
         self.field2maxlen = self.config['field_max_len'] or {}
         self.float_field_preprocess = {}
-        self.fuid = self.config['user_id_field'].split(':')[0]
-        self.fiid = self.config['item_id_field'].split(':')[0]
-        self.ftime = self.config['time_field'].split(':')[0]
+        if self.config['user_id_field'] is not None:
+            self.fuid = self.config['user_id_field'].split(':')[0]
+        else:
+            self.fuid = None
+
+        if self.config['item_id_field'] is not None:
+            self.fiid = self.config['item_id_field'].split(':')[0]
+        else:
+            self.fiid = None
+
+        if self.config['time_field'] is not None:
+            self.ftime = self.config['time_field'].split(':')[0]
+        else:
+            self.ftime = None
+
         if self.config['rating_field'] is not None:
-            self.frating = self.config['rating_field'].split(':')[0]
+            if not isinstance(self.config['rating_field'], list):
+                self.frating = self.config['rating_field'].split(':')[0]
+            else:
+                self.frating = [r.split(':')[0] for r in self.config['rating_field']]
         else:
             self.frating = None
 
@@ -123,8 +141,14 @@ class TripletDataset(Dataset):
         print(feat2)
 
     def __repr__(self):
-        info = {"item": {}, "user": {}, "interaction": {}}
-        feat = {"item": self.item_feat, "user": self.user_feat, "interaction": self.inter_feat}
+        info = {"interaction": {}}
+        feat = {"interaction": self.inter_feat}
+        if self.fuid is not None:
+            info["user"] = {}
+            feat["user"] = self.user_feat
+        if self.fiid is not None:
+            info["item"] = {}
+            feat["item"] = self.item_feat
         max_num_fields = 0
         max_len_field = max([len(f) for f in self.field]+[len("token_seq")]) + 1
 
@@ -145,13 +169,14 @@ class TripletDataset(Dataset):
                 info_str += "\n"
             info_str += "=" * (max_len_field*max_num_fields) + '\n'
         info_str += "{}: {}\n".format(set_color('Total Interactions', 'blue'), self.num_inters)
-        info_str += "{}: {:.6f}\n".format(set_color('Sparsity', 'blue'),
-                                          (1-self.num_inters / ((self.num_items-1)*(self.num_users-1))))
+        if self.fuid is not None and self.fiid is not None:
+            info_str += "{}: {:.6f}\n".format(set_color('Sparsity', 'blue'),
+                                            (1-self.num_inters / ((self.num_items-1)*(self.num_users-1))))
         info_str += "=" * (max_len_field*max_num_fields) + '\n'
         info_str += color_dict_normal(self.float_field_preprocess, False)
         return info_str
 
-    def _filter_ratings(self, thres: float=None):
+    def _filter_ratings(self, thres: Union[float, List[float]] = None):
         """Filter out the interactions whose ratings are below thres.
 
         Args:
@@ -159,7 +184,10 @@ class TripletDataset(Dataset):
                 filtering operation is closed.
         """
         if thres is not None:
-            self.inter_feat = self.inter_feat[(self.inter_feat[self.frating] >= thres)]
+            if not isinstance(self.frating, list):
+                self.inter_feat = self.inter_feat[(self.inter_feat[self.frating] >= thres)]
+            else:
+                self.inter_feat = self.inter_feat[(self.inter_feat[self.frating] >= thres).all(axis=1)]
             self.inter_feat.reset_index(drop=True, inplace=True)
 
     def _load_all_data(self, data_dir, field_sep):
@@ -170,6 +198,10 @@ class TripletDataset(Dataset):
         self.inter_feat = self._load_feat(
             inter_feat_path, self.config['inter_feat_header'], field_sep, self.config['inter_feat_field'])
         self.inter_feat = self.inter_feat.dropna(how="any")
+        if self.fuid is not None:
+            self.inter_feat = self.inter_feat.dropna(how="any", subset=[self.fuid])
+        if self.fiid is not None:
+            self.inter_feat = self.inter_feat.dropna(how="any", subset=[self.fiid])
         if self.frating is None:
             # add ratings when implicit feedback
             self.frating = 'rating'
@@ -310,7 +342,11 @@ class TripletDataset(Dataset):
 
     def _get_feat_list(self):
         # if we have more features, please add here
-        feat_list = [self.inter_feat, self.user_feat, self.item_feat]
+        feat_list = []
+        for feat in [self.inter_feat, self.user_feat, self.item_feat]:
+            if feat is not None:
+                feat_list.append(feat)
+        
         if self.config['network_feat_name'] is not None:
             feat_list.extend(self.network_feat)
         # return list(feat for feat in feat_list if feat is not None)
@@ -449,7 +485,7 @@ class TripletDataset(Dataset):
             self.user_feat = self.user_feat.reindex(np.arange(self.num_users))
             self.user_feat.reset_index(inplace=True)
             self._fill_nan(self.user_feat, mapped=True)
-        else:
+        elif self.fuid is not None:
             self.user_feat = pd.DataFrame(
                 {self.fuid: np.arange(self.num_users)})
 
@@ -458,12 +494,12 @@ class TripletDataset(Dataset):
             self.item_feat = self.item_feat.reindex(np.arange(self.num_items))
             self.item_feat.reset_index(inplace=True)
             self._fill_nan(self.item_feat, mapped=True)
-        else:
+        elif self.fiid is not None:
             self.item_feat = pd.DataFrame(
                 {self.fiid: np.arange(self.num_items)})
 
     def _post_preprocess(self):
-        if self.ftime in self.inter_feat:
+        if self.ftime is not None and self.ftime in self.inter_feat:
             if self.field2type[self.ftime] == 'str':
                 assert 'time_format' in self.config, "time_format is required when timestamp is string."
                 time_format = self.config['time_format']
@@ -485,6 +521,8 @@ class TripletDataset(Dataset):
 
     def _filter(self, min_user_inter, min_item_inter):
         self._filter_ratings(self.config.get('low_rating_thres', None))
+        if self.fuid is None or self.fiid is None:
+            return
         item_list = self.inter_feat[self.fiid]
         item_idx_list, items = pd.factorize(item_list)
         user_list = self.inter_feat[self.fuid]
@@ -701,7 +739,7 @@ class TripletDataset(Dataset):
 
         splits = np.hstack(
             [np.zeros((m, 1), dtype=np.int32), np.cumsum(splits, axis=1)])
-        cumsum = np.hstack([[0], data_count.cumsum().iloc[:-1]])
+        cumsum = np.hstack([[0], data_count.cumsum()[:-1]])
         splits = cumsum.reshape(-1, 1) + splits
         return splits, data_count.index if m > 1 else None
 
@@ -716,8 +754,9 @@ class TripletDataset(Dataset):
         if splits[0][-1] == data_count.values.sum():
             return splits, data_count.index if m > 1 else None
         else:
-            ValueError(f'Expecting the number of interactions \
-            should be equal to the sum of {num}')
+            raise ValueError('Expecting the sum of split_ratio ' \
+                            f'be equal to {data_count.values.sum()}, '
+                            f'but got {num}.')
 
     def _split_by_leave_one_out(self, leave_one_num, data_count, rep=True):
         r"""Split dataset into train/valid/test by leave one out method.
@@ -795,17 +834,24 @@ class TripletDataset(Dataset):
             lens = end - start
             l = torch.cat([torch.arange(s, e) for s, e in zip(start, end)])
             d = self.inter_feat.get_col(self.fiid)[l]
-            rating = self.inter_feat.get_col(self.frating)[l]
             data[self.fiid] = pad_sequence(
                 d.split(tuple(lens.numpy())), batch_first=True)
-            data[self.frating] = pad_sequence(
-                rating.split(tuple(lens.numpy())), batch_first=True)
+            if not isinstance(self.frating, list):
+                rating = self.inter_feat.get_col(self.frating)[l]
+                data[self.frating] = pad_sequence(
+                    rating.split(tuple(lens.numpy())), batch_first=True)
+            else:
+                for r in self.frating:
+                    rating = self.inter_feat.get_col(r)[l]
+                    data[r] = pad_sequence(
+                        rating.split(tuple(lens.numpy())), batch_first=True)
         else:
             idx = self.data_index[index]
             data = self.inter_feat[idx]
-            uid, iid = data[self.fuid], data[self.fiid]
-            data.update(self.user_feat[uid])
-            data.update(self.item_feat[iid])
+            if self.fuid is not None and self.fiid is not None:
+                uid, iid = data[self.fuid], data[self.fiid]
+                data.update(self.user_feat[uid])
+                data.update(self.item_feat[iid])
 
         if 'user_hist' in data:
             user_count = self.user_count[data[self.fuid]].max()
@@ -845,7 +891,9 @@ class TripletDataset(Dataset):
             dict: A dict contains different feature.
         """
         data = self._get_pos_data(index)
-        if self.eval_mode and not getattr(self, 'fmeval', False) and 'user_hist' not in data:
+        if self.eval_mode and self.fuid is not None \
+            and not getattr(self, 'fmeval', False) \
+            and 'user_hist' not in data:
             user_count = self.user_count[data[self.fuid]].max()
             data['user_hist'] = self.user_hist[data[self.fuid]][:, 0:user_count]
         else:
@@ -881,7 +929,10 @@ class TripletDataset(Dataset):
     def _binarize_rating(self, thres):
         neg_idx = self.inter_feat[self.frating] < thres
         self.inter_feat[self.frating] = 1.0
-        self.inter_feat.loc[neg_idx, self.frating] = 0.0
+        if not isinstance(self.frating, list):
+            self.inter_feat.loc[neg_idx, self.frating] = 0.0
+        else:
+            self.inter_feat = self.inter_feat[neg_idx].fillna(0.0)
 
     def build(
             self,
@@ -919,14 +970,17 @@ class TripletDataset(Dataset):
         # keep first data, sorted by time or not, split by user or not
         if binarized_rating_thres is not None:
             self._binarize_rating(binarized_rating_thres)
-        if not hasattr(self, 'first_item_idx'):
+        if not hasattr(self, 'first_item_idx') and \
+            self.fuid is not None and self.fiid is not None:
             self.first_item_idx = ~self.inter_feat.duplicated(
                 subset=[self.fuid, self.fiid], keep='first')
         if self.drop_dup and (not rep):   # drop duplicated interactions
             self.inter_feat = self.inter_feat[self.first_item_idx]
 
         if (split_mode == 'user_entry') or (split_mode == 'user'):
-            if self.ftime in self.inter_feat:
+            if self.fuid is None:
+                raise ValueError('There is no user_id in dataset, please set `split_mode` to `entry`.')
+            if self.ftime is not None and self.ftime in self.inter_feat:
                 self.inter_feat.sort_values(by=[self.fuid, self.ftime], inplace=True)
                 self.inter_feat.reset_index(drop=True, inplace=True)
             else:
@@ -942,7 +996,8 @@ class TripletDataset(Dataset):
                     for start, c in zip(cumsum, user_count)])
                 self.inter_feat = self.inter_feat.iloc[idx].reset_index(drop=True)
         elif split_mode == 'entry':
-            if isinstance(ratio_or_num, list) and isinstance(ratio_or_num[0], int): # split by num
+            if isinstance(ratio_or_num, list) and isinstance(ratio_or_num[0], int) and \
+                self.fuid is not None: # split by num
                 user_count = self.inter_feat[self.fuid].groupby(
                     self.inter_feat[self.fuid], sort=True).count()
             else:
@@ -960,16 +1015,23 @@ class TripletDataset(Dataset):
         else:
             splits = self._split_by_num(ratio_or_num, user_count)
 
-        splits_ = splits[0][0]
-        if split_mode == 'entry':
+
+        # split_mode is `entry` and split_ratio is [num_trn, num_val, num_tst]
+        # But if `UserDataset` or `SeqDataset`, it should be applicable to `user_entry`,
+        # so sort the entries by user while keeping the trn/val/tst in order for each user.
+        if split_mode == 'entry' and \
+            isinstance(ratio_or_num, list) and isinstance(ratio_or_num[0], int) and \
+            (isinstance(self, UserDataset) or isinstance(self, SeqDataset)):
+            splits_ = splits[0][0]
             ucnts = pd.DataFrame({self.fuid : splits[1]})
             for i, (start, end) in enumerate(zip(splits_[:-1], splits_[1:])):
-                self.inter_feat[start:end] = self.inter_feat[start:end].sort_values(
-                    by=[self.fuid, self.ftime] if self.ftime in self.inter_feat
+                self.inter_feat[start:end] = self.inter_feat[start:end].sort_values(    # sort user_id in trn/val/tst respectively
+                    by=[self.fuid, self.ftime] if self.ftime is not None and self.ftime in self.inter_feat
                     else self.fuid)
-                ucnts[i] = self.inter_feat[start:end][self.fuid].groupby(
+                ucnts[i] = self.inter_feat[start:end][self.fuid].groupby(               # count num_trn/num_val/num_tst per user
                     self.inter_feat[self.fuid], sort=True).count().values
-            self.inter_feat.sort_values(by=[self.fuid], inplace=True, kind='mergesort')
+            self.inter_feat.sort_values(by=[self.fuid], inplace=True, kind='mergesort') # stable sort all entries to ensure 
+                                                                                        # order of trn/val/tst for each user
             self.inter_feat.reset_index(drop=True, inplace=True)
             ucnts = ucnts.astype(int)
             ucnts = torch.from_numpy(ucnts.values)
@@ -978,33 +1040,33 @@ class TripletDataset(Dataset):
                 [torch.tensor(0), u_cumsum[:, -1][:-1]]).view(-1, 1).cumsum(dim=0)
             splits = torch.hstack([u_start, u_cumsum + u_start])
             uids = ucnts[:, 0]
-            if isinstance(self, UserDataset):
-                splits = (splits, uids.view(-1, 1))
-            else:
-                splits = (splits.numpy(), uids)
+            splits = (splits, uids.view(-1, 1))
 
 
         self.dataframe2tensors()
         datasets = [self._copy(_) for _ in self._get_data_idx(splits)]
-        user_hist, user_count = datasets[0].get_hist(True)
-        for d in datasets[:2]:
-            d.user_hist = user_hist
-            d.user_count = user_count
-        if len(datasets) > 2:
-            assert len(datasets) == 3
-            uh, uc = datasets[1].get_hist(True)
-            uh = torch.cat((user_hist, uh), dim=-1).sort(dim=-1, descending=True).values
-            uc = uc + user_count
-            datasets[-1].user_hist = uh
-            datasets[-1].user_count = uc
+        if self.fuid is not None and self.fiid is not None:
+            user_hist, user_count = datasets[0].get_hist(True)
+            for d in datasets[:2]:
+                d.user_hist = user_hist
+                d.user_count = user_count
+            if len(datasets) > 2:
+                assert len(datasets) == 3
+                uh, uc = datasets[1].get_hist(True)
+                uh = torch.cat((user_hist, uh), dim=-1).sort(dim=-1, descending=True).values
+                uc = uc + user_count
+                datasets[-1].user_hist = uh
+                datasets[-1].user_count = uc
         return datasets
 
     def dataframe2tensors(self):
         r"""Convert the data type from TensorFrame to Tensor
         """
         self.inter_feat = TensorFrame.fromPandasDF(self.inter_feat, self)
-        self.user_feat = TensorFrame.fromPandasDF(self.user_feat, self)
-        self.item_feat = TensorFrame.fromPandasDF(self.item_feat, self)
+        if self.user_feat is not None:
+            self.user_feat = TensorFrame.fromPandasDF(self.user_feat, self)
+        if self.item_feat is not None:
+            self.item_feat = TensorFrame.fromPandasDF(self.item_feat, self)
         if hasattr(self, 'network_feat'):
             for i in range(len(self.network_feat)):
                 self.network_feat[i] = TensorFrame.fromPandasDF(
@@ -1081,7 +1143,10 @@ class TripletDataset(Dataset):
     def drop_feat(self, keep_fields):
         if keep_fields is not None and len(keep_fields) > 0:
             fields = set(keep_fields)
-            fields.add(self.frating)
+            if not isinstance(self.frating, list):
+                fields.add(self.frating)
+            else:
+                fields = {*fields, *self.frating}               # For multitask model only
             for feat in self._get_feat_list():
                 feat.del_fields(fields)
             if 'user_hist' in fields:
@@ -1201,6 +1266,11 @@ class TripletDataset(Dataset):
 
 
 class UserDataset(TripletDataset):
+    def _init_common_field(self):
+        super()._init_common_field()
+        if self.fuid is None:
+            raise ValueError(f"The selected dataset type {self.__class__.__name__} requires `user_id` while got a user-id-free dataset.")
+
     def build(
             self,
             binarized_rating_thres: float = None,
@@ -1287,6 +1357,11 @@ class UserDataset(TripletDataset):
 
 
 class SeqDataset(TripletDataset):
+    def _init_common_field(self):
+        super()._init_common_field()
+        if self.fuid is None:
+            raise ValueError(f"The selected dataset type {self.__class__.__name__} requires `user_id` while got a user-id-free dataset.")
+            
     @property
     def drop_dup(self):
         return False

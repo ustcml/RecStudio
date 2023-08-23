@@ -47,10 +47,8 @@ class BaseRanker(Recommender):
             self.logger.warning('No retriever is used, topk metrics is not supported.')
 
     def _set_data_field(self, data):
-        # token_field = set([k for k, v in data.field2type.items() if v=='token'])
-        # token_field.add(data.frating)
-        # data.use_field = token_field
-        data.use_field = data.field2type.keys()
+        token_field = set([k for k, v in data.field2type.items() if v=='token'])
+        data.use_field = token_field
 
     def _get_retriever(self, train_data):
         return None
@@ -76,10 +74,14 @@ class BaseRanker(Recommender):
         # calculate scores
         if self.retriever is None:
             output = self.score(batch)
-            return {'pos_score': output['score'], 'label': batch[self.frating]}, output
+            if not isinstance(self.frating, list):
+                return {'pos_score': output['score'], 'label': batch[self.frating]}, output  
+            else:
+                return {r: {'pos_score': output[r]['score'], 'label': batch[r]} for r in self.frating}, output
         else:
             # only positive samples in batch
             assert self.neg_count is not None, 'expecting neg_count is not None.'
+            assert not isinstance(self.frating, list), 'expecting a list for rating_field.'
             pos_output = self.score(batch)
             pos_prob, neg_item_idx, neg_prob = self.retriever.sampling(
                 batch, self.neg_count, method=self.config['train']['sampling_method'])
@@ -146,7 +148,7 @@ class BaseRanker(Recommender):
     def _test_step(self, batch, metric, cutoffs=None):
         rank_m = eval.get_rank_metrics(metric)
         pred_m = eval.get_pred_metrics(metric)
-        bs = batch[self.frating].size(0)
+        bs = batch[next(iter(batch))].size(0)
         if len(rank_m) > 0:
             assert cutoffs is not None, 'expected cutoffs for topk ranking metrics.'
         # TODO: discuss in which cases pred_metrics should be calculated. According to whether there are neg labels in dataset?
@@ -155,19 +157,41 @@ class BaseRanker(Recommender):
             result, _ = self.forward(batch)
             global_m = eval.get_global_metrics(metric)
             metrics = {}
-            for n, f in pred_m:
-                if not (n, f) in global_m:
-                    if len(inspect.signature(f).parameters) > 2:                                # precision, recall, f1
-                        metrics[n] = f(torch.sigmoid(result['pos_score']), result['label'], 
-                                       self.config['eval']['binarized_prob_thres'])
-                    elif n == 'logloss':                                                        # logloss
-                        metrics[n] = f(result['pos_score'], result['label'])
-                    else:                                                                       # acc, mae, mse
-                        metrics[n] = f(torch.sigmoid(result['pos_score']), result['label'])
-            if len(global_m) > 0:
-                # gather scores and labels for global metrics like AUC.
-                metrics['score'] = result['pos_score'].detach()
-                metrics['label'] = result['label']
+
+            if not isinstance(self.frating, list):
+                for n, f in pred_m:
+                    if not (n, f) in global_m:
+                        if len(inspect.signature(f).parameters) > 2:                                # precision, recall, f1
+                            metrics[n] = f(torch.sigmoid(result['pos_score']), result['label'], 
+                                        self.config['eval']['binarized_prob_thres'])
+                        elif n == 'logloss':                                                        # logloss
+                            metrics[n] = f(result['pos_score'], result['label'])
+                        else:                                                                       # acc, mae, mse
+                            metrics[n] = f(torch.sigmoid(result['pos_score']), result['label'])
+                if len(global_m) > 0:
+                    # gather scores and labels for global metrics like AUC.
+                    metrics['score'] = result['pos_score'].detach()
+                    metrics['label'] = result['label']
+            else:
+                for i, r in enumerate(self.frating):
+                    metrics[r] = {}
+                    for n, f in pred_m:
+                        if not (n, f) in global_m:
+                            if len(inspect.signature(f).parameters) > 2:                                        # precision, recall, f1
+                                binarized_prob_thres = self.config['eval']['binarized_prob_thres']
+                                if not isinstance(binarized_prob_thres, list):
+                                    binarized_prob_thres = [binarized_prob_thres] * len(self.frating)
+                                metrics[r][n] = f(torch.sigmoid(result[r]['pos_score']), result[r]['label'], 
+                                                binarized_prob_thres[i])
+                            elif n == 'logloss':                                                                    # logloss
+                                metrics[r][n] = f(result[r]['pos_score'], result[r]['label'])
+                            else:                                                                                   # acc, mae, mse
+                                metrics[r][n] = f(torch.sigmoid(result[r]['pos_score']), result[r]['label'])
+                    if len(global_m) > 0:
+                        # gather scores and labels for global metrics like AUC.
+                        metrics[r]['score'] = result[r]['pos_score'].detach()
+                        metrics[r]['label'] = result[r]['label']
+
         else:
             # pair-wise, support topk-based metrics, like [NDCG, Recall, Precision, MRR, MAP, MR, et al.]
             # The case is suitable for the scene where there are only positives in dataset.
@@ -188,23 +212,52 @@ class BaseRanker(Recommender):
     def _test_epoch_end(self, outputs, metrics):
         metric_list, bs = zip(*outputs)
         bs = torch.tensor(bs)
-        out = defaultdict(list)
-        for o in metric_list:
-            for k, v in o.items():
-                out[k].append(v)
-        if 'score' in out:
-            # gather scores and labels for global metrics
-            scores = torch.cat(out['score'], dim=0)
-            labels = torch.cat(out['label'], dim=0)
-            del out['score']
-            del out['label']
-        for k, v in out.items():
-            metric = torch.tensor(v)
-            out[k] = (metric * bs).sum() / bs.sum()
-        #
-        # calculate global metrics like AUC.
+
         global_m = eval.get_global_metrics(metrics)
-        if len(global_m) > 0:
-            for m, f in global_m:
-                out[m] = f(scores, labels)
+        if not isinstance(self.frating, list):
+            out = defaultdict(list)
+            for o in metric_list:
+                for k, v in o.items():
+                    out[k].append(v)
+                    
+            if 'score' in out:
+                # gather scores and labels for global metrics
+                scores = torch.cat(out['score'], dim=0)
+                labels = torch.cat(out['label'], dim=0)
+                del out['score']
+                del out['label']
+                
+            for k, v in out.items():
+                metric = torch.tensor(v)
+                out[k] = (metric * bs).sum() / bs.sum()
+                
+            # calculate global metrics like AUC.
+            if len(global_m) > 0:
+                for m, f in global_m:
+                    out[m] = f(scores, labels)
+        else:
+            out = {}
+            for r in self.frating:
+                
+                out_r = defaultdict(list)
+                for o in metric_list:
+                    for k, v in o[r].items():
+                        out_r[k].append(v)
+                        
+                if 'score' in out_r:
+                    scores = torch.cat(out_r['score'], dim=0)
+                    labels = torch.cat(out_r['label'], dim=0)
+                    del out_r['score']
+                    del out_r['label']
+                    
+                    for k, v in out_r.items():
+                        metric = torch.tensor(v)
+                        out_r[k] = (metric * bs).sum() / bs.sum()
+                    
+                # calculate global metrics like AUC.
+                if len(global_m) > 0:
+                    for m, f in global_m:
+                        out_r[m] = f(scores, labels)
+
+                out[r] = out_r
         return out

@@ -1,0 +1,16 @@
+model:
+  num_levels: 1
+  specific_experts_per_task: 2
+  num_shared_experts: 2
+  expert_mlp_layer: [128, 128]
+  expert_activation: relu
+  expert_dropout: 0.5
+
+  gate_mlp_layer: [128, ]
+  gate_activation: relu
+  gate_dropout: 0.5
+
+  tower_mlp_layer: [128, ]
+  tower_activation: relu
+  tower_dropout: 0.5
+  tower_batch_norm: False

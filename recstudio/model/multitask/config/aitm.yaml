@@ -1,0 +1,7 @@
+model:
+  tower_mlp_layer: [128, 64]
+  tower_activation: relu
+  tower_dropout: 0.5
+  tower_batch_norm: False
+
+  alpha: 0.6

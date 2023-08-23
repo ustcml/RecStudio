@@ -43,7 +43,9 @@ class DCNv2(BaseRanker):
                         [num_fields * self.embed_dim] + model_config['mlp_layer'] + [1],
                         model_config['activation'],
                         model_config['dropout'],
-                        batch_norm=model_config['batch_norm'])
+                        batch_norm=model_config['batch_norm'],
+                        last_activation=False,
+                        last_bn=False)
         else:
             raise ValueError(f'Expect combination to be `parallel`|`stacked`, but got {model_config["combination"]}.')
 

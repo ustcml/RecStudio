@@ -74,6 +74,7 @@ def parser_yaml(config_path):
 
 
 def color_dict(dict_, keep=True):
+    keykey_color = 'pink'
     key_color = 'blue'
     val_color = 'yellow'
 
@@ -89,7 +90,14 @@ def color_dict(dict_, keep=True):
     else:
         start = set_color('Testing: ', 'green', keep=keep)
     info = ' '.join([color_kv(k, v, '%s', '%.'+str(des)+'f')
-                    for k, v in dict_.items() if k != 'epoch'])
+                    for k, v in dict_.items() if k != 'epoch' and not isinstance(v, dict)])
+    
+    for k, v in dict_.items():
+        if isinstance(v, dict):
+            if info != '':
+                info += ' '
+            info += set_color('%s', keykey_color, keep=keep) % k + ' ' + \
+                    ' '.join([color_kv(vk, vv, '%s', '%.'+str(des)+'f') for vk, vv in v.items()])
     return start + ' [' + info + ']'
 
 
@@ -122,7 +130,7 @@ def get_model(model_name: str):
         Recommender: model class
         Dict: model configuration dict
     """
-    model_submodule = ['ae', 'mf', 'seq', 'fm', 'graph', 'kg', 'debias']
+    model_submodule = ['ae', 'mf', 'seq', 'fm', 'graph', 'kg', 'debias', 'multitask']
 
     model_file_name = model_name.lower()
     model_module = None
@@ -267,7 +275,7 @@ def check_valid_dataset(name: str, config: Dict, default_dataset_path=DEFAULT_CA
             return False, default_dir
         elif download_flag and (config['url'] is not None):
             if config['url'].startswith('http'):
-                logger.info(f"will download dataset {name} fron the url {config['url']}.")
+                logger.info(f"will download dataset {name} from the url {config['url']}.")
                 return False, download_dataset(config['url'], name, default_dir)
             elif config['url'].startswith('recstudio:'): # use dataset privided in dataset_demo
                 dir = os.path.dirname(os.path.dirname(__file__)) # recstudio dir

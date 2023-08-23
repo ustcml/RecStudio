@@ -67,11 +67,13 @@ class Recommender(torch.nn.Module, abc.ABC):
         self._set_data_field(train_data) #TODO(@AngusHuang17): to be considered in a better way
         self.fields = train_data.use_field
         self.frating = train_data.frating
-        assert self.frating in self.fields, 'rating field is required.'
+        assert (not isinstance(self.frating, list) and self.frating in self.fields) or \
+            (isinstance(self.frating, list) and set(self.frating).issubset(self.fields)), 'rating field is required.'
         if drop_unused_field:
             train_data.drop_feat(self.fields)
         self.item_feat = train_data.item_feat
-        self.item_fields = set(train_data.item_feat.fields).intersection(self.fields)
+        if self.item_feat is not None:
+            self.item_fields = set(train_data.item_feat.fields).intersection(self.fields)
         self.neg_count = self.config['train']['negative_count']
         if self.loss_fn is None:
             if 'train_data' in inspect.signature(self._get_loss_func).parameters:
@@ -247,7 +249,13 @@ class Recommender(torch.nn.Module, abc.ABC):
         output_list = [output_list] if not isinstance(output_list, list) else output_list
         for outputs in output_list:
             if isinstance(outputs, List):
-                loss_metric = {'train_'+ k: torch.hstack([e[k] for e in outputs]).mean() for k in outputs[0]}
+                if not isinstance(self.frating, list):
+                    loss_metric = {'train_'+ k: torch.hstack([e[k] for e in outputs]).mean() for k in outputs[0]}
+                else:
+                    loss_metric = {'train_'+ k: torch.hstack([e[k] for e in outputs]).mean() for k in outputs[0] if k not in self.frating}
+                    for k in outputs[0]:
+                        if k in self.frating:
+                            loss_metric[k] = {'train_loss_'+kk: torch.hstack([e[k][kk] for e in outputs]).mean() for kk in outputs[0][k]}
             elif isinstance(outputs, torch.Tensor):
                 loss_metric = {'train_loss': outputs.item()}
             elif isinstance(outputs, Dict):
@@ -316,12 +324,20 @@ class Recommender(torch.nn.Module, abc.ABC):
 
     def log_dict(self, metrics: Dict, tensorboard: bool=True):
         if tensorboard:
-            for k, v in metrics.items():
-                if 'train' in k:
-                    self.tensorboard_logger.add_scalar(f"train/{k}", v, self.logged_metrics['epoch']+1)
-                else:
-                    self.tensorboard_logger.add_scalar(f"valid/{k}", v, self.logged_metrics['epoch']+1)
-        self.logged_metrics.update(metrics)
+            if not (isinstance(self.frating, list) and set(self.frating).issubset(metrics)):
+                for k, v in metrics.items():
+                    if 'train' in k:
+                        self.tensorboard_logger.add_scalar(f"train/{k}", v, self.logged_metrics['epoch']+1)
+                    else:
+                        self.tensorboard_logger.add_scalar(f"valid/{k}", v, self.logged_metrics['epoch']+1)
+            else:
+                for r in self.frating:
+                    for k, v in metrics[r].items():
+                        if 'train' in k:
+                            self.tensorboard_logger.add_scalar(f"train/{r}/{k}", v, self.logged_metrics['epoch']+1)
+                        else:
+                            self.tensorboard_logger.add_scalar(f"valid/{r}/{k}", v, self.logged_metrics['epoch']+1)
+        self.logged_metrics = deep_update(self.logged_metrics, metrics)
 
     def _get_nni_format_result(self, metrics: Dict):
         nni_result = {}
@@ -518,7 +534,11 @@ class Recommender(torch.nn.Module, abc.ABC):
 
                 # model is saved in callback when the callback return True.
                 if nepoch % self.config['eval']['val_n_epoch'] == 0:
-                    stop_training = self.callback(self, nepoch, self.logged_metrics)
+                    if not isinstance(self.frating, list):
+                        stop_training = self.callback(self, nepoch, self.logged_metrics)
+                    else:
+                        main_task = self.config['eval'].get('main_task', self.frating[0])
+                        stop_training = self.callback(self, nepoch, self.logged_metrics[main_task])
                     if stop_training:
                         break
 
@@ -579,11 +599,11 @@ class Recommender(torch.nn.Module, abc.ABC):
                         opt['optimizer'].zero_grad()
                 # model loss
                 training_step_args = {'batch': batch}
-                if 'nepoch' in inspect.getargspec(self.training_step).args:
+                if 'nepoch' in inspect.signature(self.training_step).parameters:
                     training_step_args['nepoch'] = nepoch
-                if 'loader_idx' in inspect.getargspec(self.training_step).args:
+                if 'loader_idx' in inspect.signature(self.training_step).parameters:
                     training_step_args['loader_idx'] = loader_idx
-                if 'batch_idx' in inspect.getargspec(self.training_step).args:
+                if 'batch_idx' in inspect.signature(self.training_step).parameters:
                     training_step_args['batch_idx'] = batch_idx
 
                 if getattr(self, '_dp', False):     # there are perfermance degrades in DP mode
@@ -592,22 +612,25 @@ class Recommender(torch.nn.Module, abc.ABC):
                     loss = self.training_step(**training_step_args)
 
                 if isinstance(loss, dict):
-                    if loss['loss'].requires_grad:
-                        if isinstance(loss['loss'], torch.Tensor):
-                            loss['loss'].backward()
-                        elif isinstance(loss['loss'], List):
-                            for l in loss['loss']:
-                                l.backward()
-                        else:
-                            raise TypeError("loss must be Tensor or List of Tensor")
-                    loss_ = {}
+                    if isinstance(loss['loss'], torch.Tensor):
+                        loss['loss'].backward()
+                    elif isinstance(loss['loss'], List):
+                        for l in loss['loss']:
+                            l.backward()
+                    else:
+                        raise TypeError("loss must be Tensor or List of Tensor")
+                    
+                    loss_ = defaultdict(dict)
                     for k, v in loss.items():
                         if k == 'loss':
                             if isinstance(v, torch.Tensor):
                                 v = v.detach()
                             elif isinstance(v, List):
                                 v = [_ for _ in v]
-                        loss_[f'{k}_{loader_idx}'] = v
+                        if not (isinstance(self.frating, list) and k in self.frating):
+                           loss_[f'{k}_{loader_idx}'] = v
+                        else:
+                            loss_[k][f'{loader_idx}'] = v
                     outputs.append(loss_)
                 elif isinstance(loss, torch.Tensor):
                     if loss.requires_grad:

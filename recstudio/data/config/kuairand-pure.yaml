@@ -1,0 +1,30 @@
+url: ~ # Please look for https://kuairand.com/ for downloading
+user_id_field: &u user_id:token
+item_id_field: &i video_id_id:token
+rating_field: [is_click:float, is_like:float, is_follow:float, is_comment:float, is_forward:float, is_hate:float]
+time_field: &t date:float
+time_format: ~
+
+
+inter_feat_name: log_standard_4_22_to_5_08_pure.csv
+inter_feat_field: [*u, *i, *t, hourmin:float, time_ms:float, is_click:float, is_like:float, is_follow:float, is_comment:float, is_forward:float, is_hate:float, long_view:float, play_time_ms:float, duration_ms:float, profile_stay_time:float, comment_stay_time:float, is_probfile_enter:float, is_rand:float, tab:float]
+inter_feat_header: 0
+
+user_feat_name: [user_features_pure.csv]
+user_feat_field: [[*u, user_active_degree:token, is_lowactive_period:float, is_live_streamer:float, is_video_author:float, follow_user_num:float, follow_user_num_range:token, fans_user_num:float, fans_user_num_range:token, friend_user_num:float, friend_user_num_range:token, register_days:float, register_days_range:token, onehot_feat0:float, onehot_feat1:float, onehot_feat2:float, onehot_feat3:float, onehot_feat4:float, onehot_feat5:float, onehot_feat6:float, onehot_feat7:float, onehot_feat8:float, onehot_feat9:float, onehot_feat10:float, onehot_feat11:float, onehot_feat12:float, onehot_feat13:float, onehot_feat14:float, onehot_feat15:float, onehot_feat16:float, onehot_feat17:float]]
+user_feat_header: 0
+
+
+item_feat_name: ~ #[video_features_basic_pure.csv, video_features_statistic_pure.csv]
+item_feat_field: ~ # [[...]]
+item_feat_header: 0
+
+
+field_separator: ","
+min_user_inter: 0
+min_item_inter: 0
+field_max_len: ~
+low_rating_thres: ~
+max_seq_len: ~
+
+save_cache: True
