@@ -67,8 +67,6 @@ class Recommender(torch.nn.Module, abc.ABC):
         self._set_data_field(train_data) #TODO(@AngusHuang17): to be considered in a better way
         self.fields = train_data.use_field
         self.frating = train_data.frating
-        assert (not isinstance(self.frating, list) and self.frating in self.fields) or \
-            (isinstance(self.frating, list) and set(self.frating).issubset(self.fields)), 'rating field is required.'
         if drop_unused_field:
             train_data.drop_feat(self.fields)
         self.item_feat = train_data.item_feat
