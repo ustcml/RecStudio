@@ -4,6 +4,7 @@ import inspect
 import logging
 from typing import Dict, List, Optional, Tuple
 from collections import defaultdict
+from tqdm import tqdm
 
 import time
 import nni
@@ -561,6 +562,14 @@ class Recommender(torch.nn.Module, abc.ABC):
 
         for loader_idx, loader in enumerate(trn_dataloaders):
             outputs = []
+            loader = tqdm(
+                loader,
+                total=len(loader),
+                ncols=75,
+                desc=set_color(f"Training {nepoch:>5}", "green"),
+                leave=False,
+                disable=self.run_mode == 'tune', # Mute the progressbar when tuning
+            )
             for batch_idx, batch in enumerate(loader):
                 # data to device
                 batch = self._to_device(batch, self._parameter_device)
@@ -620,7 +629,14 @@ class Recommender(torch.nn.Module, abc.ABC):
         if hasattr(self, '_update_item_vector'):
             self._update_item_vector()
         output_list = []
-
+        dataloader = tqdm(
+            dataloader,
+            total=len(dataloader),
+            ncols=75,
+            desc=set_color(f"Evaluating {nepoch:>5}", "green"),
+            leave=False,
+            disable=self.run_mode == 'tune', # Mute the progressbar when tuning
+        )
         for batch in dataloader:
             # data to device
             batch = self._to_device(batch, self._parameter_device)
