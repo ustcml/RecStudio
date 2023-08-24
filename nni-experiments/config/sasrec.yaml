@@ -1,0 +1,42 @@
+experimentName: SASRec-ml-100k                                      # Mnemonic name of the experiment, which will be shown in WebUI and nnictl
+searchSpaceFile: ../search_space/sasrec.yaml                        # Path to the TAML file containing the search space
+
+trialCommand: python3 run.py -m SASRec -d ml-100k --mode tune       # Command to launch trial
+trialCodeDirectory: ../..                                           # Path to the directory containing trial source files
+trialConcurrency: 4                                                 # Specify how many trials should be run concurrently
+trialGpuNumber: 1
+
+maxExperimentDuration: 100d                                         # Stop generating trials after the limitation
+maxTrialNumber: 1000                                                # Limit the number of trials to create
+maxTrialDuration: ~                                                 # Limit the duration of trial job
+
+experimentWorkingDirectory: ../                                     # The directory to place log, checkpoint, metadata, and other run-time stuff
+
+
+tuner:                                                              # Tuning algorithm
+  name: TPE
+  classArgs:
+    optimize_mode: maximize                                         # Optimization direction, consistent with the first metric in 
+                                                                    # train/val_metrics and train/test_metrics
+
+
+# assessor:                                                         # used to terminate trials early
+#   name: Curvefitting
+#   classArgs:
+#     epoch_num: 200
+#     start_step: 20
+#     threshold: 0.9
+#     gap: 1
+
+# assessor:
+#   name: Medianstop
+#   classArgs:
+#     optimize_mode: maximize
+#     start_step: 200
+
+
+trainingService:
+  platform: local
+  useActiveGpu: true
+  maxTrialNumberPerGpu: 2                                           # how many trials can share one GPU
+  gpuIndices: 0, 1                                                  # GPUs visible to trial processes

@@ -90,7 +90,7 @@ class DenseKernel(torch.nn.Module):
 class Embeddings(torch.nn.Module):
 
     def __init__(self, fields: Set, embed_dim, data, reduction='mean',
-                 share_dense_embedding=False, dense_emb_bias=False, dense_emb_norm=False,
+                 share_dense_embedding=False, dense_emb_bias=False, dense_emb_norm=True,
                  with_dense_kernel=False):
         r"""
         Args:

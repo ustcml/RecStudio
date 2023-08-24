@@ -35,3 +35,4 @@ network_feat_field: [[[source_id:token, target_id:token]], [[head_id:token, rela
 network_feat_header: [[0], [0, 0]]
 
 save_cache: False # whether to save processed dataset to cache.
+float_field_preprocess: [timestamp:StandardScaler()]
