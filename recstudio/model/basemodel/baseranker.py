@@ -47,8 +47,16 @@ class BaseRanker(Recommender):
             self.logger.warning('No retriever is used, topk metrics is not supported.')
 
     def _set_data_field(self, data):
-        token_field = set([k for k, v in data.field2type.items() if v=='token'])
-        data.use_field = token_field
+        # token_field = set([k for k, v in data.field2type.items() if v=='token'])
+        # if not isinstance(data.frating, list):
+        #     use_field = {*token_field, data.frating}
+        # else:
+        #     use_field = {*token_field, *data.frating}
+        # data.use_field = use_field
+        self.logger.warning("By default, all features will be used. "
+                            "And the float features might need a scaler, "
+                            "which can be configured in *.yaml of the dataset.")
+        data.use_field = data.field2type.keys()
 
     def _get_retriever(self, train_data):
         return None
