@@ -70,6 +70,6 @@ eval:
     cutoff: [5, 10, 20]
     val_metrics: [ndcg, recall]
     val_n_epoch: 1
-    test_metrics: [recall, precision, map, ndcg, mrr, hit]
+    test_metrics: [ndcg, recall, precision, map, mrr, hit]
     topk: 100
     save_path: './saved/'

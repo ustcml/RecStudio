@@ -112,63 +112,100 @@ Generally speaking, the simple example will take less than one minute with GPUs.
 like below:
 
 ```bash
-[2022-04-11 14:30:29] INFO (faiss.loader/MainThread) Loading faiss with AVX2 support.
-[2022-04-11 14:30:29] INFO (faiss.loader/MainThread) Loading faiss.
-[2022-04-11 14:30:29] INFO (faiss.loader/MainThread) Successfully loaded faiss.
-[2022-04-11 14:30:30] INFO (pytorch_lightning.utilities.seed/MainThread) Global seed set to 42
-[2022-04-11 14:30:30] INFO (pytorch_lightning/MainThread) learning_rate=0.001
-weight_decay=0
-learner=adam
-scheduler=None
-epochs=100
-batch_size=2048
-num_workers=0
-gpu=None
-ann=None
-sampler=None
-negative_count=1
-dataset_sampling_count=None
-embed_dim=64
-item_bias=False
-eval_batch_size=20
-split_ratio=[0.8, 0.1, 0.1]
-test_metrics=['recall', 'precision', 'map', 'ndcg', 'mrr', 'hit']
-val_metrics=['recall', 'ndcg']
-topk=100
-cutoff=10
-early_stop_mode=max
-split_mode=user_entry
-shuffle=True
-use_fields=['user_id', 'item_id', 'rating']
-[2022-04-11 14:30:30] INFO (pytorch_lightning/MainThread) save_dir:/home/RecStudio/
-[2022-04-11 14:30:30] INFO (pytorch_lightning.utilities.distributed/MainThread) GPU available: True, used: False
-[2022-04-11 14:30:30] INFO (pytorch_lightning.utilities.distributed/MainThread) TPU available: False, using: 0 TPU cores
-[2022-04-11 14:30:30] INFO (pytorch_lightning.utilities.distributed/MainThread) IPU available: False, using: 0 IPUs
-[2022-04-11 14:30:30] INFO (pytorch_lightning.utilities.distributed/MainThread) The following callbacks returned in `LightningModule.configure_callbacks` will override existing callbacks passed to Trainer: ModelCheckpoint
-[2022-04-11 14:30:30] INFO (pytorch_lightning.core.lightning/MainThread)
-  | Name         | Type               | Params
-----------------------------------------------------
-0 | loss_fn      | BPRLoss            | 0
-1 | score_func   | InnerProductScorer | 0
-2 | item_encoder | Embedding          | 107 K
-3 | sampler      | UniformSampler     | 0
-4 | user_encoder | Embedding          | 60.4 K
-----------------------------------------------------
-168 K     Trainable params
-0         Non-trainable params
-168 K     Total params
-0.673     Total estimated model params size (MB)
-[2022-04-11 14:30:30] INFO (pytorch_lightning.callbacks.early_stopping/MainThread) Metric recall@10 improved. New best score: 0.007
-[2022-04-11 14:30:30] INFO (pytorch_lightning/MainThread) Training: Epoch=  0 [recall@10=0.0074 ndcg@10=0.0129 train_loss=0.6932]
-[2022-04-11 14:30:31] INFO (pytorch_lightning.callbacks.early_stopping/MainThread) Metric recall@10 improved by 0.006 >= min_delta = 0.0. New best score: 0.014
-[2022-04-11 14:30:31] INFO (pytorch_lightning/MainThread) Training: Epoch=  1 [recall@10=0.0135 ndcg@10=0.0251 train_loss=0.6915]
-[2022-04-11 14:30:32] INFO (pytorch_lightning.callbacks.early_stopping/MainThread) Metric recall@10 improved by 0.038 >= min_delta = 0.0. New best score: 0.051
+[2023-08-24 10:51:41] INFO Log saved in /home/RecStudio/log/BPR/ml-100k/2023-08-24-10-51-41-738329.log.
+[2023-08-24 10:51:41] INFO Global seed set to 2022
+[2023-08-24 10:51:41] INFO dataset is read from /home/RecStudio/recstudio/dataset_demo/ml-100k.
+[2023-08-24 10:51:42] INFO 
+Dataset Info: 
+
+=============================================================================
+interaction information: 
+field      user_id    item_id    rating     timestamp  
+type       token      token      float      float      
+##         944        1575       -          -          
+=============================================================================
+user information: 
+field      user_id    age        gender     occupation zip_code   
+type       token      token      token      token      token      
+##         944        62         3          22         795        
+=============================================================================
+item information: 
+field      item_id    
+type       token      
+##         1575       
+=============================================================================
+Total Interactions: 82520
+Sparsity: 0.944404
+=============================================================================
+timestamp=StandardScaler()
+[2023-08-24 10:51:42] INFO 
+Model Config: 
+
+data:
+	binarized_rating_thres=None
+	fm_eval=False
+	neg_count=0
+	sampler=None
+	shuffle=True
+	split_mode=user_entry
+	split_ratio=[0.8, 0.1, 0.1]
+	fmeval=False
+	binaried_rating_thres=0.0
+eval:
+	batch_size=20
+	cutoff=[5, 10, 20]
+	val_metrics=['ndcg', 'recall']
+	val_n_epoch=1
+	test_metrics=['ndcg', 'recall', 'precision', 'map', 'mrr', 'hit']
+	topk=100
+	save_path=./saved/
+model:
+	embed_dim=64
+	item_bias=False
+train:
+	accelerator=gpu
+	ann=None
+	batch_size=512
+	early_stop_mode=max
+	early_stop_patience=10
+	epochs=1000
+	gpu=1
+	grad_clip_norm=None
+	init_method=xavier_normal
+	item_batch_size=1024
+	learner=adam
+	learning_rate=0.001
+	num_threads=10
+	sampling_method=none
+	sampler=uniform
+	negative_count=1
+	excluding_hist=False
+	scheduler=None
+	seed=2022
+	weight_decay=0.0
+	tensorboard_path=None
+[2023-08-24 10:51:42] INFO Tensorboard log saved in ./tensorboard/BPR/ml-100k/2023-08-24-10-51-41-738329.
+[2023-08-24 10:51:42] INFO The default fields to be used is set as [user_id, item_id, rating]. If more fields are needed, please use `self._set_data_field()` to reset.
+[2023-08-24 10:51:42] INFO save_dir:./saved/
+[2023-08-24 10:51:42] INFO BPR(
+  (score_func): InnerProductScorer()
+  (loss_fn): BPRLoss()
+  (item_encoder): Embedding(1575, 64, padding_idx=0)
+  (query_encoder): Embedding(944, 64, padding_idx=0)
+  (sampler): UniformSampler()
+)
+[2023-08-24 10:51:42] INFO GPU id [8] are selected.
+[2023-08-24 10:51:45] INFO Training: Epoch=  0 [ndcg@5=0.0111 recall@5=0.0044 train_loss_0=0.6931]
+[2023-08-24 10:51:45] INFO Train time: 0.88524s. Valid time: 0.18036s. GPU RAM: 0.03/10.76 GB
+[2023-08-24 10:51:45] INFO ndcg@5 improved. Best value: 0.0111
+[2023-08-24 10:51:45] INFO Best model checkpoint saved in ./saved/BPR/ml-100k/2023-08-24-10-51-41-738329.ckpt.
 ...
-[2022-04-11 14:31:26] INFO (pytorch_lightning/MainThread) Training: Epoch= 75 [recall@10=0.2074 ndcg@10=0.2942 train_loss=0.1909]
-[2022-04-11 14:31:26] INFO (pytorch_lightning.callbacks.early_stopping/MainThread) Monitored metric recall@10 did not improve in the last 10 records. Best score: 0.211. Signaling Trainer to stop.
-[2022-04-11 14:31:26] INFO (pytorch_lightning/MainThread) Training: Epoch= 76 [recall@10=0.2073 ndcg@10=0.2949 train_loss=0.1899]
-[2022-04-11 14:31:26] INFO (pytorch_lightning.utilities.distributed/MainThread) The following callbacks returned in `LightningModule.configure_callbacks` will override existing callbacks passed to Trainer: EarlyStopping, ModelCheckpoint
-[2022-04-11 14:31:27] INFO (pytorch_lightning/MainThread) Testing:  [recall@10=0.2439 precision@10=0.1893 map@10=0.5762 ndcg@10=0.3718 mrr@10=0.4487 hit@10=0.7815]
+[2023-08-24 10:52:08] INFO Training: Epoch= 34 [ndcg@5=0.1802 recall@5=0.1260 train_loss_0=0.1901]
+[2023-08-24 10:52:08] INFO Train time: 0.41784s. Valid time: 0.32394s. GPU RAM: 0.03/10.76 GB
+[2023-08-24 10:52:08] INFO Early stopped. Since the metric ndcg@5 haven't been improved for 10 epochs.
+[2023-08-24 10:52:08] INFO The best score of ndcg@5 is 0.1807 on epoch 24
+[2023-08-24 10:52:08] INFO Best model checkpoint saved in ./saved/BPR/ml-100k/2023-08-24-10-51-41-738329.ckpt.
+[2023-08-24 10:52:08] INFO Testing:  [ndcg@5=0.2389 recall@5=0.1550 precision@5=0.1885 map@5=0.1629 mrr@5=0.3845 hit@5=0.5705 ndcg@10=0.2442 recall@10=0.2391 precision@10=0.1498 map@10=0.1447 mrr@10=0.4021 hit@10=0.6999 ndcg@20=0.2701 recall@20=0.3530 precision@20=0.1170 map@20=0.1429 mrr@20=0.4109 hit@20=0.8240]
 ```
 
 If you want to change models or datasets, command line is ready for you.
@@ -238,7 +275,11 @@ For more detailed information, please refer to our documentation http://recstudi
 
 ## Automatic Hyper-parameter Tuning
 RecStudio integrates with NNI module for tuning the hype-parameters automatically. For easy usage,
-you can run `tune.sh` script with your specific config file like the provided file `config.yaml`.
+you can run the following command in bash:
+```bash
+nnictl create --config ./nni-experiments/config/bpr.yaml --port 2023
+```
+Configure `nni-experiments/config/bpr.yaml`  and `nni-experiments/search_space/bpr.yaml` for personal usage.
 
 For more detailed information about NNI, please refer to
 [NNI Documentation](https://nni.readthedocs.io/zh/stable/).
@@ -264,7 +305,9 @@ RecStudio is developed and maintained by USTC BigData Lab.
 |@[JennahF](https://github.com/JennahF)|NCF,CML,logisticMF models|
 |@[HERECJ](https://github.com/HERECJ)|AutoEncoder models|
 |@[BinbinJin](https://github.com/BinbinJin)|IRGAN model|
-
+|@[pepsi2222](https://github.com/pepsi2222)|Ranking models|
+|@[echobelbo](https://github.com/echobelbo)|Docs|
+|@[jinbaobaojhr](https://github.com/jinbaobaojhr)|Docs|
 
 ## License
 RecStudio uses [MIT License](./LICENSE).

@@ -1,0 +1,7 @@
+train/learning_rate:
+    _type: choice
+    _value: [0.001]
+
+train/weight_decay: 
+     _type: choice
+    _value": [0.0001, 0.0005, 0.001, 0.005]
