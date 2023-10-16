@@ -80,11 +80,9 @@ class Top1Loss(BPRLoss):
 class SampledSoftmaxLoss(PairwiseLoss):
     def forward(self, label, pos_score, log_pos_prob, neg_score, log_neg_prob):
         new_pos = pos_score - log_pos_prob
-        new_neg = neg_score - log_neg_prob
-        if new_pos.dim() < new_neg.dim():
-            new_pos.unsqueeze_(-1)
-        new_neg = torch.cat([new_pos, new_neg], dim=-1)
-        output = torch.logsumexp(new_neg, dim=-1, keepdim=True) - new_pos
+        total_score = torch.cat([pos_score, neg_score], dim=-1)
+        log_total_score = torch.cat([log_pos_prob, log_neg_prob], dim=-1)
+        output = torch.logsumexp(total_score) - torch.logsumexp(log_total_score) - new_pos
         notpadnum = torch.logical_not(torch.isinf(new_pos)).float().sum(-1)
         output = torch.nan_to_num(output, posinf=0).sum(-1) / notpadnum
         return torch.mean(output)
