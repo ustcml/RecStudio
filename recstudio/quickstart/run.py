@@ -39,7 +39,7 @@ def run(model: str, dataset: str, model_config: Dict=None, data_config: Dict=Non
     if data_config_path is not None:
         if isinstance(data_config_path, str):
             # load dataset config from file
-            conf = parser_yaml(data_config)
+            conf = parser_yaml(data_config_path)
             data_conf.update(conf)
         else:
             raise TypeError(f"expecting `data_config_path` to be str, while get {type(data_config_path)} instead.")

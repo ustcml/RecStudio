@@ -14,9 +14,9 @@ experimentWorkingDirectory: ../                                 # The directory 
 
 
 tuner:                                                          # Tuning algorithm
-  name: TPE
-  classArgs:
-    optimize_mode: maximize                                     # Optimization direction, consistent with the first metric in 
+    name: TPE
+    classArgs:
+        optimize_mode: maximize                                     # Optimization direction, consistent with the first metric in 
                                                                 # train/val_metrics and train/test_metrics
 
 
@@ -36,7 +36,7 @@ tuner:                                                          # Tuning algorit
 
 
 trainingService:
-  platform: local
-  useActiveGpu: true
-  maxTrialNumberPerGpu: 2                                       # how many trials can share one GPU
-  gpuIndices: 0, 1                                              # GPUs visible to trial processes
+    platform: local
+    useActiveGpu: true
+    maxTrialNumberPerGpu: 2                                       # how many trials can share one GPU
+    gpuIndices: 0, 1                                              # GPUs visible to trial processes
