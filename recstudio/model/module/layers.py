@@ -403,19 +403,21 @@ class Dice(torch.nn.Module):
     __constants__ = ['num_parameters']
     num_features: int
 
-    def __init__(self, num_parameters, init: float = 0.25, epsilon: float = 1e-08):
+    def __init__(self, num_parameters, init: float = 0.0, epsilon: float = 1e-08):
         super().__init__()
         self.num_parameters = num_parameters
         self.weight = torch.nn.parameter.Parameter(
-            torch.empty(num_parameters).fill_(init))
+            torch.empty(1, num_parameters).fill_(init))
         self.epsilon = epsilon
+        self.batch_norm = torch.nn.BatchNorm1d(num_parameters, eps=self.epsilon)
 
     def forward(self, x):
-        mean_x = torch.mean(x, dim=-1, keepdim=True)
-        var_x = torch.var(x, dim=-1, keepdim=True)
-        x_std = (x - mean_x) / (torch.sqrt(var_x + self.epsilon))
-        p_x = torch.sigmoid(x_std)
-        f_x = p_x * x + (1-p_x) * x * self.weight.expand_as(x)
+        x_shape = x.shape
+        x_ = x.reshape(-1, x.shape[-1])
+        x_normed = self.batch_norm(x_)
+        p_x = torch.sigmoid(x_normed)
+        p_x = p_x.reshape(x_shape)
+        f_x = p_x * x + (1 - p_x) * x * self.weight.expand_as(x)
         return f_x
 
     def extra_repr(self) -> str:
