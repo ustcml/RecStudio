@@ -517,10 +517,18 @@ class TripletDataset(Dataset):
                 feat[field] = feat[field].map(
                     lambda x: self.field2tokens[field][x])
         return feat
-
+    
+    def _drop_duplicated_pairs(self):
+        # after drop, the interaction of user may be smaller than the min_user_inter, which will cause split problem
+        # So we move the drop before filter to ensure after filtering, interactions of user and item are larger than min.
+        first_item_idx = ~self.inter_feat.duplicated(
+            subset=[self.fuid, self.fiid], keep='first')
+        self.inter_feat = self.inter_feat[first_item_idx]
 
     def _filter(self, min_user_inter, min_item_inter):
         self._filter_ratings(self.config.get('low_rating_thres', None))
+        if self.drop_dup:
+            self._drop_duplicated_pairs()
         if self.fuid is None or self.fiid is None:
             return
         item_list = self.inter_feat[self.fiid]
@@ -1238,6 +1246,7 @@ class TripletDataset(Dataset):
         """
         return self.num_values(self.fiid)
 
+    # TODO: only the number of interactions in self.inter_feat_subset
     @property
     def num_inters(self):
         r"""Number of total interaction numbers.
