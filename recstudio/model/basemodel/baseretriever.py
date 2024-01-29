@@ -410,7 +410,7 @@ class BaseRetriever(Recommender):
 
     def test_step(self, batch):
         eval_metric = self.config['eval']['test_metrics']
-        cutoffs = self.config['eval']['cutoff'] if isinstance(self.config['eval']['cutoff'], list) else [self.config['eva']['cutoff']]
+        cutoffs = self.config['eval']['cutoff'] if isinstance(self.config['eval']['cutoff'], list) else [self.config['eval']['cutoff']]
         return self._test_step(batch, eval_metric, cutoffs)
 
     def _test_step(self, batch, metric, cutoffs):
