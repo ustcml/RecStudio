@@ -1010,7 +1010,7 @@ class FieldAwareFMLayer(nn.Module):
         field_wise_emb = inputs.view(bs, self.num_fields, self.num_fields - 1, -1)      # B x F x F-1 x D
         emb0 = torch.masked_select(field_wise_emb, self.triu_mask)                      # B*num_pairs*D, 1D tensor
         emb1 = torch.masked_select(field_wise_emb.transpose(1, 2), self.tril_mask)      # B*num_pairs*D, 1D tensor
-        output = (emb0 * emb1).flatten(1).sum(-1)                                       # w_{ij} * w_{ji}
+        output = (emb0 * emb1).view(bs, -1).sum(-1)                                       # w_{ij} * w_{ji}
         return output
         
 
