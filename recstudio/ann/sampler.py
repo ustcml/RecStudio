@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from torch import Tensor
 import torch.nn.functional as F
-from ..model import scorer
+from recstudio.model import scorer
 
 
 def kmeans(X, K_or_center, max_iter=300, verbose=False):
@@ -38,6 +38,7 @@ def kmeans(X, K_or_center, max_iter=300, verbose=False):
 def construct_index(cd01, K):
     cd01, indices = torch.sort(cd01, stable=True)
     cluster, count = torch.unique_consecutive(cd01, return_counts=True)
+    cluster = cluster.type(torch.long)
     count_all = torch.zeros(K + 1, dtype=torch.long, device=cd01.device)
     count_all[cluster + 1] = count
     indptr = count_all.cumsum(dim=-1)
@@ -470,8 +471,7 @@ class ClusterSamplerUniform(MIDXSamplerUniform):
             #     N_k_pos[0] = 0
             #     r += torch.log(N_k - N_k_pos)
             rs = torch.softmax(r, dim=-1)   # num_q x K
-            k = torch.multinomial(
-                rs, num_neg, replacement=True)    # num_q x neg
+            k = torch.multinomial(rs, num_neg, replacement=True)    # num_q x neg
             p = torch.gather(r, -1, k)
             neg_items, neg_prob = self.sample_item(k, p, pos_items)
             if pos_items is not None:
@@ -559,35 +559,177 @@ class ClusterSamplerPop(ClusterSamplerUniform):
                 self.cp[start:end] = cumsum / cumsum[-1]
 
 
+class LSHSampler(UniformSampler):
+
+    def __init__(
+            self, 
+            num_items: int,
+            n_dims: int,
+            n_bits: int = 4,
+            n_table: int = 16, 
+            device: Union[str, torch.device]="cuda", 
+            scorer_fn=None
+        ):
+        """
+        LSH-based negative sampler proposed in 
+        "A New Unbiased and Efficient Class of LSH-Based Samplers and Estimators for Partition Function Computation in Log-Linear Models".
+
+        Args:
+            num_items (int): number of items
+            n_dims (int): dimension of item embedding vectors
+            n_bits (int): number of hash functions in each hash table, i.e., K in the paper
+            n_table (int): number of hash tables, i.e., L in the paper
+            device (str or torch.device): device to save the hash functions, must be consistent with item embedding vectors
+        """
+        super().__init__(num_items, scorer_fn)
+        if self.scorer is None:
+            print("Scorer should be `InnerProductScorer` for LSHSampler, while got None.")
+        else:
+            assert type(self.scorer) == scorer.InnerProductScorer, f"Scorer should be `InnerProductScorer` for LSHSampler, while got {type(self.scorer)}."
+        self.n_dims = n_dims
+        self.n_bits = n_bits
+        self.n_table = n_table
+        self.device = device
+        self.weight_vectors = self._generate_random_vectors(self.n_dims, self.n_bits, self.n_table) # DxKxL, normalized
+        K_base_vec = torch.from_numpy(1 << np.arange(n_bits - 1, -1, -1)).type(torch.float).to(self.device)  # [K]
+        self.K_base_vec = torch.nn.parameter.Parameter(K_base_vec, requires_grad=False)
+        self.indptr, self.indices = None, None
+        self.item_embs = None
+
+    @torch.no_grad()
+    def update(self, item_embs: torch.Tensor):
+        norm_item_embs = item_embs / (torch.norm(item_embs, dim=1, keepdim=True) + 1e-10)
+        y = torch.matmul(norm_item_embs, self.weight_vectors.view(self.n_dims, -1)).view(item_embs.size(0), self.n_bits, -1)    # NxKxL
+        y = (y > 0).type(torch.float)
+        code = torch.matmul(y.transpose(1,2), self.K_base_vec)   # N, L
+        self.item_embs = item_embs.clone().detach() 
+        self.indices, self.indptr = self._construct_inverted_index(code)   # indptr: Lx(K+1); indices: LxN
+
+    @torch.no_grad()
+    def forward(self, query, num_neg, pos_items=None):
+        """
+        Sample negative items and calculate sampling probablity for correction.
+
+        Args:
+            query (torch.Tensor): shape of (B,D), query embedding. 
+            num_neg (int): number of negative items to be sampled
+            pos_items (torch.Tensor): shape of (B), positive item indexes.
+
+        Returns:
+            log_pos_prob (torch.Tensor): log sampling probability of positive items
+            neg_id (torch.Tensor): sampled negative item indexes
+            log_neg_prob (torch.Tensor): log sampling probability of negative items
+        """
+        # get hash code
+        norm_query = query / (torch.norm(query, dim=-1, keepdim=True) + 1e-10)
+        y = torch.matmul(norm_query, self.weight_vectors.view(self.n_dims, -1)).view(query.size(0), self.n_bits, -1)    # BxKxL
+        y = (y > 0).type(torch.float)
+        code = torch.matmul(y.transpose(1,2), self.K_base_vec).transpose(0, 1).type(torch.long)   # LxB
+        start_idx = torch.gather(self.indptr, dim=1, index=code)    # LxB
+        end_idx = torch.gather(self.indptr, dim=1, index=code+1)    # LxB
+        num_candidates = (end_idx - start_idx)
+        len_item = num_candidates.sum(dim=0) # B
+
+        # for empty candidates, use uniform sampling
+        empty_flag = (len_item == 0)
+        if empty_flag.any():
+            neg_id_empty, log_neg_prob_empty = super().forward(query[empty_flag], num_neg, pos_items=None)
+
+        cum_len = num_candidates.cumsum(dim=0).T.contiguous()
+        rand_idx = torch.floor(torch.rand((query.size(0), num_neg), device=query.device) * len_item.view(-1, 1)).type(torch.long)   # B x neg
+        rand_idx[rand_idx==len_item.view(-1,1)] = rand_idx[rand_idx==len_item.view(-1,1)] - 1   # in case of numerically unstable
+        table_id = torch.searchsorted(cum_len, rand_idx, right=True)    # B x neg
+        _table_id = table_id - 1
+        flag = _table_id < 0
+        _table_id[flag] = 0
+        offset = torch.gather(cum_len, dim=1, index=_table_id)
+        offset[flag] = 0
+        offset = rand_idx - offset
+        indices = torch.gather(start_idx.transpose(0,1), dim=1, index=table_id) + offset    # B x neg
+        item_id = self.indices[table_id, indices]   # B x neg
+
+        # cal probablity
+        sampling_prob = 1.0 / (len_item) # B
+        sampled_item_emb = F.embedding(item_id, self.item_embs, padding_idx=0)  # B x neg x D
+        cosine_theta = F.cosine_similarity(query.view(query.size(0), 1, query.size(1)), sampled_item_emb, dim=-1)   # B x neg
+        theta = torch.acos(cosine_theta)
+        collision_p = 1 - theta / torch.pi
+        weight = (1 - (1 - collision_p ** self.n_bits) ** self.n_table)
+        neg_prob = sampling_prob.view(-1, 1) * weight
+        neg_id = item_id + 1    # item_id denotes item index without padding
+
+        eps = 1e-12
+        log_neg_prob = torch.log(neg_prob + eps)
+        if empty_flag.any():
+            neg_id[empty_flag] = neg_id_empty
+            log_neg_prob[empty_flag] = log_neg_prob_empty.type_as(log_neg_prob)
+        
+        if pos_items is not None:   # get correction for positive items
+            # pos_item_emb = F.embedding(pos_items-1, self.item_embs)  # B x D, remove padding index
+            # pos_cosine_theta = F.cosine_similarity(query, pos_item_emb, dim=-1)   # B
+            # pos_theta = torch.acos(pos_cosine_theta)
+            # pos_p = 1 - pos_theta / torch.pi
+            # pos_weight = (1 - (1 - pos_p ** self.n_bits) ** self.n_table)
+            # pos_prob = sampling_prob * pos_weight
+            # return torch.log(pos_prob+eps), neg_id, log_neg_prob
+            return torch.zeros_like(pos_items), neg_id, log_neg_prob    
+        else:
+            return item_id + 1, torch.log(neg_prob)
+
+
+    def _generate_random_vectors(self, n_dims, n_hash, n_table):
+        random_vectors = torch.rand(n_dims, n_hash, n_table)    # DxKxL
+        norm_random_vectors = random_vectors / (torch.norm(random_vectors, dim=0, keepdim=True))
+        return torch.nn.Parameter(norm_random_vectors.to(self.device), requires_grad=False)
+
+
+    def _construct_inverted_index(self, code):
+        """
+        Construct inverted index for each hash table with a csr sparse data structure.
+
+        Args:
+            idx (np.ndarray): NxL, where N is the number of data points, L is the number of tables. Each entry ranges from 0 to K-1. 
+                              It indicates each data point's hash code.
+        """
+        table_indptr = []
+        table_indices = []
+        for i in range(self.n_table):
+            indptr, indices = construct_index(code[:, i], 2 ** self.n_bits)
+            table_indptr.append(indptr)
+            table_indices.append(indices)
+        table_indptr = torch.stack(table_indptr)
+        table_indices = torch.stack(table_indices)
+
+        # check legacy
+        # if there are a lot of empty buckets in each table, it's possible that the number of bits is too large.
+
+
+        return table_indptr, table_indices
+
+    
 
 
 # TODO(@AngusHuang17): avoid sampling pos items in MIDX and Cluster
 # TODO(@AngusHuang17) aobpr sampler
 
 def test():
-    item_emb = torch.rand(100, 64).cuda()
-    query = torch.rand(2, 10, 64).cuda()
-    item_count = torch.floor(torch.rand(100) * 100).cuda()
-    pos_id = torch.tensor(
-        [[0, 0, 2, 5, 19, 29, 89], [21, 23, 11, 22, 44, 78, 39]]).cuda()
-    # midx_uni = MIDXSamplerUniform(100,8).cuda()
-    # midx_uni.update(item_emb)
-    # pos_prob, neg_id, neg_prob = midx_uni(query, 10, pos_id)
+    num_items = 1000
+    n_dims = 64
+    batch_size = 4
+    num_negs = 10
+    item_emb = torch.rand(num_items, n_dims).cuda()
+    query = torch.rand(batch_size, n_dims).cuda()
+    pos_id = torch.randint(1, num_items, size=(batch_size,)).cuda()
 
-    # midx_pop = MIDXSamplerPop(item_count, 100, 8).cuda()
-    # midx_pop.update(item_emb)
-    # pos_prob, neg_id, neg_prob = midx_pop(query, 10, pos_id)
+    #=== LSH Sampler ===
+    n_bits = 4
+    n_table = 5
+    lsh_sampler = LSHSampler(num_items, n_dims, n_bits, n_table, device="cuda")
+    lsh_sampler.update(item_emb)
+    pos_prob, neg_id, neg_prob = lsh_sampler.forward(query, num_negs, pos_id)
+    print(pos_prob.shape, neg_id.shape, neg_prob.shape)
 
-    # cluster_uni = ClusterSamplerUniform(100, 8).cuda()
-    # cluster_uni.update(item_emb)
-    # pos_prob, neg_id, neg_prob = cluster_uni(query, 10, pos_id)
+    print('Test Passed')
 
-    # cluster_pop = ClusterSamplerPop(item_count, 100, 8).cuda()
-    # cluster_pop.update(item_emb)
-    # pos_prob, neg_id, neg_prob = cluster_pop(query, 10, pos_id)
-
-    masked_uniform = MaskedUniformSampler(100)
-    pos_prob, neg_id, neg_prob = masked_uniform(query, 100000, pos_id)
-    print('end')
-
-# test()
+if __name__ == "__main__":
+    test()
