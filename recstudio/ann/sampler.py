@@ -559,13 +559,13 @@ class ClusterSamplerPop(ClusterSamplerUniform):
                 self.cp[start:end] = cumsum / cumsum[-1]
 
 
-class LSHSampler(Sampler):
+class LSHSampler(UniformSampler):
 
     def __init__(
             self, 
             num_items: int,
             n_dims: int,
-            n_bits: int = 10,
+            n_bits: int = 4,
             n_table: int = 16, 
             device: Union[str, torch.device]="cuda", 
             scorer_fn=None
@@ -602,7 +602,7 @@ class LSHSampler(Sampler):
         y = torch.matmul(norm_item_embs, self.weight_vectors.view(self.n_dims, -1)).view(item_embs.size(0), self.n_bits, -1)    # NxKxL
         y = (y > 0).type(torch.float)
         code = torch.matmul(y.transpose(1,2), self.K_base_vec)   # N, L
-        self.item_embs = item_embs.clone().detach()  # TODO: it's underdetermined whether it should be pointer or value
+        self.item_embs = item_embs.clone().detach() 
         self.indices, self.indptr = self._construct_inverted_index(code)   # indptr: Lx(K+1); indices: LxN
 
     @torch.no_grad()
@@ -629,16 +629,27 @@ class LSHSampler(Sampler):
         end_idx = torch.gather(self.indptr, dim=1, index=code+1)    # LxB
         num_candidates = (end_idx - start_idx)
         len_item = num_candidates.sum(dim=0) # B
+
+        # for empty candidates, use uniform sampling
+        empty_flag = (len_item == 0)
+        if empty_flag.any():
+            neg_id_empty, log_neg_prob_empty = super().forward(query[empty_flag], num_neg, pos_items=None)
+
         cum_len = num_candidates.cumsum(dim=0).T.contiguous()
         rand_idx = torch.floor(torch.rand((query.size(0), num_neg), device=query.device) * len_item.view(-1, 1)).type(torch.long)   # B x neg
         rand_idx[rand_idx==len_item.view(-1,1)] = rand_idx[rand_idx==len_item.view(-1,1)] - 1   # in case of numerically unstable
         table_id = torch.searchsorted(cum_len, rand_idx, right=True)    # B x neg
-        offset = rand_idx - torch.gather(cum_len, dim=1, index=table_id)
+        _table_id = table_id - 1
+        flag = _table_id < 0
+        _table_id[flag] = 0
+        offset = torch.gather(cum_len, dim=1, index=_table_id)
+        offset[flag] = 0
+        offset = rand_idx - offset
         indices = torch.gather(start_idx.transpose(0,1), dim=1, index=table_id) + offset    # B x neg
         item_id = self.indices[table_id, indices]   # B x neg
 
         # cal probablity
-        sampling_prob = 1.0 / (len_item + 1) if pos_items is not None else 1.0 / (len_item) # B
+        sampling_prob = 1.0 / (len_item) # B
         sampled_item_emb = F.embedding(item_id, self.item_embs, padding_idx=0)  # B x neg x D
         cosine_theta = F.cosine_similarity(query.view(query.size(0), 1, query.size(1)), sampled_item_emb, dim=-1)   # B x neg
         theta = torch.acos(cosine_theta)
@@ -647,16 +658,21 @@ class LSHSampler(Sampler):
         neg_prob = sampling_prob.view(-1, 1) * weight
         neg_id = item_id + 1    # item_id denotes item index without padding
 
+        eps = 1e-12
+        log_neg_prob = torch.log(neg_prob + eps)
+        if empty_flag.any():
+            neg_id[empty_flag] = neg_id_empty
+            log_neg_prob[empty_flag] = log_neg_prob_empty.type_as(log_neg_prob)
+        
         if pos_items is not None:   # get correction for positive items
-            pos_item_emb = F.embedding(pos_items-1, self.item_embs)  # B x D, remove padding index
-            pos_cosine_theta = F.cosine_similarity(query, pos_item_emb, dim=-1)   # B
-            pos_theta = torch.acos(pos_cosine_theta)
-            pos_p = 1 - pos_theta / torch.pi
-            pos_weight = (1 - (1 - pos_p ** self.n_bits) ** self.n_table)
-            pos_prob = sampling_prob * pos_weight
-            return torch.log(pos_prob), neg_id, torch.log(neg_prob)
-            # return torch.zeros_like(pos_items), neg_id, torch.log(neg_prob)    
-            # return torch.zeros_like(pos_items), neg_id, torch.zeros_like(item_id)
+            # pos_item_emb = F.embedding(pos_items-1, self.item_embs)  # B x D, remove padding index
+            # pos_cosine_theta = F.cosine_similarity(query, pos_item_emb, dim=-1)   # B
+            # pos_theta = torch.acos(pos_cosine_theta)
+            # pos_p = 1 - pos_theta / torch.pi
+            # pos_weight = (1 - (1 - pos_p ** self.n_bits) ** self.n_table)
+            # pos_prob = sampling_prob * pos_weight
+            # return torch.log(pos_prob+eps), neg_id, log_neg_prob
+            return torch.zeros_like(pos_items), neg_id, log_neg_prob    
         else:
             return item_id + 1, torch.log(neg_prob)
 
@@ -683,6 +699,10 @@ class LSHSampler(Sampler):
             table_indices.append(indices)
         table_indptr = torch.stack(table_indptr)
         table_indices = torch.stack(table_indices)
+
+        # check legacy
+        # if there are a lot of empty buckets in each table, it's possible that the number of bits is too large.
+
 
         return table_indptr, table_indices
 
