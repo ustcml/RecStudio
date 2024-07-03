@@ -1,7 +1,7 @@
 data:
   fmeval: True
   low_rating_thres: 0.0
-  binarized_rating_thres: 3.0
+  binarized_rating_thres: ~
 
 eval:
   val_metrics: [auc, logloss]

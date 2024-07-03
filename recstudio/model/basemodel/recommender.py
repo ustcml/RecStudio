@@ -67,6 +67,11 @@ class Recommender(torch.nn.Module, abc.ABC):
         self._set_data_field(train_data) #TODO(@AngusHuang17): to be considered in a better way
         self.fields = train_data.use_field
         self.frating = train_data.frating
+        domain_key = self.config['eval'].get('multi_domain_key', None)
+        if domain_key is not None:
+            self.domain_dict = train_data.field2token2idx[domain_key]
+        else:
+            self.domain_dict = None
         assert (not isinstance(self.frating, list) and self.frating in self.fields) or \
             (isinstance(self.frating, list) and set(self.frating).issubset(self.fields)), 'rating field is required.'
         if drop_unused_field:
@@ -121,6 +126,10 @@ class Recommender(torch.nn.Module, abc.ABC):
         self._init_model(train_data)
 
         self._init_parameter()
+
+        num_params = count_total_parameters(self)
+
+        self.logger.info(f"Model has {num_params} learnable parameters.")
 
         # config callback
         self.run_mode = run_mode
@@ -325,19 +334,15 @@ class Recommender(torch.nn.Module, abc.ABC):
 
     def log_dict(self, metrics: Dict, tensorboard: bool=True):
         if tensorboard:
-            if not (isinstance(self.frating, list) and set(self.frating).issubset(metrics)):
-                for k, v in metrics.items():
-                    if 'train' in k:
-                        self.tensorboard_logger.add_scalar(f"train/{k}", v, self.logged_metrics['epoch']+1)
-                    else:
-                        self.tensorboard_logger.add_scalar(f"valid/{k}", v, self.logged_metrics['epoch']+1)
-            else:
-                for r in self.frating:
-                    for k, v in metrics[r].items():
-                        if 'train' in k:
-                            self.tensorboard_logger.add_scalar(f"train/{r}/{k}", v, self.logged_metrics['epoch']+1)
-                        else:
-                            self.tensorboard_logger.add_scalar(f"valid/{r}/{k}", v, self.logged_metrics['epoch']+1)
+            for k, v in metrics.items():
+                if isinstance(v, dict):
+                    # multi-task / multi-domain / multi-domain-multi-task
+                    for kk, vv in v.items():
+                        group = 'train' if 'train' in kk else 'valid'
+                        self.tensorboard_logger.add_scalar(f"{group}/{k}/{kk}", vv, self.logged_metrics['epoch']+1)
+                else:
+                    group = 'train' if 'train' in k else 'valid'
+                    self.tensorboard_logger.add_scalar(f"{group}/{k}", v, self.logged_metrics['epoch']+1)
         self.logged_metrics = deep_update(self.logged_metrics, metrics)
 
     def _get_nni_format_result(self, metrics: Dict):

@@ -73,3 +73,4 @@ eval:
     test_metrics: [ndcg, recall, precision, map, mrr, hit]
     topk: 100
     save_path: './saved/'
+    multi_domain_key: 'tab'

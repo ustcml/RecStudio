@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from collections import defaultdict
-from recstudio.model.multitask.hardshare import HardShare
+from recstudio.model.multitask._base import _MultiTaskBase
 from ..module import ctr, MLPModule
 
 r"""
@@ -13,16 +13,19 @@ Paper Reference:
     https://dl.acm.org/doi/10.1145/3219819.3220007
 """
 
-class MMoE(HardShare):
+class MMoE(_MultiTaskBase):
 
     def _init_model(self, train_data, drop_unused_field=True):
         super()._init_model(train_data, drop_unused_field)
         model_config = self.config['model']
-        self.embedding = ctr.Embeddings(self.fields, self.embed_dim, train_data)
+        self.embedding = ctr.Embeddings(
+            self.fields, self.embed_dim, train_data, 
+            # share_dense_embedding=False, share_dense_embed_dim=2*self.embed_dim
+        )
         assert isinstance(self.frating, list), f'Expect rating_field to be a list, but got {self.frating}.'
         self.experts = nn.ModuleList([
                             MLPModule(
-                                [self.embedding.num_features * self.embed_dim] + model_config['expert_mlp_layer'],
+                                [self.embedding.output_dim] + model_config['expert_mlp_layer'],
                                 model_config['expert_activation'], 
                                 model_config['expert_dropout'],
                                 batch_norm=model_config['expert_batch_norm'])

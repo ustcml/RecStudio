@@ -47,16 +47,10 @@ class BaseRanker(Recommender):
             self.logger.warning('No retriever is used, topk metrics is not supported.')
 
     def _set_data_field(self, data):
-        # token_field = set([k for k, v in data.field2type.items() if v=='token'])
-        # if not isinstance(data.frating, list):
-        #     use_field = {*token_field, data.frating}
-        # else:
-        #     use_field = {*token_field, *data.frating}
-        # data.use_field = use_field
         self.logger.warning("By default, all features will be used. "
                             "And the float features might need a scaler, "
                             "which can be configured in *.yaml of the dataset.")
-        data.use_field = data.field2type.keys()
+        # data.use_field = data.field2type.keys()
 
     def _get_retriever(self, train_data):
         return None
@@ -161,12 +155,17 @@ class BaseRanker(Recommender):
             assert cutoffs is not None, 'expected cutoffs for topk ranking metrics.'
         # TODO: discuss in which cases pred_metrics should be calculated. According to whether there are neg labels in dataset?
         # When there are neg labels in dataset, should rank_metrics be considered?
+
+        # multi-domain evaluation
+        domain_key = self.config['eval'].get('multi_domain_key', None)
+        eval_domains = True if domain_key is not None else False
+
         if self.retriever is None:
             result, _ = self.forward(batch)
             global_m = eval.get_global_metrics(metric)
             metrics = {}
 
-            if not isinstance(self.frating, list):
+            if (not isinstance(self.frating, list)) and (not eval_domains):
                 for n, f in pred_m:
                     if not (n, f) in global_m:
                         if len(inspect.signature(f).parameters) > 2:                                # precision, recall, f1
@@ -181,24 +180,82 @@ class BaseRanker(Recommender):
                     metrics['score'] = result['pos_score'].detach()
                     metrics['label'] = result['label']
             else:
-                for i, r in enumerate(self.frating):
-                    metrics[r] = {}
+                if not isinstance(self.frating, list):
+                    frating = [self.frating]
+                    result = {self.frating: result}
+                else:
+                    frating = self.frating
+
+                if eval_domains:
+                    domain_id_col = batch[domain_key]
+                    domain_names = set(self.domain_dict.keys())
+                    domain_mask = {}
+                    bs = {}
+                    for d in domain_names:
+                        domain_mask[d] = domain_id_col == self.domain_dict[d]
+                        bs[d] = domain_mask[d].sum()
+                for i, r in enumerate(frating):
+                    if eval_domains:
+                        for d in domain_names:
+                            metrics[f"{d}/{r}"] = {}
+                    else:
+                        metrics[r] = {}
+
                     for n, f in pred_m:
                         if not (n, f) in global_m:
                             if len(inspect.signature(f).parameters) > 2:                                        # precision, recall, f1
                                 binarized_prob_thres = self.config['eval']['binarized_prob_thres']
                                 if not isinstance(binarized_prob_thres, list):
                                     binarized_prob_thres = [binarized_prob_thres] * len(self.frating)
-                                metrics[r][n] = f(torch.sigmoid(result[r]['pos_score']), result[r]['label'], 
-                                                binarized_prob_thres[i])
-                            elif n == 'logloss':                                                                    # logloss
-                                metrics[r][n] = f(result[r]['pos_score'], result[r]['label'])
-                            else:                                                                                   # acc, mae, mse
-                                metrics[r][n] = f(torch.sigmoid(result[r]['pos_score']), result[r]['label'])
+                                
+                                if eval_domains:
+                                    for d, mask in domain_mask.items():
+                                        if mask.sum() <= 0:
+                                            metrics[f"{d}/{r}"][n] = 0.0
+                                        else:
+                                            metric_value = f(
+                                                torch.sigmoid(result[r]['pos_score'][mask]),
+                                                result[r]['label'][mask], 
+                                                binarized_prob_thres[i]
+                                            )
+                                            metrics[f"{d}/{r}"][n] = metric_value
+                                else:
+                                    metric_value = f(
+                                        torch.sigmoid(result[r]['pos_score']),
+                                        result[r]['label'], 
+                                        binarized_prob_thres[i]
+                                    )
+                                    metrics[r][n] = metric_value
+                            elif n == 'logloss':            # logloss
+                                if eval_domains:
+                                    for d, mask in domain_mask.items():
+                                        if mask.sum() <= 0:
+                                            metrics[f"{d}/{r}"][n] = 0.0
+                                        else:
+                                            metrics[f"{d}/{r}"][n] = f(result[r]['pos_score'][mask], result[r]['label'][mask])
+                                else:
+                                    metrics[r][n] = f(result[r]['pos_score'], result[r]['label'])
+                            else:                           # acc, mae, mse
+                                if eval_domains:
+                                    for d, mask in domain_mask.items():
+                                        if mask.sum() <= 0:
+                                            metrics[f"{d}/{r}"][n] = 0.0
+                                        else:
+                                            metrics[f"{d}/{r}"][n] = f(torch.sigmoid(result[r]['pos_score'][mask]), result[r]['label'][mask])
+                                else:
+                                    metrics[r][n] = f(torch.sigmoid(result[r]['pos_score']), result[r]['label'])
                     if len(global_m) > 0:
                         # gather scores and labels for global metrics like AUC.
-                        metrics[r]['score'] = result[r]['pos_score'].detach()
-                        metrics[r]['label'] = result[r]['label']
+                        if eval_domains:
+                            for d, mask in domain_mask.items():
+                                # if mask.sum() <= 0:
+                                #     metrics[f"{d}/{r}"][n] = 0.0
+                                # else:
+                                metrics[f"{d}/{r}"]['score'] = result[r]['pos_score'][mask].detach()
+                                metrics[f"{d}/{r}"]['label'] = result[r]['label'][mask]
+                        else:
+                            metrics[r]['score'] = result[r]['pos_score'].detach()
+                            metrics[r]['label'] = result[r]['label']
 
         else:
             # pair-wise, support topk-based metrics, like [NDCG, Recall, Precision, MRR, MAP, MR, et al.]
@@ -218,11 +275,16 @@ class BaseRanker(Recommender):
         return metrics, bs
 
     def _test_epoch_end(self, outputs, metrics):
+        domain_key = self.config['eval'].get('multi_domain_key', None)
+        eval_domains = True if domain_key is not None else False
         metric_list, bs = zip(*outputs)
-        bs = torch.tensor(bs)
+        if not eval_domains:
+            bs = torch.tensor(bs)
+        else:
+            bs = {d: torch.tensor([b[d] for b in bs]) for d in self.domain_dict.keys()}
 
         global_m = eval.get_global_metrics(metrics)
-        if not isinstance(self.frating, list):
+        if (not isinstance(self.frating, list)) and (not eval_domains):
             out = defaultdict(list)
             for o in metric_list:
                 for k, v in o.items():
@@ -245,11 +307,29 @@ class BaseRanker(Recommender):
                     out[m] = f(scores, labels)
         else:
             out = {}
-            for r in self.frating:
-                
+            if not isinstance(self.frating, list):
+                frating = [self.frating]
+            else:
+                frating = self.frating
+            
+            if eval_domains:
+                overall_metrics = {r: defaultdict(lambda : 0.0) for r in frating}
+                overall_metrics.update({'bs': 0})
+                domain_frating = [f"{d}/{r}" for d in self.domain_dict.keys() for r in frating]
+
+            for d_r in domain_frating:
+                d, r = d_r.split('/')
+                if eval_domains:
+                    _bs = bs[d]
+                else:
+                    _bs = bs
+
+                if _bs.sum() <= 0:  # no data in this domain
+                    continue
+                    
                 out_r = defaultdict(list)
                 for o in metric_list:
-                    for k, v in o[r].items():
+                    for k, v in o[d_r].items():
                         out_r[k].append(v)
                         
                 if 'score' in out_r:
@@ -257,15 +337,53 @@ class BaseRanker(Recommender):
                     labels = torch.cat(out_r['label'], dim=0)
                     del out_r['score']
                     del out_r['label']
+
+                    if eval_domains:
+                        if 'score' in overall_metrics[r]:
+                            overall_metrics[r]['score'].append(scores)
+                            overall_metrics[r]['label'].append(labels)
+                        else:
+                            overall_metrics[r]['score'] = []
+                            overall_metrics[r]['label'] = []
                     
-                    for k, v in out_r.items():
-                        metric = torch.tensor(v)
-                        out_r[k] = (metric * bs).sum() / bs.sum()
-                    
+                for k, v in out_r.items():
+                    metric = torch.tensor(v)
+                    if _bs.sum() <= 0:
+                        out_r[k] = 0.0
+                    else:
+                        _sum_metrics = (metric * _bs).sum()
+                        _sum_bs = _bs.sum()
+                        out_r[k] = _sum_metrics / _sum_bs
+                        if eval_domains:
+                            overall_metrics[r][k] += _sum_metrics
+                            overall_metrics['bs'] += _sum_bs
+
                 # calculate global metrics like AUC.
                 if len(global_m) > 0:
                     for m, f in global_m:
                         out_r[m] = f(scores, labels)
 
-                out[r] = out_r
+                out[d_r] = dict(out_r)
+
+            # overall metrics across all domains
+            if eval_domains:
+                overall_bs = overall_metrics['bs']
+                del overall_metrics['bs']
+                for r in frating:
+                    if 'score' in overall_metrics[r]:
+                        overall_scores = torch.cat(overall_metrics[r]['score'], dim=0)
+                        overall_labels = torch.cat(overall_metrics[r]['label'], dim=0)
+                        del overall_metrics[r]['score']
+                        del overall_metrics[r]['label']
+                    
+                    for k, v in overall_metrics[r].items():
+                        overall_metrics[r][k] = overall_metrics[r][k] / overall_bs
+
+                    if len(global_m) > 0:
+                        for m, f in global_m:
+                            overall_metrics[r][m] = f(overall_scores, overall_labels)
+                    
+                    overall_metrics[r] = dict(overall_metrics[r])
+                    
+                out.update(dict(overall_metrics))
         return out

@@ -62,4 +62,6 @@ network_feat_header: [0, 0]
 # Customized: LogTransformer(), or use FunctionTransformer(...)
 float_field_preprocess: ~ # [float_field:MinMaxScaler(), ...]
 
+use_fields_as_x: ~ # [feat1, feat2, ...], default use all fields as x expect rating_field
+
 save_cache: False # whether to save processed dataset to cache.

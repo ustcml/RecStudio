@@ -49,7 +49,7 @@ class TripletDataset(Dataset):
 
         cache_flag, data_dir = check_valid_dataset(self.name, self.config)
         if cache_flag:
-            self.logger.info("Load dataset from cache.")
+            self.logger.info(f"Load dataset from cache {data_dir}.")
             self._load_cache(data_dir)
         else:
             self._init_common_field()
@@ -64,10 +64,22 @@ class TripletDataset(Dataset):
             if self.config['save_cache']:
                 self._save_cache(md5(self.config))
 
-        if not isinstance(self.frating, list):
-            self._use_field = set([self.fuid, self.fiid, self.frating])
+        self._config_use_field()
+
+    def _config_use_field(self):
+        if self.config.get("use_fields_as_x", None) is not None:
+            self._use_field = set(self.config["use_fields_as_x"])
         else:
-            self._use_field = set([self.fuid, self.fiid, *self.frating]) - {None}
+            self._use_field = set(self.field2type.keys())
+
+        if self.fuid not in self._use_field:
+            raise ValueError(f"user field {self.fuid} should be in use_fields_as_x.")
+        if self.fiid not in self._use_field:
+            raise ValueError(f"item field {self.fiid} should be in use_fields_as_x.")
+
+        # manually add rating field to use_field since it is required as y
+        rating_field = set([self.frating]) if not isinstance(self.frating, list) else set(self.frating)
+        self._use_field.update(rating_field)
 
     @property
     def field(self):
@@ -204,6 +216,7 @@ class TripletDataset(Dataset):
             self.inter_feat = self.inter_feat.dropna(how="any", subset=[self.fiid])
         if self.frating is None:
             # add ratings when implicit feedback
+            # TODO: give warning when implicit feedback is used
             self.frating = 'rating'
             self.inter_feat.insert(0, self.frating, 1)
             self.field2type[self.frating] = 'float'

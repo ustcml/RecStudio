@@ -513,6 +513,20 @@ def dict2markdown_table(d: dict, nested: bool=False) -> str:
             res += "\n\n"
         return res
 
+
+def count_total_parameters(model: torch.nn.Module) -> int:
+    r"""
+    Count the total number of parameters in a model.
+
+    Args:
+        model(torch.nn.Module): the model to be counted.
+    
+    Returns:
+        int: the total number of parameters in the model.
+    """
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
 __all__ = [
     'deep_update',
     'DEFAULT_CACHE_DIR',
@@ -532,5 +546,6 @@ __all__ = [
     'get_logger',
     'get_gpus',
     'mask_with_hist',
-    'dict2markdown_table'
+    'dict2markdown_table',
+    'count_total_parameters'
 ]
