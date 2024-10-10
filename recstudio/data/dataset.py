@@ -1175,7 +1175,8 @@ class TripletDataset(Dataset):
         """
         user_array = self.inter_feat.get_col(self.fuid)[self.inter_feat_subset]
         item_array = self.inter_feat.get_col(self.fiid)[self.inter_feat_subset]
-        sorted, index = torch.sort(user_array if isUser else item_array)
+        # use stable sort to ensure the order consistent with the original order, e.g. time-order if the interactions are sorted by time before.
+        sorted, index = torch.sort(user_array if isUser else item_array, stable=True)
         user_item, count = torch.unique_consecutive(sorted, return_counts=True)
         list_ = torch.split(
             item_array[index] if isUser else user_array[index], tuple(count.numpy()))
@@ -1439,7 +1440,9 @@ class SeqDataset(TripletDataset):
 
     @property
     def inter_feat_subset(self):
-        return self.data_index[:, -1]
+        # the first item in each user's sequence will be ignored if only return self.data_index[:, -1]
+        user_first_item = self.data_index[self.data_index[:, -1] - self.data_index[:, -2] == 1][:, -2]
+        return torch.cat([user_first_item, self.data_index[:, -1]], dim=0)
 
 
 class FullSeqDataset(SeqDataset):
